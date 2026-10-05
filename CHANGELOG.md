@@ -2,6 +2,7 @@
 
 ## v0.1.0-alpha.4 — planned
 
+- Repair overview joins with one frame/sample-aligned encode, complete comparison sentences and visible pause captions.
 - Added the standalone `/youtube` skill for regular YouTube videos, with source-bound pacing, scene-appropriate grading and full-render review.
 - Included YouTube in the Claude plugin, portable skill ZIPs and English/Japanese installation guides.
 - Kept vertical Shorts routed to the existing TikTok workflow and preserved source upload restrictions.

@@ -49,3 +49,37 @@ class DemoLanguages(unittest.TestCase):
         labels = json.dumps(module.language_content('en'), ensure_ascii=False)
         self.assertFalse(any('\u3040' <= char <= '\u30ff' or '\u4e00' <= char <= '\u9fff' for char in labels))
         self.assertIn('編集前', module.language_content('ja')['before'])
+
+
+class OverviewTimeline(unittest.TestCase):
+    def test_independent_segments_join_on_one_zero_based_frame_grid(self):
+        import shutil
+        import subprocess
+        if not shutil.which('ffmpeg') or not shutil.which('ffprobe'):
+            self.skipTest('FFmpeg is required for the media regression')
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);clips=[]
+            for index,(color,frames) in enumerate([('red',10),('blue',14)]):
+                clip=root/f'{index}.mp4'
+                subprocess.run(['ffmpeg','-v','error','-nostdin','-y','-f','lavfi','-i',f'color={color}:s=128x72:r=30',
+                                '-f','lavfi','-i','anullsrc=r=48000:cl=stereo','-t',str(frames/30),
+                                '-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',str(clip)],check=True)
+                clips.append(clip)
+            target=root/'overview.mp4'
+            expected=module.join_segments(clips,target,root/'join.log')
+            info=module.probe(target)
+            video=next(s for s in info['streams'] if s['codec_type']=='video')
+            self.assertEqual(expected,24)
+            self.assertEqual(int(video['nb_frames']),24)
+            self.assertEqual(float(video['start_time']),0)
+            self.assertAlmostEqual(float(video['duration']),.8,places=4)
+            self.assertNotIn('Non-monotonic', (root/'join.log').read_text())
+            packets=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_packets','-show_entries','packet=stream_index,dts_time','-of','json',str(target)]))['packets']
+            for stream in (0,1):
+                times=[float(p['dts_time']) for p in packets if p['stream_index']==stream]
+                self.assertTrue(all(a<b for a,b in zip(times,times[1:])))
+            raw=subprocess.check_output(['ffmpeg','-v','error','-i',str(target),'-f','rawvideo','-pix_fmt','rgb24','-'])
+            stride=128*72*3
+            self.assertEqual(len(raw),stride*24)
+            self.assertGreater(raw[5*stride],200)  # Red before the join.
+            self.assertGreater(raw[15*stride+2],200)  # Blue after the join.

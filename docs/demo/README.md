@@ -9,7 +9,7 @@ The two versions use separate speech, captions, illustration text and presentati
 
 These alpha.4 assets remain a draft until the [release gates](../RELEASE_VALIDATION.md) pass. Download URLs become public when that release is published.
 
-Both overviews show the same sequence: promise → matched before/after excerpt → example commands → portrait result → output types. YouTube retains both complete tips and shortens the long pause. TikTok keeps one complete tip, with captions below the preserved landscape illustration. Before/after audio uses the same -18 LUFS normalization target. Sentence anchors and comparison ranges come from each language's own measured timing and frame mapping; token counts and durations are not copied across languages.
+Both overviews show the same sequence: promise → complete before/after sentences → example commands → portrait result → output types. YouTube retains both complete tips and shortens the long pause. TikTok keeps one complete tip, with captions below the preserved landscape illustration. Before/after audio uses the same -18 LUFS normalization target. Sentence anchors and comparison ranges come from each language's own measured timing and frame mapping; token counts and durations are not copied across languages.
 
 English script:
 
@@ -47,3 +47,5 @@ uv run python scripts/build_platform_demos.py --sample output/demo-sample-en \
 To reuse existing sessions, add `--youtube-session PATH --tiktok-session PATH` after rendering with `scripts/render_demo_sample.py`. Existing output directories are never replaced. Use `--font /path/to/font.ttc` to select a local font; Japanese needs Hiragino or Noto Sans CJK. Encoded hashes vary with FFmpeg/fonts; source identity and behavior are the portable checks. Automated fixture selection is recorded as `automation` / `not_human_reviewed`.
 
 Older unlocalised graphics remain historical references; `en/` and `ja/` contain the current README previews.
+
+The repaired overview uses one continuous H.264/AAC encode on an exact 30 fps / 48 kHz grid. It shows complete sentences instead of starting midway through speech. Captions identify the intentional source pause explicitly, so the static illustration is not mistaken for stalled playback. The Japanese overview is 33.8 seconds; English is 35.2 seconds.

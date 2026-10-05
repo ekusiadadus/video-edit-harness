@@ -76,7 +76,7 @@ def card(path, title, subtitle, lines=(), size=(1280, 720), font=None, banner='V
     im.save(path)
 
 
-def make_segment(source, target, log, duration=None, start=0, still=False, label=None, font=None):
+def make_segment(source, target, log, duration=None, start=0, still=False, label=None, font=None, cues=()):
     inputs = ['-loop', '1', '-framerate', '30', '-t', str(duration), '-i', str(source)] if still else ['-ss', str(start), '-i', str(source)]
     if still:
         inputs += ['-f', 'lavfi', '-t', str(duration), '-i', 'anullsrc=r=48000:cl=stereo']
@@ -85,7 +85,7 @@ def make_segment(source, target, log, duration=None, start=0, still=False, label
     filters = ['-vf', vf+','+tail]
     video_map = '0:v:0'
     if label:
-        vf = 'scale=1280:652:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:68:color=0x122536,fps=30,setsar=1'
+        vf = f'scale=1280:{528 if cues else 652}:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:68:color=0x122536,fps=30,setsar=1'
         overlay = target.with_suffix('.png')
         im = Image.new('RGBA',(1280,720),(0,0,0,0)); draw = ImageDraw.Draw(im)
         draw.rectangle((0,0,1280,68), fill='#122536')
@@ -93,8 +93,47 @@ def make_segment(source, target, log, duration=None, start=0, still=False, label
         inputs += ['-loop','1','-framerate','30','-t',str(duration),'-i',str(overlay)]
         filters = ['-filter_complex',f'[0:v]{vf}[base];[base][1:v]overlay=0:0:shortest=1:format=auto,{tail}[v]']
         video_map = '[v]'
+        if cues:
+            chain = f'[0:v]{vf}[base];[base][1:v]overlay=0:0:shortest=1:format=auto[c0]'
+            for index, cue in enumerate(cues):
+                tile = target.with_name(f'{target.stem}-cue-{index}.png')
+                im = Image.new('RGBA',(1280,720),(0,0,0,0)); draw=ImageDraw.Draw(im)
+                draw.rectangle((0,604,1280,720),fill='#122536')
+                text = '\n'.join(textwrap.wrap(cue['text'], width=38 if any(ord(c)>127 for c in cue['text']) else 68))
+                draw.multiline_text((40,619),text,font=display_font(30,font),fill='white',spacing=8)
+                im.save(tile)
+                inputs += ['-loop','1','-framerate','30','-t',str(duration),'-i',str(tile)]
+                chain += f";[c{index}][{index+2}:v]overlay=0:0:shortest=1:format=auto:enable='gte(t,{cue['start']})*lt(t,{cue['end']})'[c{index+1}]"
+            filters=['-filter_complex',chain+f';[c{len(cues)}]{tail}[v]']
     run(['ffmpeg', '-hide_banner', '-nostdin', '-y', *inputs, '-t', str(duration), '-map', video_map, '-map', '1:a:0' if still else '0:a:0', *filters, '-af', 'aresample=48000', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', str(target)], log)
 
+
+
+def join_segments(clips, target, log):
+    """Decode segments onto an exact frame/sample grid and encode one MP4 stream.
+
+    Stream-copying independently encoded H.264/AAC files preserves incompatible
+    codec state and AAC priming at joins; a full decode alone misses browser issues.
+    """
+    inputs, filters, ordered = [], [], []
+    total_frames = 0
+    for index, clip in enumerate(clips):
+        info = probe(clip)
+        video = next(row for row in info['streams'] if row['codec_type']=='video')
+        frames = int(video['nb_frames'])
+        duration = frames/30
+        total_frames += frames
+        inputs += ['-i',str(clip)]
+        filters += [f'[{index}:v]trim=end_frame={frames},setpts=N/(30*TB),setsar=1[v{index}]',
+                    f'[{index}:a]aresample=48000,apad,atrim=duration={duration},asetpts=N/SR/TB[a{index}]']
+        ordered += [f'[v{index}][a{index}]']
+    filters.append(''.join(ordered)+f'concat=n={len(clips)}:v=1:a=1[v][a]')
+    run(['ffmpeg','-hide_banner','-nostdin','-y',*inputs,'-filter_complex',';'.join(filters),
+         '-map','[v]','-map','[a]','-t',str(total_frames/30),'-r','30','-fps_mode','cfr',
+         '-c:v','libx264','-profile:v','high','-level:v','4.0','-pix_fmt','yuv420p','-preset','medium','-crf','20',
+         '-color_primaries','bt709','-color_trc','bt709','-colorspace','bt709',
+         '-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-movflags','+faststart',str(target)],log)
+    return total_frames
 
 
 def build(sample, out, docs, font=None, youtube_session=None, tiktok_session=None, language=None):
@@ -163,30 +202,36 @@ def build(sample, out, docs, font=None, youtube_session=None, tiktok_session=Non
     for image, key in [(intro, 'intro'), (command, 'command'), (end, 'end')]:
         card(image, *content[key], font=chosen_font, banner=content['banner'])
     # Anchor the matched excerpt to the actual frame-mapped sentence boundary.
-    excerpt_start = max(yt_mapping['sequence'][0]['source_start'], yt_mapping['sequence'][0]['source_end']-1.32)
-    excerpt_end = min(yt_mapping['sequence'][1]['source_end'], yt_mapping['sequence'][1]['source_start']+1.48)
+    excerpt_start = yt_mapping['sequence'][0]['source_start']
+    excerpt_end = yt_mapping['sequence'][-1]['source_end']
     before_duration = excerpt_end-excerpt_start
     after_duration = before_duration-removed_gap
+    script = provenance['voice']['script']
+    before_cues = [{'start':first[0]['start']-excerpt_start,'end':first[-1]['end']-excerpt_start,'text':script[0]},
+                   {'start':first[-1]['end']-excerpt_start,'end':words[split+1]['start']-excerpt_start,'text':'長い間があります（映像の停止ではありません）' if language=='ja' else 'Long pause in the source (not frozen playback)'},
+                   {'start':words[split+1]['start']-excerpt_start,'end':words[-1]['end']-excerpt_start,'text':script[1]}]
+    after_cues = [{'start':first[0]['start']-excerpt_start,'end':first[-1]['end']-excerpt_start,'text':script[0]},
+                  {'start':words[split+1]['start']-excerpt_start-removed_gap,'end':words[-1]['end']-excerpt_start-removed_gap,'text':script[1]}]
     segments = [
-        (intro, 2, 0, True, None),
-        (normalized, before_duration, excerpt_start, False, content['before']),
-        (yt, after_duration, excerpt_start-yt_mapping['sequence'][0]['source_start'], False, content['after'].format(gap=removed_gap)),
-        (command, 3, 0, True, None),
-        (out/f'tiktok-demo-{language}.mp4', float(vertical['duration']), 0, False, content['portrait']),
-        (end, 2.5, 0, True, None),
+        (intro, 2, 0, True, None, ()),
+        (normalized, before_duration, excerpt_start, False, content['before'], before_cues),
+        (yt, after_duration, excerpt_start-yt_mapping['sequence'][0]['source_start'], False, content['after'].format(gap=removed_gap), after_cues),
+        (command, 3, 0, True, None, ()),
+        (out/f'tiktok-demo-{language}.mp4', float(vertical['duration']), 0, False, content['portrait'], ()),
+        (end, 2.5, 0, True, None, ()),
     ]
     clips = []
-    for i,(media,dur,start,still,label) in enumerate(segments):
-        target=out/f'part-{i}.mp4'; make_segment(media,target,out/f'part-{i}.log',dur,start,still,label,chosen_font); clips.append(target)
-    concat = out/'concat.txt'
-    concat.write_text(''.join(f"file '{p.name}'\n" for p in clips))
+    for i,(media,dur,start,still,label,cues) in enumerate(segments):
+        target=out/f'part-{i}.mp4'; make_segment(media,target,out/f'part-{i}.log',dur,start,still,label,chosen_font,cues); clips.append(target)
     overview = out/f'youtube-demo-{language}.mp4'
-    run(['ffmpeg','-hide_banner','-nostdin','-y','-f','concat','-safe','0','-i',str(concat),'-c','copy','-movflags','+faststart',str(overview)],out/'concat.log')
+    expected_frames = join_segments(clips, overview, out/'concat.log')
     outputs={}
     for name,path,dims in [('youtube',overview,(1280,720)),('tiktok',out/f'tiktok-demo-{language}.mp4',(1080,1920)),('youtube-result',out/f'youtube-result-{language}.mp4',(1280,720))]:
         info=probe(path); v=next(s for s in info['streams'] if s['codec_type']=='video')
         if (v['width'],v['height'])!=dims or v['r_frame_rate']!='30/1' or v.get('sample_aspect_ratio')!='1:1' or any(v.get(k)!='bt709' for k in ['color_space','color_transfer','color_primaries']) or not any(s['codec_type']=='audio' and s['codec_name']=='aac' for s in info['streams']):
             raise ValueError(f'{name}: format check failed')
+        if name=='youtube' and (int(v['nb_frames'])!=expected_frames or abs(float(v.get('start_time',0)))>.001):
+            raise ValueError('Overview frame count or zero-based timeline check failed')
         run(['ffmpeg','-hide_banner','-nostdin','-v','error','-i',str(path),'-f','null','-'],out/f'{name}-decode.log')
         outputs[name]={'filename':path.name,'sha256':fingerprint(path)['sha256'],'duration':float(info['format']['duration']),'dimensions':dims,'full_decode':'pass'}
         if name!='youtube-result':
@@ -195,7 +240,7 @@ def build(sample, out, docs, font=None, youtube_session=None, tiktok_session=Non
     palette=out/'palette.png'
     run(['ffmpeg','-hide_banner','-nostdin','-y','-i',str(overview),'-vf','fps=3,scale=480:-2:flags=lanczos,palettegen=max_colors=48',str(palette)],out/'palette.log')
     run(['ffmpeg','-hide_banner','-nostdin','-y','-i',str(overview),'-i',str(palette),'-filter_complex','[0:v]fps=3,scale=480:-2:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=4',str(docs/'youtube-preview.gif')],out/'gif.log')
-    result={'language':language,'source_sha256':provenance['source_sha256'],'source_kind':'synthetic','font_sha256':fingerprint(chosen_font)['sha256'] if chosen_font else None,'pause_removed_seconds':removed_gap,'retained_words':{mode: result['retained_words'] for mode, result in renderings.items()},'comparison_source_interval':[excerpt_start,excerpt_end],'outputs':outputs,'human_listening':'not_performed','fcp_gui':'not_performed','platform_playback':'not_performed','screen_recording':False}
+    result={'language':language,'source_sha256':provenance['source_sha256'],'source_kind':'synthetic','font_sha256':fingerprint(chosen_font)['sha256'] if chosen_font else None,'pause_removed_seconds':removed_gap,'retained_words':{mode: result['retained_words'] for mode, result in renderings.items()},'comparison_source_interval':[excerpt_start,excerpt_end],'overview_join':'single_encode_frame_sample_grid','overview_frames':expected_frames,'outputs':outputs,'human_listening':'not_performed','fcp_gui':'not_performed','platform_playback':'not_performed','screen_recording':False}
     (out/'manifest.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
     print(json.dumps(result,ensure_ascii=False,indent=2))
 
