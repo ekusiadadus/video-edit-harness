@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.0-alpha.4 — planned
+
+- Repair overview joins with one frame/sample-aligned encode, complete comparison sentences and visible pause captions. Preserve complete original PCM speech extents when ASR onsets are late.
+- Added the standalone `/youtube` skill for regular YouTube videos, with source-bound pacing, scene-appropriate grading and full-render review.
+- Included YouTube in the Claude plugin, portable skill ZIPs and English/Japanese installation guides.
+- Kept vertical Shorts routed to the existing TikTok workflow and preserved source upload restrictions.
+- Enforced source/provider-bound cloud permission through projects, sessions and low-level API calls.
+- Added version/tool/font/command diagnosis, paginated junction auditions and recorded listening coverage.
+- Linked reviewed portrait derivatives to exact renders, subtitles and fonts; added portable completion evidence.
+- Restricted release manifests and checksums to current artifacts.
+- Rebuilt a reproducible offline synthetic fixture, smooth Japanese AI voice, matched before/after overview and actual YouTube/TikTok outputs.
+- Reorganized English/Japanese READMEs around invocations, one quickstart and offline onboarding.
+- Prepared separate English and Japanese synthetic demo media, captions, labels, fixtures and README links; publication and human/FCP review remain separate release checks.
+
 ## v0.1.0-alpha.3 — 2026-10-05
 
 - Published Claude Code plugin manifest and community marketplace entry alongside the portable Codex/Claude skill.

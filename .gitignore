@@ -45,3 +45,7 @@ __pycache__/
 /build/
 /release-assets/
 .DS_Store
+
+# Agent acceptance outputs and local recordings
+*.screenstudio/
+*.screenstudio

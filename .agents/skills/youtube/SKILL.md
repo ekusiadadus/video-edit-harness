@@ -1,0 +1,32 @@
+---
+name: youtube
+description: Edit a local video for a regular YouTube upload with coherent long-form structure, natural pacing, scene-appropriate color, clear audio, captions and Final Cut Pro handoff. Use for /youtube or regular YouTube editing requests; route vertical Shorts to tiktok.
+---
+
+# YouTube editing
+
+In Claude Code, `/youtube /path/to/video.mov [brief]` supplies the local video and optional brief in `$ARGUMENTS`. Codex uses `$youtube` with the path and brief. The marketplace plugin exposes `/video-editing:youtube`; the standalone skill installed under `~/.claude/skills/youtube` exposes the exact `/youtube` spelling. This is an editing invocation, not a shell command or permission to post.
+
+Locate the Video Edit Harness checkout (`v0.1.0-alpha.4`) through `VIDEO_EDIT_HARNESS_ROOT` or the current project. If absent, follow the [installation guide](https://github.com/ekusiadadus/video-edit-harness/blob/v0.1.0-alpha.4/docs/SKILL_INSTALL.md). Read its README.md, AGENTS.md and `.agents/skills/video-editing/SKILL.md` for the actual session commands. Run commands from that checkout. The standalone ZIP contains instructions, metadata and license; the execution harness is separate.
+
+Run `uv run video-harness doctor` before editing. Check root, versions, skills, commands and required tools; resolve relevant findings. Persist source upload allow/deny through `session cloud-policy`, using the actual current authorization and provider scope. Unknown blocks cloud calls; existing deny survives resume. Reuse an unchanged allowed source without repeated permission questions.
+
+## Preserve the source and choose the scope
+
+Inspect the actual local file's tracks, duration, frame rate, rotation and color metadata. Keep originals intact. Infer the audience, purpose and desired length from the brief and footage. Ordinary YouTube defaults to a regular video preserving its source aspect and resolution, not a 9:16 short. A 10–15-minute indoor talk is a useful existing use case, not a mandatory duration. If the user requests Shorts, read the checkout's `.agents/skills/tiktok/SKILL.md` and use that vertical workflow. For requested 16:9 reframing of non-16:9 footage, explicitly review padding/crop in FCP or a separate framing operation; the current session renderer preserves the source aspect.
+
+Honor explicit no-upload/no-publication restrictions, including children's footage. Neither this command nor publication of the harness authorizes cloud transcription, posting, screenshots, or recording uploads. Cloud transcription is OpenAI then Azure only, after source-specific authorization; never run local Whisper/ASR. If upload is forbidden, use a sealed existing transcript when available. Otherwise continue local color/audio/framing previews and report that word-anchored story edits need a permitted transcript. Never invent words, alignment or review evidence.
+
+## Edit for sustained listening
+
+For a talk or explanation, retain context, reasons, transitions and a complete conclusion. Reduce repeated setup and unproductive pauses using actual word IDs and source times. Preserve negation, qualifications, names, word endings, breaths and emphasis. Do not apply a fixed silence threshold, force a short-form hook, remove every pause, or stretch a clip to a target length. Listen across each cut and check whether the result still makes sense without the picture. Use chapter spans to organize longer material; do not fabricate a source claim to improve the story.
+
+Use the checkout's `video-editing` workflow to create the project/session, attach or obtain a permitted transcript, inspect word context, plan source-bound spans/omissions, render, inspect edit boundaries and revise. Actor records must identify the actual agent; agent selection is not human acceptance. Start with a review preview, then render the full reviewed plan using the checkout's approval/review gates. Record whether selection/review was by an agent or a human; never infer human acceptance. Match subtitles to this exact edit; inspect spelling, line breaks and timing. Deliver actual chapter timestamps derived from the final timeline when requested, not guessed source timestamps.
+
+## Finish the picture and audio
+
+Choose a use case from the scene: indoor talk, daylight exterior, night, backlight, etc. Read `docs/PRESET_CATALOG.md` and compare styles on the same source interval. Start indoor explanations with `natural` or `clean_editorial` and readable facial brightness; retain natural skin and whites. The platform name does not determine a color grade. For color-only/local-only work, use `preview PROJECT --styles ...` without creating a transcript. Apple Log conversion must happen once; avoid stacking its Rec.709 transform with an FCP Camera LUT.
+
+Measure speech and normalize according to the project. Check audible cuts, harshness, clipping, background noise and loudness across the full render. Do not synthesize a replacement speaker or add music by default. Treat loudness targets as project choices, not YouTube requirements. Offer an audio-only listening output alongside the video where the session supports it.
+
+For a completed editorial workflow, deliver the local full MP4 and matching subtitles/review artifacts. For a local-only preview without a usable transcript, deliver that preview and its unresolved editorial scope instead. For FCP, package the reviewed session as a flat single-source FCPXML and distinguish separate LUT/subtitle/audio application from effects actually represented in XML. Verify full decode, duration, source/frame mapping and audio coverage. Keep technical checks, human viewing/listening, actual FCP import and YouTube playback as separate evidence. Do not label a preview as the full edit, claim checks that were not performed, or upload/publish without an explicit further instruction.

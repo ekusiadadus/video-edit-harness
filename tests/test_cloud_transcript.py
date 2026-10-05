@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from video_harness.cloud_transcript import ProviderFailure, _chunks, transcribe_cloud
+from video_harness.common import fingerprint
 
 
 class FakeTranscriptions:
@@ -48,7 +49,10 @@ class CloudTranscriptTests(unittest.TestCase):
         with patch('video_harness.cloud_transcript.probe', return_value=probe_data or info), \
              patch('video_harness.cloud_transcript.run', side_effect=run_fn or self.fake_run), \
              patch('video_harness.cloud_transcript._client', return_value=(FakeClient(self.responses), 'fake-sdk')):
-            return transcribe_cloud({'source': str(self.source), 'transcription': transcription or {}}, provider, self.cache)
+            return transcribe_cloud({'source': str(self.source), 'transcription': transcription or {},
+                                     'cloud_permission': {'source_sha256': fingerprint(self.source)['sha256'],
+                                                          'policy': 'allow', 'providers': [provider],
+                                                          'basis': 'synthetic test fixture'}}, provider, self.cache)
 
     def test_two_requests_and_immutable_cached_result(self):
         result = self.invoke()

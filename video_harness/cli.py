@@ -89,7 +89,9 @@ def main():
    print(json.dumps(export_vertical(args.source,args.output,args.framing,args.subtitles,args.font),ensure_ascii=False,indent=2));return
   if args.cmd in ['doctor','presets']:
    result={'use_cases':catalog('use_cases'),'styles':catalog('styles')}
-   if args.cmd=='doctor':result={x:shutil.which(x) for x in ['ffmpeg','ffprobe','uv']}|{'free_gb':round(shutil.disk_usage(ROOT).free/1e9,2),'use_cases':list(result['use_cases']),'styles':list(result['styles'])}
+   if args.cmd=='doctor':
+    from .doctor import report
+    result=report()|{'use_cases':list(result['use_cases']),'styles':list(result['styles'])}
    print(json.dumps(result,ensure_ascii=False,indent=2));return
   if args.cmd in ['review','adopt']:
    print(review(args.run,args.candidate,getattr(args,'decision','accept'),args.note,args.cmd=='adopt'));return

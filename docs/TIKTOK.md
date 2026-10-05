@@ -29,3 +29,18 @@ The exporter writes a 1080×1920, square-pixel H.264 MP4 with its audio, fingerp
 TikTok's [official in-feed advertising specs](https://ads.tiktok.com/resources/help/article/tiktok-auction-in-feed-ads?redirected=1) recommend 9:16 and say the safe area depends on dimensions, captions and interactive formats. This is an advertising reference, not a universal organic-upload specification. The harness's 1080×1920 output and conservative caption margins are working defaults, not official UI-safe guarantees. Check the actual destination preview on the target phone before posting.
 
 The portrait derivative does not change source-aspect FCPXML. Apply portrait framing separately in Final Cut Pro and verify it there if that handoff is needed. Full decode, dimensions, duration and audio checks are technical evidence; they do not prove visual quality, subtitle wording, human listening acceptance or TikTok playback. Uploading/posting remains a separate explicit request.
+
+## Keep portrait delivery in the session
+
+For a transcript-backed session, register and review the exact exported derivative:
+
+```sh
+uv run video-harness session register-vertical output/my-session RENDER_ID output/my-tiktok/result.json
+uv run video-harness session review-vertical output/my-session DERIVATIVE_ID --data-file portrait-review.json
+uv run video-harness session package output/my-session RENDER_ID --target mp4 --derivative-id DERIVATIVE_ID
+uv run video-harness session finish output/my-session DELIVERY_ID --actor ACTOR
+```
+
+The report contains `video_sha256` and four `checks` objects with IDs `framing`, `captions`, `audio`, `playback`; each has `status`, actual `basis` and `note`. Visual/text, listening and local playback are distinct. Use `synthetic` only for explicitly synthetic fixtures; it is not a human observation. Source render/project/plan, output, subtitles and font are bound by fingerprints. Changes invalidate old review and finish. Package/finish require the current full render and its own accepted review as well. An unresolved local-only framing preview is not a finished editorial delivery.
+
+The finished bundle carries `completion.json` and copied review evidence. Verify it independently with `video_harness.delivery.verify_completion(folder)`; this checks consistency and file hashes, not a signed identity or actual TikTok-platform playback.

@@ -49,6 +49,56 @@ def check_ref(ref):
     return Path(ref['path'])
 
 
+def validate_junction_coverage(coverage, render_sha256, junction_ids):
+    if not isinstance(coverage, dict) or coverage.get('render_sha256') != render_sha256:
+        raise ValueError('Boundary review needs coverage bound to this exact render')
+    require_note(coverage.get('note'))
+    mode = coverage.get('mode')
+    if mode == 'full_listening':
+        if coverage.get('reviewed_ids') or coverage.get('waived'):
+            raise ValueError('Full listening uses one declaration without junction selections')
+    elif mode == 'selected':
+        reviewed = coverage.get('reviewed_ids', [])
+        waived = coverage.get('waived', [])
+        if not isinstance(reviewed, list) or not isinstance(waived, list) or not all(isinstance(w, dict) for w in waived):
+            raise ValueError('Invalid selected junction coverage')
+        waived_ids = [w.get('id') for w in waived]
+        if junction_ids and not reviewed:
+            raise ValueError('A passing boundary review must include at least one listened junction')
+        for waiver in waived:
+            require_note(waiver.get('reason'))
+        if (len(set(reviewed)) != len(reviewed) or len(set(waived_ids)) != len(waived_ids)
+                or set(reviewed) & set(waived_ids) or set(reviewed) | set(waived_ids) != set(junction_ids)):
+            raise ValueError('Junction coverage must account for every selected cut or explicit waiver')
+    else:
+        raise ValueError('Junction coverage mode must be full_listening or selected')
+
+
+def process_birth(pid):
+    """Best-effort process identity; some sandboxes forbid invoking ps."""
+    try:
+        return subprocess.check_output(['ps', '-p', str(pid), '-o', 'lstart='], text=True).strip() or None
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def operation_liveness(operation):
+    """Only a missing PID or a proven birth mismatch makes an operation stale."""
+    try:
+        os.kill(operation['pid'], 0)
+    except ProcessLookupError:
+        return 'stale'
+    except OSError:
+        return 'unknown'
+    expected = operation.get('process_birth')
+    if not expected:
+        return 'unknown'
+    actual = process_birth(operation['pid'])
+    if actual is None:
+        return 'unknown'
+    return 'active' if actual == expected else 'stale'
+
+
 class Session:
     def __init__(self, folder):
         self.root = Path(folder).resolve()
@@ -60,20 +110,35 @@ class Session:
         from .editorial import make_brief
         actor_name(actor)
         cfg = project(project_path)
+        brief = make_brief(cfg, brief_data or {})
+        source = fingerprint(cfg['source'])
+        inherited_permission = cfg.get('cloud_permission')
+        if inherited_permission is not None:
+            if (not isinstance(inherited_permission, dict) or inherited_permission.get('source_sha256') != source['sha256']
+                    or inherited_permission.get('policy') not in ('allow', 'deny')
+                    or not isinstance(inherited_permission.get('providers'), list)
+                    or not isinstance(inherited_permission.get('basis'), str)
+                    or not inherited_permission['basis'].strip()):
+                raise ValueError('Project cloud permission does not match this source')
+            if inherited_permission['policy'] == 'deny' and inherited_permission['providers']:
+                raise ValueError('Denied cloud permission cannot list providers')
+            if inherited_permission['policy'] == 'allow' and (not inherited_permission['providers']
+                    or set(inherited_permission['providers']) - {'openai', 'azure'}):
+                raise ValueError('Invalid project cloud providers')
         folder = Path(folder).resolve()
         folder.mkdir(parents=True, exist_ok=False)
         (folder / 'checkpoints').mkdir()
         for name in ('artifacts', 'renders', 'reviews', 'feedback', 'deliveries', 'handoffs'):
             (folder / name).mkdir()
         write(folder / 'artifacts/project-0000.json', cfg)
-        brief = make_brief(cfg, brief_data or {})
         write(folder / 'artifacts/brief-0000.json', brief)
         session = cls(folder)
         state = {'version': 1, 'id': uuid.uuid4().hex, 'created_at': now(), 'generation': 0,
-                 'phase': 'needs_transcript', 'source': fingerprint(cfg['source']),
+                 'phase': 'needs_transcript', 'source': source,
                  'project': fingerprint(folder / 'artifacts/project-0000.json'),
                  'brief': fingerprint(folder / 'artifacts/brief-0000.json'), 'transcript': None,
                  'plan': None, 'renders': [], 'feedback': [], 'reviews': [], 'deliveries': [],
+                 'derivatives': [], 'cloud_permission': deepcopy(inherited_permission),
                  'operation': None, 'last_actor': actor, 'history': []}
         with session._lock():
             session._save(state, 'started', actor)
@@ -148,6 +213,19 @@ class Session:
         for collection in ('feedback', 'reviews', 'deliveries'):
             for item in state[collection]:
                 check_ref(item['artifact'])
+        for item in state.get('derivatives', []):
+            check_ref(item['result'])
+            check_ref(item['video'])
+            if item.get('technical_verification'):
+                check_ref(item['technical_verification'])
+            for key in ('subtitles_source', 'font_source'):
+                if item.get(key) and item[key].get('path'):
+                    check_ref(item[key])
+            result = read(item['result']['path'])
+            if result.get('video') != item['video'] or result.get('framing') != item['framing']:
+                raise ValueError('Portrait export evidence changed')
+            for review in item['reviews']:
+                check_ref(review['artifact'])
         if deep:
             for render in state['renders']:
                 self._verify_render(render)
@@ -185,9 +263,14 @@ class Session:
         pending = [item for item in state['feedback'] if item['status'] != 'resolved']
         latest = state['renders'][-1] if state['renders'] else None
         if state['operation']:
-            next_action = 'Resume the interrupted operation or wait for its process to finish.'
+            next_action = ('Process identity is unavailable; wait for the owner to finish or retry resume after its PID exits.'
+                           if not state['operation'].get('process_birth') else
+                           'Resume the interrupted operation or wait for its process to finish.')
         elif not state['transcript']:
-            next_action = 'Attach a verified transcript or run cloud transcription (OpenAI then Azure).'
+            permission = state.get('cloud_permission') or {}
+            next_action = ('Attach a verified transcript; cloud transcription is denied for this source.'
+                           if permission.get('policy') == 'deny' else
+                           'Attach a verified transcript or record source-bound cloud permission before transcription.')
         elif not state['plan']:
             next_action = 'Read packed transcript and brief, then propose a story with exact word IDs.'
         elif read(state['plan']['path']).get('status') != 'reviewed_selection':
@@ -205,7 +288,8 @@ class Session:
                 'transcript': state['transcript'], 'packed': state.get('packed'), 'plan': state['plan'], 'latest_render': latest,
                 'pending_feedback': pending, 'next_action': next_action,
                 'last_actor': state['last_actor'], 'deep_verified': deep,
-                'operation': state['operation'], 'deliveries': state['deliveries']}
+                'operation': state['operation'], 'deliveries': state['deliveries'],
+                'derivatives': state.get('derivatives', []), 'cloud_permission': state.get('cloud_permission')}
 
     def resume(self, actor='codex'):
         actor_name(actor)
@@ -214,18 +298,13 @@ class Session:
             self._verify(state)
             op = state['operation']
             if op:
-                try:
-                    os.kill(op['pid'], 0)
-                    running = True
-                    if op.get('process_birth'):
-                        birth = subprocess.check_output(['ps', '-p', str(op['pid']), '-o', 'lstart='], text=True).strip()
-                        running = birth == op['process_birth']
-                except (ProcessLookupError, subprocess.CalledProcessError):
-                    running = False
-                except PermissionError:
-                    running = True
-                if running:
-                    return self.status(deep=True)
+                liveness = operation_liveness(op)
+                if liveness != 'stale':
+                    result = self.status(deep=True)
+                    result['operation_liveness'] = liveness
+                    if liveness == 'unknown':
+                        result['next_action'] = 'Operation owner identity is unavailable; do not recover it until its PID is confirmed gone.'
+                    return result
                 result = Path(op['path']) / 'result.json'
                 if op['kind'] == 'render' and result.is_file() and read(result).get('technical_status') == 'pass':
                     self._register_render(state, op)
@@ -269,11 +348,35 @@ class Session:
             self._idle(state)
             self._verify(state)
             folder = self.root / 'artifacts' / ('cloud-routing-' + uuid.uuid4().hex[:12])
-            path = transcribe(read(state['project']['path']), folder, provider='auto')
+            cfg = read(state['project']['path'])
+            cfg['cloud_permission'] = state.get('cloud_permission')
+            path = transcribe(cfg, folder, provider='auto')
             self._attach(state, path)
             routing = fingerprint(folder / 'routing.json') if (folder / 'routing.json').is_file() else None
             self._save(state, 'cloud_transcript_attached', actor, {'routing': routing})
         return state['transcript']
+
+    def set_cloud_policy(self, policy, actor, note, providers=()):
+        """Persist a decision for this exact source before any cloud transcription."""
+        actor_name(actor)
+        require_note(note)
+        if policy not in ('allow', 'deny'):
+            raise ValueError('Cloud policy must be allow or deny')
+        providers = list(providers)
+        if policy == 'allow' and (not providers or len(set(providers)) != len(providers)
+                                  or set(providers) - {'openai', 'azure'}):
+            raise ValueError('Allow policy needs explicit OpenAI/Azure providers')
+        if policy == 'deny' and providers:
+            raise ValueError('Deny policy cannot name providers')
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            value = {'source_sha256': state['source']['sha256'], 'policy': policy,
+                     'providers': providers, 'basis': note.strip(), 'actor': actor, 'at': now()}
+            state['cloud_permission'] = value
+            self._save(state, 'cloud_policy_set', actor, {'policy': policy, 'providers': providers})
+        return value
 
     def correct_transcript(self, changes, actor, note):
         from .transcript_revision import revise_transcript
@@ -435,7 +538,8 @@ class Session:
             out = self.root / 'renders' / rid
             operation = {'kind': 'render', 'id': rid, 'path': str(out), 'pid': os.getpid(),
                          'preview': preview, 'plan': state['plan'], 'project': state['project'], 'brief': state['brief'], 'started_at': now(),
-                         'process_birth': subprocess.check_output(['ps', '-p', str(os.getpid()), '-o', 'lstart='], text=True).strip()}
+                         'process_birth': process_birth(os.getpid())}
+            operation['process_identity_status'] = 'known' if operation['process_birth'] else 'unknown'
             state['operation'] = operation
             state['phase'] = 'rendering'
             self._save(state, 'render_started', actor, {'render_id': rid})
@@ -575,6 +679,13 @@ class Session:
                     raise ValueError('Acceptance requires appropriate observation; audio/pacing need listening and color needs visual review')
                 if entry['basis'] == 'synthetic' and read(render['project']['path']).get('evidence_kind') != 'synthetic':
                     raise ValueError('Synthetic observations are only for explicitly synthetic fixtures')
+            plan = read(render['files']['plan']['path'])
+            junction_ids = ([item['id'] for item in plan['sequence'][:-1]] if plan.get('version') == 3
+                            else [item['id'] for item in plan['cuts']])
+            boundary_pass = next(e for e in entries if e['id'] == 'cut_boundaries')['status'] == 'pass'
+            coverage = report.get('junction_coverage')
+            if boundary_pass and (len(junction_ids) > 24 or coverage is not None):
+                validate_junction_coverage(coverage, render['files']['video']['sha256'], junction_ids)
             passed = all(e['status'] == 'pass' for e in entries)
             value = {'version': 1, 'render_id': rid, 'actor': actor, 'at': now(), 'report': report,
                      'passed': passed, 'observation_kind': 'declared_review_not_automatic_quality_measurement'}
@@ -593,12 +704,107 @@ class Session:
             self._save(state, 'render_reviewed', actor, {'render_id': rid, 'passed': passed})
         return value
 
+    def register_derivative(self, rid, result_path, actor='codex'):
+        """Attach an existing portrait export to the exact primary render."""
+        actor_name(actor)
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            render = self._find_render(state, rid)
+            self._verify_render(render)
+            result_path = Path(result_path).resolve()
+            result = read(result_path)
+            if result.get('technical_status') != 'pass' or result.get('source') != render['files']['video']:
+                raise ValueError('Portrait result must be a passed export of this exact render')
+            video = result.get('video')
+            if not isinstance(video, dict) or fingerprint(video['path']) != video:
+                raise ValueError('Portrait output changed')
+            technical_verification = None
+            if read(render['project']['path']).get('evidence_kind') != 'synthetic':
+                from .common import probe
+                from .media import stream_bounds, verify
+                source_media = probe(render['files']['video']['path'])
+                source_range = stream_bounds(source_media, 'video')
+                if abs(float(result['duration']) - (source_range[1] - source_range[0])) > .05:
+                    raise ValueError('Portrait duration does not match the source render')
+                check_folder = self.root / 'artifacts' / ('portrait-check-' + uuid.uuid4().hex[:12])
+                media = verify(video['path'], check_folder, expected_duration=source_range[1] - source_range[0],
+                               require_audio=True, expected_audio_range=stream_bounds(source_media, 'audio'))
+                stream = next((s for s in media['streams'] if s['codec_type'] == 'video'), None)
+                if (stream is None or (stream.get('width'), stream.get('height'), stream.get('sample_aspect_ratio')) != (1080, 1920, '1:1')
+                        or abs(stream_bounds(media, 'video')[0]) > .05):
+                    raise ValueError('Portrait result does not match verified 1080x1920 Rec.709 media')
+                technical_verification = fingerprint(check_folder / 'verification.json')
+            for key in ('subtitles_source', 'font_source'):
+                if result.get(key) and result[key].get('path'):
+                    check_ref(result[key])
+            value = {'id': uuid.uuid4().hex[:12], 'render_id': rid, 'render_sha256': render['files']['video']['sha256'],
+                     'plan': render['plan'], 'project': render['project'], 'result': fingerprint(result_path),
+                     'video': video, 'framing': result['framing'], 'subtitles_source': result.get('subtitles_source'),
+                     'font_source': result.get('font_source'), 'technical_verification': technical_verification,
+                     'reviews': []}
+            state.setdefault('derivatives', []).append(value)
+            self._save(state, 'derivative_registered', actor, {'derivative_id': value['id'], 'render_id': rid})
+        return value
+
+    def review_derivative(self, derivative_id, report, actor='human'):
+        actor_name(actor)
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            item = next((d for d in state.get('derivatives', []) if d['id'] == derivative_id), None)
+            if item is None:
+                raise ValueError('Unknown derivative ID')
+            check_ref(item['result'])
+            check_ref(item['video'])
+            if report.get('video_sha256') != item['video']['sha256']:
+                raise ValueError('Portrait review must name the exact video SHA256')
+            expected = {'framing': {'visual'}, 'captions': {'visual', 'text'},
+                        'audio': {'listening'}, 'playback': {'playback'}}
+            checks = report.get('checks')
+            if not isinstance(checks, list) or len(checks) != len(expected) or {c.get('id') for c in checks} != set(expected):
+                raise ValueError('Portrait review needs framing, captions, audio and playback checks')
+            synthetic = read(self._find_render(state, item['render_id'])['project']['path']).get('evidence_kind') == 'synthetic'
+            for check in checks:
+                require_note(check.get('note'))
+                if check.get('status') not in ('pass', 'fail', 'pending') or check.get('basis') not in expected[check['id']] | {'synthetic'}:
+                    raise ValueError('Invalid portrait review basis or status')
+                if check['basis'] == 'synthetic' and not synthetic:
+                    raise ValueError('Synthetic proof is only for a synthetic fixture')
+            value = {'version': 1, 'derivative_id': derivative_id, 'video_sha256': item['video']['sha256'],
+                     'actor': actor, 'at': now(), 'checks': checks,
+                     'passed': all(c['status'] == 'pass' for c in checks)}
+            ref = self._artifact('derivative-review', value)
+            item['reviews'].append({'artifact': ref, 'passed': value['passed']})
+            self._save(state, 'derivative_reviewed', actor, {'derivative_id': derivative_id, 'passed': value['passed']})
+        return value
+
     def inspect(self, rid, start=0, duration=8):
         from .inspection import inspect_render
         state = self._load()
         self._verify(state)
         render = self._find_render(state, rid)
         return inspect_render(render, self.root / 'inspections' / uuid.uuid4().hex[:12], start, duration)
+
+    def audition_junctions(self, rid, offset=0, limit=24, ids=None):
+        from .editing import audition
+        state = self._load()
+        self._verify(state)
+        render = self._find_render(state, rid)
+        folder = self.root / 'auditions' / rid / uuid.uuid4().hex[:12]
+        plan = read(render['files']['plan']['path'])
+        if ids is not None:
+            available = ([item['id'] for item in plan['sequence'][:-1]] if plan.get('version') == 3
+                         else [item['id'] for item in plan['cuts']])
+            mapping = {str(identifier): identifier for identifier in available}
+            if any(str(identifier) not in mapping for identifier in ids):
+                raise ValueError('Unknown junction ID')
+            ids = [mapping[str(identifier)] for identifier in ids]
+        audition(read(render['project']['path']), plan, folder,
+                 cut_ids=ids, offset=offset, limit=limit)
+        return read(folder / 'junctions.json')
 
     def evaluate(self):
         from .assessment import assess
@@ -635,6 +841,7 @@ document.getElementById('save').onclick=()=>{const time=Number(document.getEleme
         for item in state['pending_feedback']:
             text.append(f"Feedback {item['id']} ({item['status']}): {item['artifact']['path']}")
         text += ['Do not repeat transcription if the verified revision exists.',
+                 'Cloud policy: ' + json.dumps(state.get('cloud_permission'), ensure_ascii=False),
                  'Actor changes do not turn agent observations into human listening approval.',
                  'Use session resume to verify inputs before continuing.']
         path = self.root / 'handoffs' / (uuid.uuid4().hex[:12] + '.txt')
@@ -670,7 +877,7 @@ document.getElementById('save').onclick=()=>{const time=Number(document.getEleme
             self._save(state, 'fcp_timeline_imported', actor, {'report': result, 'xml': fingerprint(copy)})
         return {'plan': state['plan'], 'report': result}
 
-    def package(self, rid, target='fcp', actor='codex'):
+    def package(self, rid, target='fcp', actor='codex', derivative_id=None):
         from .delivery import bundle
         if target not in ('fcp', 'mp4'):
             raise ValueError('Delivery target must be fcp or mp4')
@@ -681,10 +888,20 @@ document.getElementById('save').onclick=()=>{const time=Number(document.getEleme
             render = self._find_render(state, rid)
             if render['plan'] != state['plan'] or render['project'] != state['project']:
                 raise ValueError('Delivery requires the current plan and project render')
+            derivative = None
+            if derivative_id is not None:
+                derivative = next((d for d in state.get('derivatives', []) if d['id'] == derivative_id), None)
+                if derivative is None or derivative['render_id'] != rid or derivative['render_sha256'] != render['files']['video']['sha256']:
+                    raise ValueError('Portrait derivative does not belong to this exact render')
+                if not derivative['reviews'] or not derivative['reviews'][-1]['passed']:
+                    raise ValueError('Portrait derivative needs a passing exact-video review')
+                check_ref(derivative['video'])
+                check_ref(derivative['result'])
             did = uuid.uuid4().hex[:12]
             path = bundle(render, state['brief'], target, self.root / 'deliveries' / did,
-                          accepted=self._accepted(state, render))
-            item = {'id': did, 'render_id': rid, 'artifact': fingerprint(path), 'checks': [], 'target': target}
+                          accepted=self._accepted(state, render), derivative=derivative)
+            item = {'id': did, 'render_id': rid, 'artifact': fingerprint(path), 'checks': [],
+                    'target': target, 'derivative_id': derivative_id}
             state['deliveries'].append(item)
             state['phase'] = 'delivery_pending'
             self._save(state, 'delivery_packaged', actor, {'delivery_id': did})
@@ -748,11 +965,60 @@ document.getElementById('save').onclick=()=>{const time=Number(document.getEleme
             pending = [key for key in manifest['manual_checks_required'] if latest.get(key) != 'pass']
             if pending:
                 raise ValueError('Delivery checks remain: ' + ', '.join(pending))
+            derivative = None
+            if delivery.get('derivative_id'):
+                derivative = next((d for d in state.get('derivatives', []) if d['id'] == delivery['derivative_id']), None)
+                if derivative is None or derivative['render_id'] != render['id'] or not derivative['reviews'] or not derivative['reviews'][-1]['passed']:
+                    raise ValueError('Selected portrait review is missing or no longer passing')
+                check_ref(derivative['video'])
+                if manifest.get('portrait', {}).get('video_sha256') != derivative['video']['sha256']:
+                    raise ValueError('Selected portrait differs from delivery')
             synthetic = read(render['project']['path']).get('evidence_kind') == 'synthetic'
             result = {'session_id': state['id'], 'delivery_id': did, 'render_id': render['id'],
                       'status': 'synthetic_complete' if synthetic else 'complete', 'at': now(),
                       'actor': actor_name(actor), 'delivery': delivery['artifact'], 'checks': latest,
                       'creative_review': [r for r in state['reviews'] if r['render_id'] == render['id']][-1]['artifact']}
+            folder = Path(delivery['artifact']['path']).parent
+            proof_dir = folder / 'evidence'
+            proof_dir.mkdir(exist_ok=True)
+            proof_refs = {'creative_review': result['creative_review'], 'project': render['project']}
+            if derivative:
+                proof_refs['portrait_review'] = derivative['reviews'][-1]['artifact']
+            for check in delivery['checks']:
+                proof_refs['delivery_check_' + check['check']] = check['artifact']
+            proof_files = {}
+            for label, ref in proof_refs.items():
+                check_ref(ref)
+                copied = proof_dir / (label + '.json')
+                if copied.exists():
+                    if fingerprint(copied)['sha256'] != ref['sha256']:
+                        raise ValueError('Existing delivery proof changed: ' + label)
+                else:
+                    shutil.copy2(ref['path'], copied)
+                if fingerprint(copied)['sha256'] != ref['sha256']:
+                    raise ValueError('Delivery proof changed during copy')
+                proof_files[label] = str(copied.relative_to(folder))
+            portable = {'version': 1, 'status': result['status'], 'session_id': state['id'],
+                        'delivery_id': did, 'render_id': render['id'], 'render_sha256': render['files']['video']['sha256'],
+                        'portrait_video_sha256': derivative['video']['sha256'] if derivative else None,
+                        'portrait': manifest.get('portrait'),
+                        'checks': latest, 'manual_checks_remaining': [], 'evidence': proof_files,
+                        'at': result['at'], 'files': []}
+            for file in sorted(folder.rglob('*')):
+                if file.is_file() and file != folder / 'completion.json':
+                    identity = fingerprint(file)
+                    portable['files'].append({'path': str(file.relative_to(folder)), 'sha256': identity['sha256'],
+                                              'bytes': identity['bytes']})
+            completion_path = folder / 'completion.json'
+            if completion_path.exists():
+                from .delivery import verify_completion
+                prior = verify_completion(folder)
+                if (prior['delivery_id'] != did or prior['render_sha256'] != render['files']['video']['sha256']
+                        or prior['portrait_video_sha256'] != portable['portrait_video_sha256']):
+                    raise ValueError('Existing portable completion does not match this delivery')
+            else:
+                write(completion_path, portable)
+            result['portable_completion'] = fingerprint(completion_path)
             artifact = self._artifact('completion', result)
             state['phase'] = result['status']
             state['completion'] = artifact

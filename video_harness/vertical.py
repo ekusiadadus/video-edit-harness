@@ -1,11 +1,12 @@
 """Local portrait derivatives of already graded Rec.709 edits; no uploads."""
 from pathlib import Path
+import hashlib
 import math
 import re
 import shutil
 import subprocess
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, __version__ as pillow_version
 
 from .common import fingerprint, probe, run, write
 from .media import stream_bounds, verify
@@ -97,7 +98,10 @@ def export_vertical(source, out, framing='fit', subtitles=None, font=None):
     cues = load_captions(subtitles, duration) if subtitles else []
     used_font = caption_font(cues, font) if cues else None
     font_path = getattr(used_font, 'path', None)
-    font_id = fingerprint(font_path) if isinstance(font_path, (str, Path)) else None
+    font_id = fingerprint(font_path) if isinstance(font_path, (str, Path)) else (
+        {'kind': 'pillow_default', 'pillow_version': pillow_version,
+         'sha256': hashlib.sha256(bytes(used_font.getmask('The quick brown fox 0123456789'))).hexdigest()}
+        if used_font else None)
     tiles = iter(caption_images(cues, used_font)) if cues else iter(())
     out.mkdir(parents=True, exist_ok=False)
     try:
@@ -159,7 +163,7 @@ def export_vertical(source, out, framing='fit', subtitles=None, font=None):
             raise ValueError('Source changed during export')
         if subtitles and fingerprint(subtitles)!=subtitle_id:
             raise ValueError('Subtitle file changed during export')
-        if font_id and fingerprint(font_id['path'])!=font_id:
+        if font_id and font_id.get('path') and fingerprint(font_id['path'])!=font_id:
             raise ValueError('Font file changed during export')
         result={'version':1,'source':original,'video':fingerprint(target),'framing':framing,
                 'width':1080,'height':1920,'fps':30,'duration':duration,'subtitles_burned':bool(cues),

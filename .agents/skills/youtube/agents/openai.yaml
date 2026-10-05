@@ -1,0 +1,4 @@
+interface:
+  display_name: "YouTube Editing"
+  short_description: "Coherent long-form edits from local footage"
+  default_prompt: "Use $youtube to edit this local video for YouTube with clear structure, natural pacing and source-specific upload restrictions."
