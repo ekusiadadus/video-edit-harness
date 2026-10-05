@@ -4,6 +4,14 @@ A local, reviewable workflow for spoken-video editing, color comparison, audio n
 
 This is an **alpha** release. It runs on macOS or Linux with POSIX tools. Final Cut Pro (FCP) GUI import and review require macOS and an installed copy of FCP. FCPXML validation alone does not prove that FCP opened or played a project.
 
+## Demo
+
+[![Watch the 27-second demo: source, edited result, and revision workflow](docs/demo/preview.gif)](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.1/video-edit-harness-demo.mp4)
+
+**[Watch / download the demo with sound (MP4)](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.1/video-edit-harness-demo.mp4)** — original → shorter pauses → corrected captions, color and audio → revision cache reuse → FCP handoff. The GIF above is silent; the MP4 includes the original and edited Japanese speech.
+
+This walkthrough uses synthetic speech and a test pattern. The edited segment is an actual harness render; the surrounding cards illustrate the workflow. See [demo provenance](docs/demo/README.md) for measured results and limitations.
+
 ## Install
 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), `ffmpeg`, and `ffprobe` on `PATH`. Cloud transcription additionally needs provider credentials and authorization to upload the specific source. No local Whisper model is installed or run.
