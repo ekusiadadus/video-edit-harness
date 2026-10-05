@@ -211,11 +211,12 @@ def build(sample, out, docs, font=None, youtube_session=None, tiktok_session=Non
     before_duration = excerpt_end-excerpt_start
     after_duration = before_duration-removed_gap
     script = provenance['voice']['script']
-    before_cues = [{'start':first[0]['start']-excerpt_start,'end':first[-1]['end']-excerpt_start,'text':script[0]},
-                   {'start':first[-1]['end']-excerpt_start,'end':words[split+1]['start']-excerpt_start,'text':'長い間があります（映像の停止ではありません）' if language=='ja' else 'Long pause in the source (not frozen playback)'},
-                   {'start':words[split+1]['start']-excerpt_start,'end':words[-1]['end']-excerpt_start,'text':script[1]}]
-    after_cues = [{'start':first[0]['start']-excerpt_start,'end':first[-1]['end']-excerpt_start,'text':script[0]},
-                  {'start':words[split+1]['start']-excerpt_start-removed_gap,'end':words[-1]['end']-excerpt_start-removed_gap,'text':script[1]}]
+    speech = provenance['speech_ranges_seconds']
+    before_cues = [{'start':speech[0][0]-excerpt_start,'end':speech[0][1]-excerpt_start,'text':script[0]},
+                   {'start':speech[0][1]-excerpt_start,'end':speech[1][0]-excerpt_start,'text':'長い間があります（映像の停止ではありません）' if language=='ja' else 'Long pause in the source (not frozen playback)'},
+                   {'start':speech[1][0]-excerpt_start,'end':speech[1][1]-excerpt_start,'text':script[1]}]
+    after_cues = [{'start':speech[0][0]-excerpt_start,'end':speech[0][1]-excerpt_start,'text':script[0]},
+                  {'start':speech[1][0]-excerpt_start-removed_gap,'end':speech[1][1]-excerpt_start-removed_gap,'text':script[1]}]
     segments = [
         (intro, 2, 0, True, None, ()),
         (normalized, before_duration, excerpt_start, False, content['before'], before_cues),
