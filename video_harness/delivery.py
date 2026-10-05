@@ -75,7 +75,7 @@ def verify_completion(folder):
         if str(relative) in listed or not candidate.is_file() or fingerprint(candidate)['sha256'] != entry['sha256']:
             raise ValueError('Completed delivery file changed: ' + entry['path'])
         listed[str(relative)] = entry['sha256']
-    actual = {str(path.relative_to(folder)) for path in folder.rglob('*') if path.is_file() and path.name != 'completion.json'}
+    actual = {str(path.relative_to(folder)) for path in folder.rglob('*') if path.is_file() and path != folder / 'completion.json'}
     if set(listed) != actual:
         raise ValueError('Completed delivery file inventory changed')
     manifest = read(folder / 'delivery.json')

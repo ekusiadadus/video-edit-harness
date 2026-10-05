@@ -1005,7 +1005,7 @@ document.getElementById('save').onclick=()=>{const time=Number(document.getEleme
                         'checks': latest, 'manual_checks_remaining': [], 'evidence': proof_files,
                         'at': result['at'], 'files': []}
             for file in sorted(folder.rglob('*')):
-                if file.is_file() and file.name != 'completion.json':
+                if file.is_file() and file != folder / 'completion.json':
                     identity = fingerprint(file)
                     portable['files'].append({'path': str(file.relative_to(folder)), 'sha256': identity['sha256'],
                                               'bytes': identity['bytes']})

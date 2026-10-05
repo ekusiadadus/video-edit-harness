@@ -47,6 +47,12 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual(portable['status'], 'synthetic_complete')
             self.assertEqual(set(portable['checks']), set(FCP_CHECKS))
             self.assertFalse(portable['manual_checks_remaining'])
+            nested = moved / 'extra' / 'completion.json'
+            nested.parent.mkdir()
+            nested.write_text('{}')
+            with self.assertRaisesRegex(ValueError, 'inventory changed'):
+                verify_completion(moved)
+            nested.unlink()
             completion_path = moved / 'completion.json'
             forged = {**portable, 'status': 'complete', 'checks': {key: 'fail' for key in FCP_CHECKS}}
             completion_path.write_text(json.dumps(forged))
