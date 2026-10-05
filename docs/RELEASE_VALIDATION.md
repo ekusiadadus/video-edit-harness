@@ -4,7 +4,7 @@ The implementation candidate is version `0.1.0a4`; the proposed release tag is `
 
 ## Verified locally
 
-- 130 automated tests passed on macOS/Python 3.11, covering source/provider upload gates, retained transcript timing, session revisions, portrait binding/tamper rejection, 26-boundary pagination, render-bound coverage, moved delivery verification, completion-field contradictions and conservative process recovery when `ps` is unavailable.
+- 131 automated tests passed on macOS/Python 3.11, covering source/provider upload gates, retained transcript timing, session revisions, portrait binding/tamper rejection, 26-boundary pagination, render-bound coverage, moved delivery verification, completion-field contradictions and conservative process recovery when `ps` is unavailable.
 - The wheel installed into an isolated virtual environment outside the checkout; CLI, session commands, preset data, LUT generation and workspace paths passed smoke checks.
 - Three standalone skill formats passed validation. Claude's marketplace manifest passed its local validator. The release inventory includes only the named current artifacts; unrelated old ZIPs are excluded.
 - A separate 608.33-second, 1280×720/30 fps repeated synthetic fixture retained 2,050 tokens in 100 spans. The full render took 170.63 seconds in this environment, produced 492.03 seconds, and resumed with the same output hash. Its 99 boundaries exposed 24 generated auditions and 75 remaining IDs. Audio repetition used an exact PCM sample/frame grid; word timing was deterministically replayed from the measured short fixture, not newly transcribed. A naive AAC loop with duration drift was rejected before the measured run. This is a synthetic scale check, not natural-talk, ProRes or human-listening proof.

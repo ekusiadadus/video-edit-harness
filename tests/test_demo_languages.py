@@ -34,6 +34,17 @@ class DemoLanguages(unittest.TestCase):
             self.assertFalse((root/'out').exists())
             self.assertFalse((root/'docs').exists())
 
+    def test_same_language_foreign_timing_fails_before_render(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); sample = root/'sample'; sample.mkdir()
+            (sample/'provenance.json').write_text(json.dumps({'voice': {'language': 'en'}, 'source_kind': 'synthetic', 'source_sha256': 'a'*64}))
+            (sample/'timing.json').write_text(json.dumps({'language': 'en', 'source_sha256': 'b'*64}))
+            with patch.object(module, 'fingerprint', return_value={'sha256': 'a'*64}), patch.object(module, 'render_sample') as render:
+                with self.assertRaisesRegex(ValueError, 'different source'):
+                    module.build(sample, root/'out', root/'docs', language='en')
+                render.assert_not_called()
+            self.assertFalse((root/'out').exists())
+
     def test_english_presentation_contains_no_japanese_labels(self):
         labels = json.dumps(module.language_content('en'), ensure_ascii=False)
         self.assertFalse(any('\u3040' <= char <= '\u30ff' or '\u4e00' <= char <= '\u9fff' for char in labels))

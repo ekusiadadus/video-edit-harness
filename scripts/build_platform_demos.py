@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from video_harness.common import fingerprint, read
 from video_harness.vertical import caption_font, export_vertical
+from video_harness.transcript import load_transcript
 from render_demo_sample import render_sample
 
 
@@ -108,6 +109,11 @@ def build(sample, out, docs, font=None, youtube_session=None, tiktok_session=Non
     source = sample/'sample.mp4'
     if provenance.get('source_kind') != 'synthetic' or provenance['source_sha256'] != fingerprint(source)['sha256']:
         raise ValueError('Only a hash-verified public synthetic fixture may enter demo generation')
+    if timing.get('source_sha256') != provenance['source_sha256']:
+        raise ValueError('Demo timing belongs to a different source')
+    sealed = load_transcript(sample/'transcript/transcript.json', source)
+    if any(timing.get(key) != sealed.get(key) for key in ('words', 'segments', 'duration', 'language')):
+        raise ValueError('Demo timing differs from the sealed transcript')
     if out.exists():
         raise FileExistsError('Choose a new output directory; demo builds preserve prior evidence')
     out.mkdir(parents=True)
