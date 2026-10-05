@@ -1,6 +1,6 @@
 [project]
 name = "video-edit-harness"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Transcript-led video editing, grading and FCPXML harness for Codex and Claude Code"
 readme = "README.md"
 license = "MIT"
@@ -33,4 +33,4 @@ Issues = "https://github.com/ekusiadadus/video-edit-harness/issues"
 "tones" = "video_harness/data/tones"
 
 [tool.hatch.build.targets.sdist]
-include = ["video_harness/*.py", "use_cases/*.json", "styles/*.json", "tones/*.json", "projects/*.template.json", "examples/*.json", "tests/*.py", "scripts/*.py", "docs/*.md", ".agents/skills/video-editing/**", ".claude/skills/video-editing", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "AGENTS.md", "CLAUDE.md", "Makefile", "pyproject.toml", "uv.lock", ".env.example"]
+include = ["video_harness/*.py", "use_cases/*.json", "styles/*.json", "tones/*.json", "projects/*.template.json", "examples/*.json", "tests/*.py", "scripts/*.py", "docs/*.md", ".agents/skills/video-editing/**", ".claude/skills/video-editing", "README.md", "README.ja.md", "docs/demo/**", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "AGENTS.md", "CLAUDE.md", "Makefile", "pyproject.toml", "uv.lock", ".env.example"]

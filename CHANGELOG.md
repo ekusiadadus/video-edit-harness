@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.0-alpha.2 — 2026-10-05
+
+- English and Japanese READMEs with linked navigation and real screen-recording guides.
+- Updated synthetic source/edit demo with OpenAI-generated Japanese `marin` speech, a freshly transcribed word-anchored edit, and explicit AI voice disclosure.
+- Fixed CLI preview/render failing because a branch-local import shadowed `build_lut`.
+- Included demo documentation and preview assets in source archives.
+
+The README walkthrough is composed from actual synthetic source and render files; it is not a Codex screen recording or an FCP GUI test.
+
 ## v0.1.0-alpha.1 — 2026-10-05
 
 First public alpha of the harness and portable `video-editing` skill.

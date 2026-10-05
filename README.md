@@ -1,30 +1,34 @@
 # Video Edit Harness
 
+English | [日本語](README.ja.md)
+
 A local, reviewable workflow for spoken-video editing, color comparison, audio normalization, subtitles, and Final Cut Pro XML handoff. A session keeps its brief, transcript, word-anchored edit plan, renders, timestamped feedback, and delivery checks together. Source media and prior revisions are retained.
 
 This is an **alpha** release. It runs on macOS or Linux with POSIX tools. Final Cut Pro (FCP) GUI import and review require macOS and an installed copy of FCP. FCPXML validation alone does not prove that FCP opened or played a project.
 
 ## Demo
 
-[![Watch the 27-second demo: source, edited result, and revision workflow](docs/demo/preview.gif)](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.1/video-edit-harness-demo.mp4)
+[![Watch the 29-second demo: source, edited result, and revision workflow](docs/demo/preview.gif)](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.2/video-edit-harness-demo-v2.mp4)
 
-**[Watch / download the demo with sound (MP4)](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.1/video-edit-harness-demo.mp4)** — original → shorter pauses → corrected captions, color and audio → revision cache reuse → FCP handoff. The GIF above is silent; the MP4 includes the original and edited Japanese speech.
+**[Watch / download the demo with sound (MP4)](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.2/video-edit-harness-demo-v2.mp4)** — original → shorter pauses → captions, color and audio → word retention → FCP handoff. The GIF above is silent; the MP4 includes the original and edited Japanese speech.
 
-This walkthrough uses synthetic speech and a test pattern. The edited segment is an actual harness render; the surrounding cards illustrate the workflow. See [demo provenance](docs/demo/README.md) for measured results and limitations.
+This walkthrough uses **AI-generated Japanese speech (OpenAI `marin`)** and a test pattern. The edited segment is an actual harness render; the surrounding cards illustrate the workflow. See [demo provenance](docs/demo/README.md) for measured results and limitations.
+
+For a real screen recording of Codex editing footage, see the [Screen Studio recording guide](docs/SCREEN_RECORDING.md). The walkthrough above is a composed demo, not a Codex screen recording.
 
 ## Install
 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), `ffmpeg`, and `ffprobe` on `PATH`. Cloud transcription additionally needs provider credentials and authorization to upload the specific source. No local Whisper model is installed or run.
 
 ```sh
-git clone --branch v0.1.0-alpha.1 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.2 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 uv run video-harness --help
 uv run video-harness session --help
 ```
 
-The [release](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.1) includes a wheel, source archive and a separate skill ZIP with SHA256SUMS. The wheel includes presets; when used outside this checkout, outputs default to the current working directory. PyPI publication is not part of this release.
+The [release](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.2) includes a wheel, source archive and a separate skill ZIP with SHA256SUMS. The wheel includes presets; when used outside this checkout, outputs default to the current working directory. PyPI publication is not part of this release.
 
 To use the included `video-editing` skill in a project, copy `.agents/skills/video-editing` into that project's `.agents/skills/`. Claude Code can use the same directory through `.claude/skills/video-editing` (a relative symlink or copy) and `CLAUDE.md`. Alternatively copy the skill into `~/.agents/skills/video-editing` or `~/.claude/skills/video-editing`. Set `VIDEO_EDIT_HARNESS_ROOT` to this checkout when invoking it outside the checkout. Pin updates to a reviewed tag. The skill's instructions do not authorize any upload or publication by themselves.
 
@@ -36,7 +40,7 @@ For a personal skill installation, copy the `video-editing/` directory extracted
 export VIDEO_EDIT_HARNESS_ROOT="/absolute/path/to/video-edit-harness"
 ```
 
-The Python wheel can also be installed into a virtual environment using `uv pip install /path/to/video_edit_harness-0.1.0a1-py3-none-any.whl`; invoke `video-harness` from that environment. The standalone skill requires the checkout for templates and agent instructions.
+The Python wheel can also be installed into a virtual environment using `uv pip install /path/to/video_edit_harness-0.1.0a2-py3-none-any.whl`; invoke `video-harness` from that environment. The standalone skill requires the checkout for templates and agent instructions.
 
 ## Spoken-video session
 

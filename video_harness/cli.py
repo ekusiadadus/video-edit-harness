@@ -133,7 +133,6 @@ def main():
    with evidence_run(cfg,args.cmd,out,{'plan_sha256':fingerprint(args.plan)['sha256']}):
     if args.cmd=='edit-export':
      export_edit(cfg,plan,out)
-     from .color import build_lut
      cfg['_resolved']=resolve(cfg);build_lut(cfg,None,out/'look.cube')
      from .fcp_check import validate_dtd
      write(out/'dtd-verification.json',validate_dtd(out/'timeline.fcpxml',out/'dtd.log'))

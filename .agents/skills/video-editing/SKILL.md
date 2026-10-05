@@ -5,7 +5,7 @@ description: Edit spoken footage with a durable, reviewable transcript-to-plan-t
 
 # Video editing with Video Edit Harness
 
-This skill requires the [Video Edit Harness](https://github.com/ekusiadadus/video-edit-harness) checkout (release `v0.1.0-alpha.1`), Python 3.11+, uv, FFmpeg and ffprobe. The standalone skill ZIP contains instructions and its license; it does not bundle the harness or media.
+This skill requires the [Video Edit Harness](https://github.com/ekusiadadus/video-edit-harness) checkout (release `v0.1.0-alpha.2`), Python 3.11+, uv, FFmpeg and ffprobe. The standalone skill ZIP contains instructions and its license; it does not bundle the harness or media.
 
 Find the harness checkout. If `VIDEO_EDIT_HARNESS_ROOT` is set, use that directory. Otherwise, find the checkout containing `pyproject.toml`, `video_harness/`, and this skill; if the skill was copied elsewhere, ask for the checkout location. Run commands from the harness root with `uv run video-harness`. Read its README.md and AGENTS.md; use `uv run video-harness session --help` for exact command syntax.
 
