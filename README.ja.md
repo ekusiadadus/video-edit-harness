@@ -41,11 +41,11 @@ claude plugin marketplace add ekusiadadus/video-edit-harness
 claude plugin install video-editing@video-edit-harness
 ```
 
-正確に `/youtube`・`/tiktok` と入力したい場合は単体スキルを使います。[導入方法・ZIPの検証・バージョン診断](docs/SKILL_INSTALL.ja.md)。公開予定のGitHubリリースはコミュニティ配布版で、公式キュレーションへの掲載ではありません。
+正確に `/youtube`・`/tiktok` と入力したい場合は単体スキルを使います。[導入方法・ZIPの検証・バージョン診断](docs/SKILL_INSTALL.ja.md)。GitHubリリースはコミュニティ配布版で、公式キュレーションへの掲載ではありません。
 
 ## APIキーなしで試す
 
-v0.1.0-alpha.4の公開後に[日本語の合成サンプル](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/demo-fixture-ja-v0.1.0-alpha.4.zip)を取得し、`DEMO-SHA256SUMS` で確認します。実測の単語時刻とライセンスを含みます。
+v0.1.0-alpha.4の[日本語の合成サンプル](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/demo-fixture-ja-v0.1.0-alpha.4.zip)を取得し、`DEMO-SHA256SUMS` で確認します。実測の単語時刻とライセンスを含みます。
 
 ```sh
 uv run python scripts/prepare_demo.py --fixture /path/to/demo-fixture-ja-v0.1.0-alpha.4.zip \

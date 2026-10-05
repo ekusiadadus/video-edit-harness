@@ -41,11 +41,11 @@ claude plugin marketplace add ekusiadadus/video-edit-harness
 claude plugin install video-editing@video-edit-harness
 ```
 
-For the exact `/youtube` and `/tiktok` spelling, use standalone skills instead. [Installation, verified ZIPs and version diagnosis](docs/SKILL_INSTALL.md). The planned GitHub release is a community distribution, not an official curated listing.
+For the exact `/youtube` and `/tiktok` spelling, use standalone skills instead. [Installation, verified ZIPs and version diagnosis](docs/SKILL_INSTALL.md). The GitHub release is a community distribution, not an official curated listing.
 
 ## Try without an API key
 
-When v0.1.0-alpha.4 is published, download its [English synthetic fixture](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/demo-fixture-en-v0.1.0-alpha.4.zip) and verify it against `DEMO-SHA256SUMS`. It includes measured word timestamps and a license.
+Download the v0.1.0-alpha.4 [English synthetic fixture](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/demo-fixture-en-v0.1.0-alpha.4.zip) and verify it against `DEMO-SHA256SUMS`. It includes measured word timestamps and a license.
 
 ```sh
 uv run python scripts/prepare_demo.py --fixture /path/to/demo-fixture-en-v0.1.0-alpha.4.zip \

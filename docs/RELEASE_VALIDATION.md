@@ -1,6 +1,6 @@
 # Alpha.4 verification / 検証範囲
 
-The implementation candidate is version `0.1.0a4`; the proposed release tag is `v0.1.0-alpha.4`. A candidate or draft release is not a completed public release. Check the GitHub release page and CI for the current publication state.
+Version `0.1.0a4` is distributed as the `v0.1.0-alpha.4` prerelease. The owner authorized merging and releasing it with the verification boundaries below. Publishing the alpha does not mark the remaining quality checks as passed.
 
 ## Verified locally
 
@@ -25,10 +25,10 @@ The implementation candidate is version `0.1.0a4`; the proposed release tag is `
 - Real full-resolution talk performance. Earlier 600-second 160×90 synthetic measurements were development checks; they are not ProRes or practical indoor-talk proof.
 - Actual Final Cut Pro GUI import/playback/LUT/caption/mix finishing. The current computer-use surface lists FCP but does not permit selecting it (`Invalid app`); XML/DTD tests do not replace GUI proof.
 - Actual YouTube/TikTok destination/device playback. No platform post or protected-media upload was performed.
-- Fresh installs from the eventual public tag and re-downloaded assets after publication. Candidate-local archive checks do not establish public URL availability.
+- Public-tag installation and checksum verification should be repeated when validating a different environment. Release publication checks are recorded separately from editing quality.
 
-The fourth stage of the implementation plan remains an acceptance/publication gate until these applicable checks are completed. The first three stages and automated correctness fixes can be reviewed in the candidate without implying those external checks have passed.
+The remaining fourth-stage quality checks stay open after this owner-authorized alpha release. Automated correctness and synthetic media checks do not establish real-talk, human-listening or FCP GUI acceptance.
 
 Raw local evidence is kept in ignored `output/implementation-alpha4/`: runtime/distribution tests, integration counterexamples and regressions, agent event logs, render manifests, portable bundles, frame inspections, `long-fixture/report.json` with resource logs and wheel build logs. These raw agent logs are not release assets; public distribution is explicitly enumerated and contains no children's footage, personal source media or credentials.
 
-**日本語：** 実装・配布・合成fixtureの検証と、人の試聴・実写長尺・Claude実行・FCP GUI・投稿先確認を分けています。認証や画面操作の制約で未実施の確認を合格扱いにはしません。公開前に残る受け入れ確認は上記のとおりです。
+**日本語：** 実装・配布・合成fixtureの検証と、人の試聴・実写長尺・Claude実行・FCP GUI・投稿先確認を分けています。認証や画面操作の制約で未実施の確認を合格扱いにはしません。alpha版の公開後も残る品質確認は上記のとおりです。

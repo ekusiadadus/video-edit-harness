@@ -7,7 +7,7 @@ The two versions use separate speech, captions, illustration text and presentati
 | English | [Overview](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-demo-en.mp4) | [Landscape result](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-result-en.mp4) | [Portrait result](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/tiktok-demo-en.mp4) |
 | 日本語 | [音声付き概要](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-demo-ja.mp4) | [横長の編集結果](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-result-ja.mp4) | [縦長の編集結果](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/tiktok-demo-ja.mp4) |
 
-These alpha.4 assets remain a draft until the [release gates](../RELEASE_VALIDATION.md) pass. Download URLs become public when that release is published.
+These assets accompany the alpha.4 prerelease. See the [verified behavior and remaining quality checks](../RELEASE_VALIDATION.md) before using it for production footage.
 
 Both overviews show the same sequence: promise → complete before/after sentences → example commands → portrait result → output types. YouTube retains both complete tips and shortens the long pause. TikTok keeps one complete tip, with captions below the preserved landscape illustration. Before/after audio uses the same -18 LUFS normalization target. Sentence anchors and comparison ranges come from each language's own measured timing and frame mapping; token counts and durations are not copied across languages.
 
