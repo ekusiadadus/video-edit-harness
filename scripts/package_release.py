@@ -18,7 +18,7 @@ def main():
     # Explicit public distribution inventory; never walk private media/output trees.
     skill_files = [Path('SKILL.md'), Path('agents/openai.yaml')]
     archives = []
-    for name in ('video-editing', 'tiktok'):
+    for name in ('video-editing', 'tiktok', 'youtube'):
         skill = ROOT/'.agents/skills'/name
         archive = args.output/f'{name}-skill-{tag}.zip'
         with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as output:
@@ -33,17 +33,28 @@ def main():
         raise ValueError('Plugin and harness versions differ')
     with zipfile.ZipFile(plugin_archive, 'w', zipfile.ZIP_DEFLATED) as output:
         output.write(manifest, '.claude-plugin/plugin.json')
-        for name in ('video-editing', 'tiktok'):
+        for name in ('video-editing', 'tiktok', 'youtube'):
             skill = ROOT/'.agents/skills'/name
             for relative in skill_files:
                 output.write(skill/relative, Path('.agents/skills')/name/relative)
         output.write(ROOT/'LICENSE', 'LICENSE')
-    files = sorted(p for p in args.output.iterdir() if p.is_file() and p.suffix in ('.whl','.gz','.zip'))
+    # Only this release's named artifacts belong in its checksum inventory.
+    files = sorted(archives + [plugin_archive] +
+                   list(args.output.glob(f'video_edit_harness-{version}-*.whl')) +
+                   list(args.output.glob(f'video_edit_harness-{version}.tar.gz')))
+    manifest_path = args.output / 'RELEASE-MANIFEST.json'
+    manifest_path.write_text(json.dumps({
+        'version': tag,
+        'artifacts': [{'name': p.name, 'bytes': p.stat().st_size,
+                       'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in files],
+    }, indent=2) + '\n')
     sums = args.output/'SHA256SUMS'
-    sums.write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in files))
+    sums.write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n'
+                            for p in files + [manifest_path]))
     for archive in archives:
         print(archive.name)
     print(plugin_archive.name)
+    print(manifest_path.name)
     print(sums.name)
 
 if __name__ == '__main__':

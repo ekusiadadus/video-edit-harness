@@ -120,5 +120,6 @@ class SessionTests(unittest.TestCase):
             self.fx.session.status(deep=True)
 
 
+
 if __name__ == '__main__':
     unittest.main()

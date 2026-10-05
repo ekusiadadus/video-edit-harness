@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from video_harness.transcription_router import transcribe
 from video_harness.cloud_transcript import ProviderFailure
+from video_harness.common import fingerprint
 
 
 KEYS = {'OPENAI_API_KEY': 'test-key', 'AZURE_OPENAI_API_KEY': 'test-key',
@@ -21,7 +22,9 @@ class RouterTests(unittest.TestCase):
   self.root = Path(self.temp.name)
   self.source = self.root / 'source.mov'
   self.source.write_bytes(b'original')
-  self.cfg = {'source': str(self.source)}
+  self.cfg = {'source': str(self.source), 'cloud_permission': {
+   'source_sha256': fingerprint(self.source)['sha256'], 'policy': 'allow',
+   'providers': ['openai', 'azure'], 'basis': 'synthetic test fixture'}}
   self.result = self.root / 'transcript.json'
   self.result.write_text('{}')
 

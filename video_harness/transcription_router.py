@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 
 from .common import ROOT, fingerprint, write
+from .privacy import permitted_providers, require_cloud_permission
 from .runs import unique_id
 
 
@@ -18,12 +19,14 @@ def transcribe(cfg, out=None, provider=None, model=None, language=None):
         options['cloud_model'] = model
     if language:
         options['language'] = language
+    order = permitted_providers(effective, choice)
     out = Path(out) if out else ROOT / 'output' / f'transcription-{unique_id()}'
     out.mkdir(parents=True, exist_ok=False)
     report = {'source': fingerprint(effective['source']), 'requested_provider': choice,
-              'order': ['openai', 'azure'] if choice == 'auto' else [choice],
+              'order': order,
               'attempts': [], 'status': 'failed', 'local_inference': False}
     for name in report['order']:
+        require_cloud_permission(effective, name)
         if fingerprint(effective['source']) != report['source']:
             report['attempts'].append({'provider': name, 'status': 'aborted_source_changed'})
             write(out / 'routing.json', report)

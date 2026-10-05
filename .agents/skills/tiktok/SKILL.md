@@ -7,7 +7,9 @@ description: Edit a local video for TikTok, Reels or YouTube Shorts with a clear
 
 In Claude Code, `/tiktok /path/to/video.mov [brief]` supplies the video path and optional brief in `$ARGUMENTS`. In Codex, use `$tiktok` with the same path and brief. A marketplace plugin exposes the namespaced `/video-editing:tiktok`; install this standalone skill under `.claude/skills/tiktok` for the exact `/tiktok` spelling.
 
-Use the Video Edit Harness checkout (`v0.1.0-alpha.3`). Locate it through `VIDEO_EDIT_HARNESS_ROOT` or the project checkout. If absent, follow the [installation guide](https://github.com/ekusiadadus/video-edit-harness/blob/v0.1.0-alpha.3/docs/SKILL_INSTALL.md). Read README.md and AGENTS.md; run `uv run video-harness --help` from the harness root. This skill is editing guidance, not authorization to install dependencies, send footage, post to TikTok, or publish a screen recording.
+Use the Video Edit Harness checkout (`v0.1.0-alpha.4`). Locate it through `VIDEO_EDIT_HARNESS_ROOT` or the project checkout. If absent, follow the [installation guide](https://github.com/ekusiadadus/video-edit-harness/blob/v0.1.0-alpha.4/docs/SKILL_INSTALL.md). Read README.md and AGENTS.md; run `uv run video-harness --help` from the harness root. This skill is editing guidance, not authorization to install dependencies, send footage, post to TikTok, or publish a screen recording.
+
+Run `uv run video-harness doctor` before editing. Check root, versions, skills, commands and required tools; resolve relevant findings. Persist source upload allow/deny through `session cloud-policy`, using the actual current authorization and provider scope. Unknown blocks cloud calls; existing deny survives resume. Reuse an unchanged allowed source without repeated permission questions.
 
 ## Understand the request and preserve the source
 
@@ -34,6 +36,8 @@ Default fit/padding preserves the whole picture. Choose `--framing center_crop` 
 
 When an actual reviewed SRT matches this exact input edit, add `--subtitles /absolute/path/to/subtitles.srt` to burn captions. Inspect Japanese wording, line breaks, timing, readability and overlays at the top, bottom and right. The exporter uses conservative working margins; TikTok's actual UI safe area varies with device, caption and interactive elements. These margins are not an official guarantee. Do not attach a stale SRT from another edit, invent subtitles without listening, or imply automatic captions are reviewed.
 
+For transcript-backed sessions, register the export with `session register-vertical SESSION RENDER_ID /path/to/export/result.json`. Record a separate exact-video-SHA review with `session review-vertical SESSION DERIVATIVE_ID --data-file REPORT_JSON`: framing, captions, audio and playback each need the actual status, basis and note. Package the selected portrait through `session package SESSION RENDER_ID --target mp4 --derivative-id ID`, then finish only after its gates pass. Changed source/render, subtitle, font, framing or video invalidates the old review. Standalone local-only previews remain previews and carry their unresolved scope.
+
 The deliverable is a local 1080×1920 H.264/AAC MP4, technical checks and source/output fingerprints. Review framing, every edit boundary, captions and audio; offer the path to the result and list any unresolved checks. Verify full decode, dimensions, aspect, duration and audio coverage. Separate agent selection, human perceptual review and platform playback. The vertical export does not modify the original-source FCPXML framing: apply and verify portrait framing separately in FCP if needed.
 
-Do not post, schedule, upload, add platform music or claim TikTok playback without a further explicit instruction. Use [TikTok workflow notes](https://github.com/ekusiadadus/video-edit-harness/blob/v0.1.0-alpha.3/docs/TIKTOK.md) for examples and evidence limits.
+Do not post, schedule, upload, add platform music or claim TikTok playback without a further explicit instruction. Use [TikTok workflow notes](https://github.com/ekusiadadus/video-edit-harness/blob/v0.1.0-alpha.4/docs/TIKTOK.md) for examples and evidence limits.

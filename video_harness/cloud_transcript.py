@@ -9,6 +9,7 @@ import re
 
 from .common import ROOT, fingerprint, probe, run
 from .media import stream_bounds
+from .privacy import require_cloud_permission
 from .transcript import load_transcript, save_transcript
 
 CHUNK_SECONDS = 300.0
@@ -152,6 +153,8 @@ def transcribe_cloud(cfg, provider, cache_root=None):
     """Make two API requests per audio chunk; return immutable transcript JSON path."""
     if provider not in ('openai', 'azure'):
         raise ValueError('Provider must be openai or azure')
+    require_cloud_permission(cfg, provider)
+    permission = cfg['cloud_permission']
     options = cfg.get('transcription', {})
     language = options.get('language', 'ja')
     if not isinstance(language, str) or not re.fullmatch(r'[a-z]{2,3}(?:-[a-z]{2})?', language):
@@ -183,11 +186,11 @@ def transcribe_cloud(cfg, provider, cache_root=None):
     with (folder / '.cache.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         return _transcribe_locked(folder, source, source_id, duration, spans, provider,
-                                  text_model, timing_model, language, timeout, max_retries)
+                                  text_model, timing_model, language, timeout, max_retries, permission)
 
 
 def _transcribe_locked(folder, source, source_id, duration, spans, provider,
-                       text_model, timing_model, language, timeout, max_retries):
+                       text_model, timing_model, language, timeout, max_retries, permission):
     result = folder / 'transcript.json'
     if result.exists():
         load_transcript(result, source)
@@ -212,6 +215,7 @@ def _transcribe_locked(folder, source, source_id, duration, spans, provider,
             raise ValueError('Audio chunk missing, empty, or exceeds provider upload limit')
         if fingerprint(source) != source_id:
             raise ValueError('Source changed before cloud upload')
+        require_cloud_permission({'source': str(source), 'cloud_permission': permission}, provider)
         semantic, timing = _cache_pair(folder, index, client, audio, provider, text_model, timing_model,
                                        language, offset, length, source_id)
         semantic_parts.append(str(semantic.get('text') or '').strip())

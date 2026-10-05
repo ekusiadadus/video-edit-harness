@@ -1,3 +1,3 @@
 """Local video editing tools. Originals are never overwritten."""
 
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"

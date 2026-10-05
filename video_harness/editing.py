@@ -264,24 +264,29 @@ def _plan_digest(plan):
                                     separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
 
-def audition(cfg, plan, out, cut_ids=None, context=1.5):
+def audition(cfg, plan, out, cut_ids=None, context=1.5, offset=0, limit=24):
     """Listen to proposed edits without applying them to the plan."""
     validate_plan(plan, verify_source=True)
     if fingerprint(cfg['source']) != plan['source']:
         raise ValueError('Project source differs from edit plan')
     if not math.isfinite(context) or not .1 <= context <= 10:
         raise ValueError('Audition context must be 0.1..10 seconds')
+    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 24:
+        raise ValueError('Audition offset must be nonnegative and limit must be 1..24')
     if plan.get('version') == 3:
-        return _audition_sequence(cfg, plan, out, cut_ids, context)
+        return _audition_sequence(cfg, plan, out, cut_ids, context, offset, limit)
     out.mkdir(parents=True, exist_ok=False)
     cuts = plan['cuts'] if cut_ids is None else [c for c in plan['cuts'] if c['id'] in set(cut_ids)]
     if cut_ids is not None and len(cuts) != len(set(cut_ids)):
         raise ValueError('Unknown cut ID')
     # More candidates are accessible by explicit IDs rather than an unbounded preview render.
-    if len(cuts) > 24:
+    all_ids = [cut['id'] for cut in plan['cuts']]
+    if len(cuts) > limit:
         if cut_ids is not None:
             raise ValueError('At most 24 explicit cut IDs per audition; split the selection')
-        cuts = cuts[:24]
+        cuts = cuts[offset:offset + limit]
+    elif cut_ids is None:
+        cuts = cuts[offset:offset + limit]
     evidence = []
     for cut in cuts:
         s, e = cut['start'], cut['end']
@@ -308,13 +313,16 @@ def audition(cfg, plan, out, cut_ids=None, context=1.5):
         evidence.append({'id': cut['id'], 'start': s, 'end': e, 'enabled': cut['enabled'],
                          'reason': cut['reason'], 'previous_words': cut.get('previous_words', []),
                          'next_words': cut.get('next_words', []), 'before': before.name, 'after': after.name})
+    generated_ids = [item['id'] for item in evidence]
     write(out / 'junctions.json', {'plan_sha256': _plan_digest(plan), 'context': context,
-                                 'items': evidence, 'total_candidates': len(plan['cuts']),
+                                 'items': evidence, 'total_candidates': len(all_ids), 'all_ids': all_ids,
+                                 'generated_count': len(evidence), 'remaining_ids': [i for i in all_ids if i not in generated_ids],
+                                 'offset': offset, 'limit': limit,
                                  'note': 'Before/after auditions are proposals, including disabled cuts. No automatic approval.'})
     return evidence
 
 
-def _audition_sequence(cfg, plan, out, selected_ids, context):
+def _audition_sequence(cfg, plan, out, selected_ids, context, offset=0, limit=24):
     """Audition actual adjoining playback spans, including reordered joins."""
     sequence = plan['sequence']
     junctions = [(left, right) for left, right in zip(sequence, sequence[1:])]
@@ -323,8 +331,8 @@ def _audition_sequence(cfg, plan, out, selected_ids, context):
         if len(wanted) != len(selected_ids) or not wanted <= {left['id'] for left, _ in junctions}:
             raise ValueError('Unknown or duplicate junction ID')
         junctions = [(left, right) for left, right in junctions if left['id'] in wanted]
-    elif len(junctions) > 24:
-        junctions = junctions[:24]
+    else:
+        junctions = junctions[offset:offset + limit]
     if len(junctions) > 24:
         raise ValueError('At most 24 junctions per audition')
     out.mkdir(parents=True, exist_ok=False)
@@ -351,13 +359,18 @@ def _audition_sequence(cfg, plan, out, selected_ids, context):
                          'end': right['start'], 'reason': left['reason'], 'previous_words': [],
                          'next_words': [], 'before': before.name, 'after': after.name,
                          'scope': 'actual adjoining selected source spans'})
+    all_ids = [left['id'] for left, _ in zip(sequence, sequence[1:])]
+    generated_ids = [item['id'] for item in evidence]
     write(out / 'junctions.json', {'plan_sha256': _plan_digest(plan), 'context': context,
-        'items': evidence, 'total_candidates': len(sequence) - 1,
+        'items': evidence, 'total_candidates': len(all_ids), 'all_ids': all_ids,
+        'generated_count': len(evidence), 'remaining_ids': [i for i in all_ids if i not in generated_ids],
+        'offset': offset, 'limit': limit,
         'note': 'Audition files require listening review; generation is not approval.'})
     return evidence
 
 
 def _gallery(out, junctions):
+    metadata = json.loads((out / 'junctions' / 'junctions.json').read_text())
     cards = []
     for item in junctions:
         text = html.escape(''.join(item['previous_words']) + ' → ' + ''.join(item['next_words']))
@@ -371,4 +384,6 @@ def _gallery(out, junctions):
         'video{max-width:100%;max-height:65vh}article{padding:16px;border:1px solid #666;margin:16px 0}a{color:#bdf}</style>'
         '<h1>編集と試聴</h1><video controls src="video.mp4"></video><p><a href="audio-only.mp3">音声のみ</a> · '
         '<a href="timeline.fcpxml">FCPXML</a> · <a href="subtitles.srt">字幕</a> · <a href="plan.json">編集計画</a></p>'
-        '<p>動画には編集計画で有効にした選択を反映します。内容と切り口は試聴して確認してください。下の比較音声には未採用の候補も含みます。</p>' + ''.join(cards) + '</html>')
+        '<p>動画には編集計画で有効にした選択を反映します。内容と切り口は試聴して確認してください。下の比較音声には未採用の候補も含みます。</p>'
+        f"<p>試聴生成: {metadata['generated_count']} / {metadata['total_candidates']}。未生成ID: {html.escape(', '.join(map(str, metadata['remaining_ids'])) or 'なし')}</p>"
+        + ''.join(cards) + '</html>')

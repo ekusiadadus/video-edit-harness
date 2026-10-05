@@ -1,43 +1,50 @@
-# Install the video-editing skill
+# Install the skills
 
 English | [日本語](SKILL_INSTALL.ja.md)
 
-This is a public, MIT-licensed community skill for Codex and Claude Code. It is distributed from this GitHub repository and its releases; it is not listed in the vendors' official curated directories. The skill requires Video Edit Harness, Python 3.11+, uv, FFmpeg and ffprobe. It installs no local Whisper model and grants no permission to upload footage.
+Three MIT community skills: `youtube` for regular videos, `tiktok` for vertical shorts and `video-editing` for general editing. Instructions require the separate harness; they do not authorize source uploads. This GitHub distribution is not an official curated-directory listing.
 
-## Prepare the harness
+## 1. Prepare the pinned harness
+
+Install Python 3.11+, uv, FFmpeg and ffprobe; for Japanese caption burn-in, provide a CJK font.
 
 ```sh
-git clone --branch v0.1.0-alpha.3 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.4 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 export VIDEO_EDIT_HARNESS_ROOT="$PWD"
+uv run video-harness doctor
 ```
 
-Keep `VIDEO_EDIT_HARNESS_ROOT` available in the environment from which you start your agent. The skill does not automatically install dependencies or fetch a missing checkout. If the checkout is absent, follow these steps before editing. Do not overwrite an existing installation without reviewing it.
+Keep that environment variable available when starting your agent from another project. The doctor reports checkout/runtime/plugin/skill versions, commands, tools, font, free space and credential **booleans**. Resolve relevant findings. Version differences are diagnostic; verify command compatibility before using a different checkout. No agent installs dependencies automatically.
 
-## Codex
+## 2. Choose one skill installation method
 
-The checkout already exposes `.agents/skills/video-editing`. To use it in other projects, copy that folder to `~/.agents/skills/video-editing`, or install the release's `video-editing-skill-v0.1.0-alpha.3.zip` there after verifying `SHA256SUMS`. The ZIP extracts as `video-editing/` and includes `SKILL.md`, `agents/openai.yaml`, and MIT license. It contains no harness or media.
+**Codex:** the checkout exposes all three `.agents/skills/` folders. In other projects, copy the selected folders into `~/.agents/skills/` or the project's `.agents/skills/`. Start a fresh session and invoke `$youtube`, `$tiktok` or `$video-editing` with a local path and brief.
 
-Start a new Codex session and invoke `$video-editing`, for example: “Use $video-editing to compare three indoor grades for my local project. Do not upload the source.” See the [official Codex skill guide](https://developers.openai.com/codex/skills).
-
-## Claude Code
-
-Install the repository's community plugin through its marketplace:
+**Claude Code marketplace plugin:**
 
 ```sh
 claude plugin marketplace add ekusiadadus/video-edit-harness
 claude plugin install video-editing@video-edit-harness
 ```
 
-Start a new Claude Code session and invoke `/video-editing:video-editing`. Marketplace updates follow the public repository; the separate harness checkout above stays pinned until you explicitly update it. You can also use the standalone skill ZIP by copying its `video-editing/` folder into `~/.claude/skills/` and invoking `/video-editing`. Choose one method to avoid duplicate skill loading.
+Start a fresh session. Invoke `/video-editing:youtube`, `/video-editing:tiktok` or `/video-editing:video-editing`. Marketplace updates follow main; the harness above remains pinned until explicitly updated. Compare versions with doctor after updates.
 
-The release's `video-editing-claude-plugin-v0.1.0-alpha.3.zip` is a portable plugin package with a manifest, the same skill, and license; it does not bundle the harness or media. Extract it and use `claude --plugin-dir /absolute/path/to/extracted-plugin` for local loading. `CLAUDE.md` at an installed plugin root is not automatically loaded; the skill explicitly directs the agent to the harness README and AGENTS.md. See [official marketplace instructions](https://code.claude.com/docs/en/plugin-marketplaces).
+**Claude standalone skills:** copy the chosen `.agents/skills/NAME` folder to `~/.claude/skills/NAME` or `.claude/skills/NAME`. Start a new session and invoke `/youtube /path/to/video.mov`, `/tiktok /path/to/video.mov` or `/video-editing`. Choose standalone or plugin for a given skill to avoid duplicates.
 
-## Privacy and evidence
+## Verified release archives
 
-An explicit no-upload restriction also prohibits cloud transcription for that source. Grading, audio normalization, previews and technical checks can run locally. Without an existing sealed transcript, do not invent word timestamps or run transcript-backed pacing edits. Public demo media is synthetic. Human listening/visual review and FCP GUI checks remain separate from software validation.
+Download from the [alpha.4 release](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.4). `RELEASE-MANIFEST.json` lists exactly the current wheel, source archive, three skill ZIPs and plugin ZIP; `SHA256SUMS` covers those artifacts and the manifest. Verify checksums before installing.
 
-## Use /tiktok
+Each `NAME-skill-v0.1.0-alpha.4.zip` extracts as `NAME/` with `SKILL.md`, `agents/openai.yaml` and LICENSE. Copy that directory to your agent's skill directory. ZIPs include no harness or media.
 
-Verify and extract `tiktok-skill-v0.1.0-alpha.3.zip`, then copy `tiktok/` into `~/.claude/skills/tiktok`. Start a new session and invoke `/tiktok /path/to/video.mov`. In Codex, install the same folder under `~/.agents/skills/tiktok` and invoke `$tiktok`. The marketplace plugin invokes `/video-editing:tiktok`. See [TikTok workflow](TIKTOK.md).
+`video-editing-claude-plugin-v0.1.0-alpha.4.zip` contains a plugin manifest, all three skills and license. Extract it and run `claude --plugin-dir /absolute/path/to/extracted-plugin` for local pinned loading. Plugin-root `CLAUDE.md` is not automatically loaded; the skill directs the agent to the checkout's README and AGENTS.md.
+
+The wheel installs into a virtual environment with `uv pip install /path/to/video_edit_harness-0.1.0a4-py3-none-any.whl`; it includes preset data and the CLI. The skills still use the checkout's templates and instructions. PyPI publication is outside this release.
+
+## First successful run
+
+Try the [offline synthetic sample](demo/README.md). It has measured word timing, no API-key requirement and explicit upload denial. For your own source, retain existing authorization; cloud calls need a source SHA and authorized providers in the session policy. Denied or unknown permission blocks transcription even with credentials. No local Whisper/ASR. Without a transcript, local grading/audio/framing previews remain available.
+
+[Codex skills](https://developers.openai.com/codex/skills/) · [Claude skills](https://code.claude.com/docs/en/skills) · [Claude marketplace](https://code.claude.com/docs/en/plugin-marketplaces)

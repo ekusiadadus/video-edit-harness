@@ -1,43 +1,50 @@
-# video-editingスキルの導入
+# スキルの導入
 
 [English](SKILL_INSTALL.md) | 日本語
 
-CodexとClaude Code向けにMITライセンスで公開するコミュニティ製スキルです。このGitHubリポジトリとリリースから配布します。各社の公式キュレーション一覧への掲載ではありません。実行にはVideo Edit Harness、Python 3.11以降、uv、FFmpeg、ffprobeが必要です。ローカルWhisperは導入せず、スキルの導入だけで動画のアップロードが許可されることもありません。
+MITのコミュニティ版です。通常動画の `youtube`、縦動画の `tiktok`、一般編集の `video-editing` を配布します。実行には別途ハーネスが必要です。スキルの導入だけで素材の送信が許可されるわけではありません。公式キュレーションへの掲載ではありません。
 
-## ハーネスの準備
+## 1. ハーネスを用意する
+
+Python 3.11以上、uv、FFmpeg、ffprobeを導入し、日本語字幕の焼き込みには日本語/CJKフォントを用意します。
 
 ```sh
-git clone --branch v0.1.0-alpha.3 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.4 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 export VIDEO_EDIT_HARNESS_ROOT="$PWD"
+uv run video-harness doctor
 ```
 
-エージェントを起動する環境にも`VIDEO_EDIT_HARNESS_ROOT`を渡してください。スキルは依存ツールの導入や不足しているチェックアウトの取得を自動実行しません。ハーネスがない場合は先に上記の準備を行います。既存のスキルが同じ名前である場合は、内容を確認してから更新してください。
+別プロジェクトからエージェントを起動する際もこの環境変数を渡します。doctorはパス・実行系/プラグイン/スキルのバージョン・コマンド・ツール・フォント・空き容量を表示します。認証情報は設定の有無だけを表示します。必要な指摘を解消してから編集します。バージョン差は診断情報で、異なる版ではコマンド互換を確認してください。エージェントは依存関係を自動導入しません。
 
-## Codex
+## 2. 導入方法を一つ選ぶ
 
-このチェックアウトでは`.agents/skills/video-editing`からスキルを検出できます。他のプロジェクトでも使う場合は、このフォルダを`~/.agents/skills/video-editing`へコピーするか、リリースの`video-editing-skill-v0.1.0-alpha.3.zip`を`SHA256SUMS`で確認してから配置してください。ZIPは`video-editing/`として展開され、`SKILL.md`、`agents/openai.yaml`、MITライセンスが含まれます。ハーネスと動画素材は含まれません。
+**Codex：** チェックアウトの `.agents/skills/` に3スキルがあります。別プロジェクトでは必要なフォルダを `~/.agents/skills/` またはプロジェクトの `.agents/skills/` にコピーします。新しいセッションで `$youtube`・`$tiktok`・`$video-editing` に素材パスと要望を添えます。
 
-新しいCodexセッションで`$video-editing`を指定します。例：「$video-editingでローカルの室内動画を3つの色で比較してください。素材はアップロードしないでください」。仕様は[公式スキルガイド](https://developers.openai.com/codex/skills)を参照してください。
-
-## Claude Code
-
-リポジトリのコミュニティマーケットプレイスからプラグインを導入できます。
+**Claude Codeプラグイン：**
 
 ```sh
 claude plugin marketplace add ekusiadadus/video-edit-harness
 claude plugin install video-editing@video-edit-harness
 ```
 
-新しいClaude Codeセッションで`/video-editing:video-editing`を指定します。マーケットプレイスの更新対象は公開リポジトリです。別途用意したハーネスのチェックアウトは、明示的に更新するまで上記タグに固定されます。ZIPの`video-editing/`を`~/.claude/skills/`へ配置して`/video-editing`で呼び出す方法もあります。重複して読み込まないよう、どちらか一方を選んでください。
+新しいセッションで `/video-editing:youtube`・`/video-editing:tiktok`・`/video-editing:video-editing` を使います。マーケットプレイスはmainに追従し、上記ハーネスは明示更新まで固定されます。更新後はdoctorで版を比較してください。
 
-リリースには`video-editing-claude-plugin-v0.1.0-alpha.3.zip`も用意します。マニフェスト、同じスキル、ライセンスを含む配布物で、ハーネスや動画素材は含みません。展開後は`claude --plugin-dir /absolute/path/to/extracted-plugin`でローカル読み込みできます。インストールされたプラグインのルートにある`CLAUDE.md`は自動読み込みされません。スキルはハーネスのREADMEとAGENTS.mdを読むよう明記しています。[公式マーケットプレイス手順](https://code.claude.com/docs/en/plugin-marketplaces)も参照してください。
+**Claude単体スキル：** `.agents/skills/NAME` を `~/.claude/skills/NAME` または `.claude/skills/NAME` にコピーします。新しいセッションで `/youtube /path/to/video.mov`・`/tiktok /path/to/video.mov`・`/video-editing` を使います。同じスキルの単体版とプラグインを重複導入しないでください。
 
-## 素材の保護と確認の範囲
+## 配布ZIPと検証
 
-アップロード禁止の素材は、クラウド文字起こしにも送信しません。色調整、音声の正規化、プレビュー、技術検証はローカルで実行できます。既存の封印済み文字起こしがなければ、単語の時刻を捏造せず、文字起こしに基づく間の編集は行いません。公開デモは合成素材です。人による試聴・目視確認とFCPのGUI確認は、ソフトウェアの検証と区別します。
+[alpha.4リリース](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.4)から取得します。`RELEASE-MANIFEST.json` は現行のwheel、ソース、3スキルZIP、プラグインZIPだけを列挙し、`SHA256SUMS` はそれらとmanifestを検証します。導入前に照合してください。
 
-## /tiktokを使う
+`NAME-skill-v0.1.0-alpha.4.zip` は `NAME/` にSKILL.md・agents/openai.yaml・LICENSEを展開します。使用するエージェントのスキルディレクトリにコピーします。ハーネス本体や動画は含みません。
 
-専用の`tiktok-skill-v0.1.0-alpha.3.zip`を確認して展開し、`tiktok/`を`~/.claude/skills/tiktok`へコピーします。新しいセッションで`/tiktok /path/to/video.mov`を指定できます。Codexでは同じフォルダを`~/.agents/skills/tiktok`へ配置し、`$tiktok`で呼び出します。プラグイン導入の場合は`/video-editing:tiktok`です。[TikTok編集手順](TIKTOK.ja.md)を参照してください。
+`video-editing-claude-plugin-v0.1.0-alpha.4.zip` はmanifest・3スキル・ライセンスを含む固定版です。展開後、`claude --plugin-dir /absolute/path/to/extracted-plugin` で読み込めます。プラグイン直下のCLAUDE.mdは自動読込されず、スキルがハーネスのREADMEとAGENTS.mdを読むよう指示します。
+
+wheelは仮想環境に `uv pip install /path/to/video_edit_harness-0.1.0a4-py3-none-any.whl` で導入でき、CLIとプリセットを含みます。スキルはチェックアウトのテンプレートと指示も利用します。PyPIには公開していません。
+
+## 最初に試す
+
+[公開用のオフライン合成サンプル](demo/README.md)で試せます。実測単語時刻付きで、APIキーは不要、送信禁止を保存します。実際の素材では既存の許可を引き継ぎ、素材SHAと送信先の許可をセッションに保存します。不明・禁止なら認証情報があっても文字起こし送信を止めます。ローカルWhisper/ASRは使いません。文字起こしがない場合もローカルの色・音声・画角プレビューは利用できます。
+
+[Codex公式スキル資料](https://developers.openai.com/codex/skills/) · [Claude公式スキル資料](https://code.claude.com/docs/en/skills) · [Claudeマーケットプレイス資料](https://code.claude.com/docs/en/plugin-marketplaces)
