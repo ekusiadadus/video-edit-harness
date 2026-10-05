@@ -48,4 +48,6 @@ To reuse existing sessions, add `--youtube-session PATH --tiktok-session PATH` a
 
 Older unlocalised graphics remain historical references; `en/` and `ja/` contain the current README previews.
 
-The repaired overview uses one continuous H.264/AAC encode on an exact 30 fps / 48 kHz grid. It shows complete sentences instead of starting midway through speech. Captions identify the intentional source pause explicitly, so the static illustration is not mistaken for stalled playback. The Japanese overview is 33.8 seconds; English is 35.2 seconds.
+The repaired overview uses one continuous H.264/AAC encode on an exact 30 fps / 48 kHz grid. It shows complete sentences instead of starting midway through speech. Captions identify the intentional source pause explicitly, so the static illustration is not mistaken for stalled playback. The Japanese overview is 34.93 seconds; English is 36.4 seconds.
+
+Original sentence WAV PCM extents are retained in `speech_ranges_seconds`. The renderer uses these known recording boundaries, with padding, to preserve speech when ASR onsets are late. Reusing a render that cuts an original recording is rejected. The Japanese second sentence onset (6.65s) is retained; the earlier edit incorrectly started at 6.77s.

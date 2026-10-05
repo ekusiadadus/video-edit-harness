@@ -164,6 +164,10 @@ def build(sample, out, docs, font=None, youtube_session=None, tiktok_session=Non
         else:
             result = render_sample(sample, out/f'{mode}-session', mode)
             (out/f'{mode}-session'/'sample-render.json').write_text(json.dumps(result, indent=2)+'\n')
+        mapping = read(Path(result['render']['path'])/'frame-mapping.json')
+        ranges = provenance.get('speech_ranges_seconds', [])[:2 if mode=='youtube' else 1]
+        if len(ranges)!=(2 if mode=='youtube' else 1) or any(not any(row['source_start']<=start and row['source_end']>=end for row in mapping['sequence']) for start,end in ranges):
+            raise ValueError('Existing render cuts original speech; rebuild the fixture session')
         if read(Path(result['render']['path'])/'frame-mapping.json')['source']['sha256'] != provenance['source_sha256']:
             raise ValueError('Render does not belong to the public fixture')
         video = Path(result['render']['files']['video']['path'])

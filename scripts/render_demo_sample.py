@@ -5,9 +5,29 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-from video_harness.common import read
+from video_harness.common import read, fingerprint
 from video_harness.session import Session
 from video_harness.transcript import load_transcript
+
+
+def sentence_padding(first, last, ranges, duration):
+    """Preserve known original PCM speech extents despite inaccurate ASR onsets."""
+    import math
+    if not isinstance(ranges,list) or len(ranges)!=2:
+        raise ValueError('Public fixture needs two exact original speech ranges')
+    previous=0
+    padding=[]
+    for words, row in zip((first,last),ranges):
+        if not isinstance(row,list) or len(row)!=2 or any(isinstance(t,bool) or not isinstance(t,(int,float)) or not math.isfinite(t) for t in row):
+            raise ValueError('Invalid original speech range')
+        start,end=row
+        if not previous<=start<end<=duration:
+            raise ValueError('Original speech ranges overlap or exceed the source')
+        if not start<=words[0]['start']<words[-1]['end']<=end:
+            raise ValueError('Measured words fall outside the original speech recording')
+        padding.append((words[0]['start']-start+.16,end-words[-1]['end']+.16))
+        previous=end
+    return padding
 
 
 def render_sample(sample, session_folder, mode='youtube'):
@@ -20,12 +40,17 @@ def render_sample(sample, session_folder, mode='youtube'):
     if gap<1:
         raise ValueError('Expected the verified sample sentence gap')
     first,last=words[:index+1],words[index+1:]
+    provenance=read(sample/'provenance.json')
+    if provenance.get('source_sha256') != fingerprint(sample/'sample.mp4')['sha256']:
+        raise ValueError('Speech range provenance belongs to a different source')
+    ranges=provenance.get('speech_ranges_seconds')
+    padding=sentence_padding(first,last,ranges,transcript['duration'])
     spans=[{'id':'tip-one','start_word_id':first[0]['id'],'end_word_id':first[-1]['id'],
-            'pad_before':.12,'pad_after':.16,'reason':'Retain the complete first practical tip'}]
+            'pad_before':padding[0][0],'pad_after':padding[0][1],'reason':'Retain the complete first practical tip'}]
     omissions=[]
     if mode=='youtube':
         spans.append({'id':'tip-two','start_word_id':last[0]['id'],'end_word_id':last[-1]['id'],
-                      'pad_before':.16,'pad_after':.24,'reason':'Retain the second tip; shorten the long pause'})
+                      'pad_before':padding[1][0],'pad_after':padding[1][1],'reason':'Retain the second tip; shorten the long pause'})
     elif mode=='tiktok':
         omissions=[{'word_ids':[w['id'] for w in last],'reason':'One coherent tip for this short; second tip belongs in the longer version','goal_ids':['goal-1']}]
     else:raise ValueError('Mode must be youtube or tiktok')

@@ -83,3 +83,15 @@ class OverviewTimeline(unittest.TestCase):
             self.assertEqual(len(raw),stride*24)
             self.assertGreater(raw[5*stride],200)  # Red before the join.
             self.assertGreater(raw[15*stride+2],200)  # Blue after the join.
+
+
+class SpeechBoundaryPreservation(unittest.TestCase):
+    def test_exact_recording_extents_override_late_asr_onset(self):
+        from render_demo_sample import sentence_padding
+        first=[{'start':0,'end':4.64}];last=[{'start':6.90,'end':11.52}]
+        padding=sentence_padding(first,last,[[0,4.65],[6.65,12.15]],12.166667)
+        self.assertLessEqual(last[0]['start']-padding[1][0],6.65)
+        self.assertGreaterEqual(last[-1]['end']+padding[1][1],12.15)
+        self.assertGreater(padding[1][0],.25)
+        with self.assertRaises(ValueError):sentence_padding(first,last,[[0,4.65],[4.0,12.15]],12.166667)
+        with self.assertRaises(ValueError):sentence_padding(first,last,None,12.166667)
