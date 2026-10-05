@@ -24,6 +24,7 @@ def parser():
   if name in ['preview','render']:a.add_argument('--tone',choices=LEGACY_TONES,help='Legacy v1 tone (compatibility)')
   if name in ['preview','compare']:a.add_argument('--styles',help='Comma-separated style IDs')
   if name=='compare':a.add_argument('--use-cases',required=True,help='Comma-separated use-case IDs')
+ a=s.add_parser('tiktok-export',help='Local 1080x1920 derivative of an already graded Rec.709 edit');a.add_argument('source',type=Path);a.add_argument('--output',type=Path,required=True);a.add_argument('--framing',choices=['fit','center_crop'],default='fit');a.add_argument('--subtitles',type=Path);a.add_argument('--font',type=Path)
  a=s.add_parser('inspect-xml');a.add_argument('xml',type=Path);a.add_argument('--output',type=Path)
  a=s.add_parser('export-xml');a.add_argument('plan',type=Path);a.add_argument('output',type=Path);a.add_argument('--name',default='Talk Pacing Review')
  a=s.add_parser('verify');a.add_argument('video',type=Path);a.add_argument('--output',type=Path,required=True)
@@ -83,6 +84,9 @@ def main():
   return session_main(sys.argv[2:])
  p=parser();args=p.parse_args()
  try:
+  if args.cmd=='tiktok-export':
+   from .vertical import export_vertical
+   print(json.dumps(export_vertical(args.source,args.output,args.framing,args.subtitles,args.font),ensure_ascii=False,indent=2));return
   if args.cmd in ['doctor','presets']:
    result={'use_cases':catalog('use_cases'),'styles':catalog('styles')}
    if args.cmd=='doctor':result={x:shutil.which(x) for x in ['ffmpeg','ffprobe','uv']}|{'free_gb':round(shutil.disk_usage(ROOT).free/1e9,2),'use_cases':list(result['use_cases']),'styles':list(result['styles'])}

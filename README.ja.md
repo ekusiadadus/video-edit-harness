@@ -21,14 +21,14 @@ Codexで実際の動画を編集する画面を収録する場合は、[Screen S
 必要なもの：Python 3.11 以降、[uv](https://docs.astral.sh/uv/)、`PATH` 上の `ffmpeg` と `ffprobe`。クラウド文字起こしには、さらにプロバイダーの認証情報と、その素材をアップロードする許可が必要です。ローカルの Whisper モデルはインストールも実行もしません。
 
 ```sh
-git clone --branch v0.1.0-alpha.2 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.3 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 uv run video-harness --help
 uv run video-harness session --help
 ```
 
-[リリース](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.2)には、wheel、ソースアーカイブ、別配布のスキル ZIP、SHA256SUMS が含まれます。wheel にはプリセットが含まれます。このチェックアウトの外で使用する場合、出力先の初期値は現在の作業ディレクトリです。このリリースは PyPI には公開していません。
+[リリース](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.3)には、wheel、ソースアーカイブ、別配布のスキル ZIP、SHA256SUMS が含まれます。wheel にはプリセットが含まれます。このチェックアウトの外で使用する場合、出力先の初期値は現在の作業ディレクトリです。このリリースは PyPI には公開していません。
 
 同梱の `video-editing` スキルをプロジェクトで使うには、`.agents/skills/video-editing` をそのプロジェクトの `.agents/skills/` にコピーします。Claude Code では、相対シンボリックリンクまたはコピーによる `.claude/skills/video-editing` と `CLAUDE.md` を通じて同じディレクトリを利用できます。代わりに、`~/.agents/skills/video-editing` または `~/.claude/skills/video-editing` にコピーしてもかまいません。このチェックアウト以外からスキルを呼び出す場合は、`VIDEO_EDIT_HARNESS_ROOT` にこのチェックアウトのパスを設定してください。更新時は、確認済みのタグに固定してください。スキルの指示だけでは、アップロードや公開は許可されません。
 
@@ -40,7 +40,22 @@ uv run video-harness session --help
 export VIDEO_EDIT_HARNESS_ROOT="/absolute/path/to/video-edit-harness"
 ```
 
-Python wheel は `uv pip install /path/to/video_edit_harness-0.1.0a2-py3-none-any.whl` で仮想環境にもインストールできます。その環境から `video-harness` を実行してください。単独配布のスキルには、テンプレートとエージェント向け指示を参照するため、このチェックアウトが必要です。
+Python wheel は `uv pip install /path/to/video_edit_harness-0.1.0a3-py3-none-any.whl` で仮想環境にもインストールできます。その環境から `video-harness` を実行してください。単独配布のスキルには、テンプレートとエージェント向け指示を参照するため、このチェックアウトが必要です。
+
+## スキルとして導入する
+
+[スキル導入ガイド](docs/SKILL_INSTALL.ja.md)に、Codexの検出方法、単体スキルZIP、Claude Codeプラグインの導入手順をまとめています。GitHubから配布するコミュニティ版で、各社の公式キュレーション一覧への掲載ではありません。
+
+```sh
+claude plugin marketplace add ekusiadadus/video-edit-harness
+claude plugin install video-editing@video-edit-harness
+```
+
+Codexでは`$video-editing`、Claude Codeでは`/video-editing:video-editing`で呼び出します。`VIDEO_EDIT_HARNESS_ROOT`に、タグで固定したハーネスのチェックアウトを指定してください。アップロード禁止は文字起こしと公開の両方に適用します。ローカルでの色調整には文字起こしは不要です。
+
+### TikTok・Reels・Shorts
+
+専用の`tiktok`スキルを導入すると、Claude Codeで`/tiktok /path/to/video.mov`、Codexで`$tiktok`と呼び出せます。プラグイン経由では`/video-editing:tiktok`です。場面に合わせた色調整、許可された文字起こしに基づく短尺編集、9:16の納品を扱います。[TikTok編集手順](docs/TIKTOK.ja.md)で1080×1920への整形と字幕の使い方を説明しています。既定でアップロードや投稿は行いません。
 
 ## 対話動画のセッション
 

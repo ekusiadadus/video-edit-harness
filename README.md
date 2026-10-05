@@ -21,14 +21,14 @@ For a real screen recording of Codex editing footage, see the [Screen Studio rec
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), `ffmpeg`, and `ffprobe` on `PATH`. Cloud transcription additionally needs provider credentials and authorization to upload the specific source. No local Whisper model is installed or run.
 
 ```sh
-git clone --branch v0.1.0-alpha.2 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.3 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 uv run video-harness --help
 uv run video-harness session --help
 ```
 
-The [release](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.2) includes a wheel, source archive and a separate skill ZIP with SHA256SUMS. The wheel includes presets; when used outside this checkout, outputs default to the current working directory. PyPI publication is not part of this release.
+The [release](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.3) includes a wheel, source archive and a separate skill ZIP with SHA256SUMS. The wheel includes presets; when used outside this checkout, outputs default to the current working directory. PyPI publication is not part of this release.
 
 To use the included `video-editing` skill in a project, copy `.agents/skills/video-editing` into that project's `.agents/skills/`. Claude Code can use the same directory through `.claude/skills/video-editing` (a relative symlink or copy) and `CLAUDE.md`. Alternatively copy the skill into `~/.agents/skills/video-editing` or `~/.claude/skills/video-editing`. Set `VIDEO_EDIT_HARNESS_ROOT` to this checkout when invoking it outside the checkout. Pin updates to a reviewed tag. The skill's instructions do not authorize any upload or publication by themselves.
 
@@ -40,7 +40,22 @@ For a personal skill installation, copy the `video-editing/` directory extracted
 export VIDEO_EDIT_HARNESS_ROOT="/absolute/path/to/video-edit-harness"
 ```
 
-The Python wheel can also be installed into a virtual environment using `uv pip install /path/to/video_edit_harness-0.1.0a2-py3-none-any.whl`; invoke `video-harness` from that environment. The standalone skill requires the checkout for templates and agent instructions.
+The Python wheel can also be installed into a virtual environment using `uv pip install /path/to/video_edit_harness-0.1.0a3-py3-none-any.whl`; invoke `video-harness` from that environment. The standalone skill requires the checkout for templates and agent instructions.
+
+## Install as a skill
+
+The [skill installation guide](docs/SKILL_INSTALL.md) covers Codex discovery, the standalone skill ZIP, and Claude Code plugin installation. This is a community release from GitHub, not an official curated-directory listing.
+
+```sh
+claude plugin marketplace add ekusiadadus/video-edit-harness
+claude plugin install video-editing@video-edit-harness
+```
+
+Invoke `$video-editing` in Codex or `/video-editing:video-editing` in Claude Code. Keep a separate, pinned harness checkout available through `VIDEO_EDIT_HARNESS_ROOT`. Explicit no-upload restrictions cover transcription as well as publication; local grading does not require a transcript.
+
+### TikTok, Reels and Shorts
+
+Install the standalone `tiktok` skill for `/tiktok /path/to/video.mov` in Claude Code (`$tiktok` in Codex). The marketplace plugin exposes `/video-editing:tiktok`. It prepares local scene-appropriate grading, transcript-backed short-form edits when permitted, and reviewed 9:16 delivery. See [TikTok workflow](docs/TIKTOK.md) for 1080×1920 fit/crop and captions. It does not upload or post by default.
 
 ## Spoken-video session
 

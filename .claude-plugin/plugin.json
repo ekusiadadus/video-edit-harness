@@ -1,0 +1,21 @@
+{
+  "name": "video-editing",
+  "version": "0.1.0-alpha.3",
+  "description": "Reviewable video and TikTok short editing with grading, captions, vertical delivery and Final Cut Pro XML handoff.",
+  "author": {
+    "name": "Daisuke Kuriyama"
+  },
+  "homepage": "https://github.com/ekusiadadus/video-edit-harness",
+  "repository": "https://github.com/ekusiadadus/video-edit-harness",
+  "license": "MIT",
+  "keywords": [
+    "video-editing",
+    "final-cut-pro",
+    "transcription",
+    "color-grading"
+  ],
+  "skills": [
+    "./.agents/skills/video-editing",
+    "./.agents/skills/tiktok"
+  ]
+}

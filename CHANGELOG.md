@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.0-alpha.3 — 2026-10-05
+
+- Published Claude Code plugin manifest and community marketplace entry alongside the portable Codex/Claude skill.
+- Added English/Japanese skill installation and invocation guides.
+- Made local-only grading explicit when cloud upload is forbidden or a transcript is unavailable.
+- Added a portable Claude plugin ZIP and verified privacy-safe release contents.
+- Added the standalone `/tiktok` skill and local 1080×1920 fit/crop delivery with optional reviewed subtitle burn-in.
+
+
 ## v0.1.0-alpha.2 — 2026-10-05
 
 - English and Japanese READMEs with linked navigation and real screen-recording guides.

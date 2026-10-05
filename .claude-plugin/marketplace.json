@@ -1,0 +1,14 @@
+{
+  "name": "video-edit-harness",
+  "owner": {
+    "name": "Daisuke Kuriyama"
+  },
+  "plugins": [
+    {
+      "name": "video-editing",
+      "source": "./",
+      "description": "Transcript-led video editing skill with local grading and reviewable FCPXML handoff."
+    }
+  ],
+  "description": "Community video-editing skill and harness integration for Claude Code."
+}

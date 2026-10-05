@@ -1,6 +1,7 @@
 """Build the portable skill archive and checksums alongside uv's wheel/sdist."""
 import argparse
 import hashlib
+import json
 from pathlib import Path
 import tomllib
 import zipfile
@@ -14,17 +15,35 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     version = tomllib.loads((ROOT/'pyproject.toml').read_text())['project']['version']
     tag = 'v' + version.replace('a', '-alpha.') if 'a' in version else 'v' + version
-    skill = ROOT/'.agents/skills/video-editing'
-    archive = args.output/f'video-editing-skill-{tag}.zip'
-    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as output:
-        for path in sorted(skill.rglob('*')):
-            if path.is_file() and '__pycache__' not in path.parts:
-                output.write(path, Path('video-editing')/path.relative_to(skill))
-        output.write(ROOT/'LICENSE', 'video-editing/LICENSE')
+    # Explicit public distribution inventory; never walk private media/output trees.
+    skill_files = [Path('SKILL.md'), Path('agents/openai.yaml')]
+    archives = []
+    for name in ('video-editing', 'tiktok'):
+        skill = ROOT/'.agents/skills'/name
+        archive = args.output/f'{name}-skill-{tag}.zip'
+        with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as output:
+            for relative in skill_files:
+                output.write(skill/relative, Path(name)/relative)
+            output.write(ROOT/'LICENSE', Path(name)/'LICENSE')
+        archives.append(archive)
+    plugin_archive = args.output/f'video-editing-claude-plugin-{tag}.zip'
+    manifest = ROOT/'.claude-plugin/plugin.json'
+    metadata = json.loads(manifest.read_text())
+    if metadata['version'] != tag.removeprefix('v'):
+        raise ValueError('Plugin and harness versions differ')
+    with zipfile.ZipFile(plugin_archive, 'w', zipfile.ZIP_DEFLATED) as output:
+        output.write(manifest, '.claude-plugin/plugin.json')
+        for name in ('video-editing', 'tiktok'):
+            skill = ROOT/'.agents/skills'/name
+            for relative in skill_files:
+                output.write(skill/relative, Path('.agents/skills')/name/relative)
+        output.write(ROOT/'LICENSE', 'LICENSE')
     files = sorted(p for p in args.output.iterdir() if p.is_file() and p.suffix in ('.whl','.gz','.zip'))
     sums = args.output/'SHA256SUMS'
     sums.write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in files))
-    print(archive.name)
+    for archive in archives:
+        print(archive.name)
+    print(plugin_archive.name)
     print(sums.name)
 
 if __name__ == '__main__':

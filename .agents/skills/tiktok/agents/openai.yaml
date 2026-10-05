@@ -1,0 +1,4 @@
+interface:
+  display_name: "TikTok Editing"
+  short_description: "Reviewed vertical shorts from local footage"
+  default_prompt: "Use $tiktok to edit this local video into a clear vertical short while preserving its source and upload restrictions."
