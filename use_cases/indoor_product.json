@@ -1,0 +1,49 @@
+{
+  "name": "indoor_product",
+  "label": "Indoor Product",
+  "description": "Neutral product color and clear midtone separation under indoor light.",
+  "grade": {
+    "curve": [
+      0,
+      0.047,
+      0.18,
+      0.405,
+      0.655,
+      0.855,
+      0.985
+    ],
+    "saturation": 1.01,
+    "rgb_gains": [
+      1,
+      1,
+      1
+    ],
+    "shadow_tint": [
+      0,
+      0,
+      0
+    ],
+    "highlight_tint": [
+      0,
+      0,
+      0
+    ]
+  },
+  "brightness_guidance": {
+    "subject_ire": [
+      40,
+      75
+    ],
+    "background_delta_ire": [
+      -30,
+      20
+    ],
+    "note": "The subject may be an object rather than a person. Protect label whites and product color; judge lighting and material, not a fixed skin value."
+  },
+  "default_style": "natural",
+  "compare_styles": [
+    "natural",
+    "clean_editorial",
+    "soft_film"
+  ]
+}

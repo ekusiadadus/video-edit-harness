@@ -1,0 +1,49 @@
+{
+  "name": "outdoor_backlight",
+  "label": "Outdoor Backlight",
+  "description": "Open dark subjects gently and compress bright backgrounds.",
+  "grade": {
+    "curve": [
+      0.008,
+      0.07,
+      0.21,
+      0.43,
+      0.65,
+      0.82,
+      0.965
+    ],
+    "saturation": 1.0,
+    "rgb_gains": [
+      1,
+      1,
+      1
+    ],
+    "shadow_tint": [
+      0,
+      0,
+      0
+    ],
+    "highlight_tint": [
+      0,
+      0,
+      0
+    ]
+  },
+  "brightness_guidance": {
+    "subject_ire": [
+      40,
+      70
+    ],
+    "background_delta_ire": [
+      0,
+      40
+    ],
+    "note": "A bright background may remain brighter than the subject. Adjust exposure or local correction manually when needed; this grade has no subject mask."
+  },
+  "default_style": "natural",
+  "compare_styles": [
+    "natural",
+    "warm_documentary",
+    "soft_film"
+  ]
+}

@@ -1,0 +1,3 @@
+[
+  {"op": "retime", "id": "opening-1", "start_word_id": 1, "end_word_id": 12, "pad_before": 0.08, "pad_after": 0.16, "reason": "導入の語尾と余韻を残す", "goal_ids": ["main"]}
+]

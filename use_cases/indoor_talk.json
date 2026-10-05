@@ -1,0 +1,49 @@
+{
+  "name": "indoor_talk",
+  "label": "Indoor Talk",
+  "description": "Conservative contrast and neutral color for faces in a controlled room.",
+  "grade": {
+    "curve": [
+      0,
+      0.055,
+      0.19,
+      0.42,
+      0.66,
+      0.845,
+      0.985
+    ],
+    "saturation": 1.0,
+    "rgb_gains": [
+      1,
+      1,
+      1
+    ],
+    "shadow_tint": [
+      0,
+      0,
+      0
+    ],
+    "highlight_tint": [
+      0,
+      0,
+      0
+    ]
+  },
+  "brightness_guidance": {
+    "subject_ire": [
+      45,
+      70
+    ],
+    "background_delta_ire": [
+      -25,
+      15
+    ],
+    "note": "Watch exposure changes across a conversation. Skin and lighting vary; judge the subject by eye and waveform, then adjust per shot."
+  },
+  "default_style": "natural",
+  "compare_styles": [
+    "natural",
+    "warm_documentary",
+    "soft_film"
+  ]
+}

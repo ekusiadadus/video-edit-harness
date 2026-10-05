@@ -1,0 +1,31 @@
+{
+  "name": "soft_film",
+  "label": "Soft Film",
+  "description": "Gently lifted blacks and compressed highlights without added grain.",
+  "defaults": {
+    "intensity": 0.65
+  },
+  "grade": {
+    "exposure_stops": 0.0,
+    "contrast": 0.96,
+    "saturation": 0.96,
+    "black_lift": 0.012,
+    "highlight_rolloff": 0.14,
+    "rgb_gains": [
+      1.002,
+      1.0,
+      0.998
+    ],
+    "shadow_tint": [
+      0.002,
+      0.001,
+      0
+    ],
+    "highlight_tint": [
+      0.003,
+      0.002,
+      0
+    ],
+    "monochrome": false
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "clean_editorial",
+  "label": "Clean Editorial",
+  "description": "Clear neutrals and restrained contrast for bright, polished imagery.",
+  "defaults": {
+    "intensity": 0.7
+  },
+  "grade": {
+    "exposure_stops": 0.0,
+    "contrast": 1.04,
+    "saturation": 0.99,
+    "black_lift": 0.0,
+    "highlight_rolloff": 0.06,
+    "rgb_gains": [
+      0.998,
+      1.0,
+      1.002
+    ],
+    "shadow_tint": [
+      -0.002,
+      0,
+      0.002
+    ],
+    "highlight_tint": [
+      0.001,
+      0.001,
+      0.001
+    ],
+    "monochrome": false
+  }
+}

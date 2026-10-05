@@ -1,0 +1,36 @@
+[project]
+name = "video-edit-harness"
+version = "0.1.0a1"
+description = "Transcript-led video editing, grading and FCPXML harness for Codex and Claude Code"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Daisuke Kuriyama"}]
+classifiers = ["Development Status :: 3 - Alpha", "Operating System :: POSIX", "Programming Language :: Python :: 3"]
+requires-python = ">=3.11"
+dependencies = ["numpy>=2,<3", "Pillow>=11,<13"]
+[project.scripts]
+video-harness = "video_harness.cli:main"
+
+[project.optional-dependencies]
+transcription-cloud = [
+    "openai>=2,<3",
+]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[tool.hatch.build.targets.wheel]
+packages = ["video_harness"]
+
+[project.urls]
+Homepage = "https://github.com/ekusiadadus/video-edit-harness"
+Repository = "https://github.com/ekusiadadus/video-edit-harness"
+Issues = "https://github.com/ekusiadadus/video-edit-harness/issues"
+
+[tool.hatch.build.targets.wheel.force-include]
+"use_cases" = "video_harness/data/use_cases"
+"styles" = "video_harness/data/styles"
+"tones" = "video_harness/data/tones"
+
+[tool.hatch.build.targets.sdist]
+include = ["video_harness/*.py", "use_cases/*.json", "styles/*.json", "tones/*.json", "projects/*.template.json", "examples/*.json", "tests/*.py", "scripts/*.py", "docs/*.md", ".agents/skills/video-editing/**", ".claude/skills/video-editing", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "AGENTS.md", "CLAUDE.md", "Makefile", "pyproject.toml", "uv.lock", ".env.example"]

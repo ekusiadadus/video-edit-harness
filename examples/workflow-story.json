@@ -1,0 +1,15 @@
+{
+  "chapters": [
+    {
+      "id": "opening",
+      "title": "導入",
+      "goal_ids": ["main"],
+      "spans": [
+        {"id": "opening-1", "start_word_id": 1, "end_word_id": 12, "reason": "話題と結論を提示する"}
+      ]
+    }
+  ],
+  "omissions": [
+    {"word_ids": [13, 14], "reason": "同じ導入を繰り返す", "goal_ids": ["main"]}
+  ]
+}

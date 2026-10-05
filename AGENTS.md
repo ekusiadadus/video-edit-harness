@@ -1,0 +1,9 @@
+# Video Edit Harness contributor instructions
+
+Work from this checkout with Python 3.11+, uv, FFmpeg, and ffprobe. Run `uv sync --locked` and use `uv run video-harness --help` or `uv run video-harness session --help` for command syntax. Read README.md and the `video-editing` skill for the editing workflow. Set `VIDEO_EDIT_HARNESS_ROOT` when invoking the skill from another directory.
+
+Keep original media, transcripts, and edit revisions. Derive story spans and omissions from actual transcript word IDs and times. Never invent alignment or treat example IDs as source data. Record the real actor (`human`, `codex`, `claude_code`, or `automation`) and decision reason. An agent selection is not human approval. A proposed or revised plan requires review. Tie feedback and final review to the exact render SHA-256.
+
+Cloud transcription sends media to OpenAI or Azure OpenAI and may incur charges. Obtain authorization for each source before upload. Do not run local Whisper/ASR. Keep credentials out of project JSON, logs, and commits. Do not send messages, publish artifacts, or claim human review on the basis of this file alone; follow the current user's instructions.
+
+Compare color candidates on the same source interval and audio conditions. Preserve natural whites and skin. Static region corrections do not track faces. Generated Apple Log LUTs include conversion to Rec.709; avoid a second FCP Camera LUT. Measure audio before normalization. The -16 LUFS and -1.5 dBTP targets are starting choices. Validate full video/audio decode, source range, frame mapping, and FCPXML rational times. Keep technical checks, synthetic tests, human visual/listening review, FCP GUI import, and distribution playback as distinct evidence. Never auto-adopt a look or remove silence based only on low amplitude. Keep raw logs under output/.

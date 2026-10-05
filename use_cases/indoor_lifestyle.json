@@ -1,0 +1,49 @@
+{
+  "name": "indoor_lifestyle",
+  "label": "Indoor Lifestyle",
+  "description": "Mildly open shadows and warm room atmosphere without strong skin shifts.",
+  "grade": {
+    "curve": [
+      0.004,
+      0.057,
+      0.195,
+      0.425,
+      0.66,
+      0.845,
+      0.98
+    ],
+    "saturation": 1.02,
+    "rgb_gains": [
+      1.004,
+      1,
+      0.996
+    ],
+    "shadow_tint": [
+      0.002,
+      0,
+      -0.002
+    ],
+    "highlight_tint": [
+      0.003,
+      0.001,
+      -0.002
+    ]
+  },
+  "brightness_guidance": {
+    "subject_ire": [
+      40,
+      70
+    ],
+    "background_delta_ire": [
+      -30,
+      20
+    ],
+    "note": "Practical lamps can be intentionally bright. Lighting and skin tone change the suitable subject range; compare shots manually."
+  },
+  "default_style": "warm_documentary",
+  "compare_styles": [
+    "warm_documentary",
+    "natural",
+    "soft_film"
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "name": "outdoor_daylight",
+  "label": "Outdoor Daylight",
+  "description": "Retain bright detail and natural color in direct sun.",
+  "grade": {
+    "curve": [
+      0,
+      0.05,
+      0.185,
+      0.405,
+      0.645,
+      0.83,
+      0.975
+    ],
+    "saturation": 0.99,
+    "rgb_gains": [
+      1,
+      1,
+      1
+    ],
+    "shadow_tint": [
+      0,
+      0,
+      0
+    ],
+    "highlight_tint": [
+      0,
+      0,
+      0
+    ]
+  },
+  "brightness_guidance": {
+    "subject_ire": [
+      45,
+      75
+    ],
+    "background_delta_ire": [
+      -30,
+      30
+    ],
+    "note": "Sun direction and skin tone affect subject brightness. Protect important white detail and allow specular reflections to peak."
+  },
+  "default_style": "clean_editorial",
+  "compare_styles": [
+    "clean_editorial",
+    "natural",
+    "warm_documentary"
+  ]
+}

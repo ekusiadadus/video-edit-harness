@@ -1,0 +1,60 @@
+{
+  "name": "outdoor_footage",
+  "source": "/absolute/path/to/outdoor-footage.mov",
+  "input_color": "apple_log",
+  "white_balance_gains": [
+    1,
+    1,
+    1
+  ],
+  "preview": {
+    "start": 2,
+    "duration": 3
+  },
+  "pacing": {
+    "silence_db": -38,
+    "minimum_silence": 0.8,
+    "keep_before": 0.16,
+    "keep_after": 0.18,
+    "minimum_cut": 0.2
+  },
+  "audio": {
+    "normalize": true,
+    "target_lufs": -16,
+    "true_peak_db": -1.5,
+    "loudness_range": 7
+  },
+  "editorial": {
+    "goal": "音声だけでも内容が伝わる10〜15分の解説・雑談",
+    "protect": [
+      "語尾",
+      "呼吸",
+      "強調の間",
+      "話題の切り替え"
+    ],
+    "review": [
+      "指示語だけで説明していないか",
+      "画面の文字を口頭でも伝えているか",
+      "切り口で音が跳ねないか"
+    ]
+  },
+  "use_case": "outdoor_overcast",
+  "style": "natural",
+  "style_intensity": 1,
+  "adjustments": {
+    "exposure_stops": 0,
+    "contrast": 1,
+    "midtones": 0,
+    "saturation": 1,
+    "black_lift": 0,
+    "highlight_rolloff": 0
+  },
+  "review_regions": {},
+  "region_corrections": [],
+  "transcription": {
+    "provider": "auto",
+    "language": "ja",
+    "request_timeout_seconds": 120,
+    "max_retries": 1
+  }
+}

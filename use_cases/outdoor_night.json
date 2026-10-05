@@ -1,0 +1,49 @@
+{
+  "name": "outdoor_night",
+  "label": "Outdoor Night",
+  "description": "Maintain dark atmosphere and black detail without strong shadow lifting.",
+  "grade": {
+    "curve": [
+      0,
+      0.051,
+      0.184,
+      0.407,
+      0.65,
+      0.845,
+      0.98
+    ],
+    "saturation": 0.985,
+    "rgb_gains": [
+      1,
+      1,
+      1
+    ],
+    "shadow_tint": [
+      0,
+      0,
+      0
+    ],
+    "highlight_tint": [
+      0,
+      0,
+      0
+    ]
+  },
+  "brightness_guidance": {
+    "subject_ire": [
+      20,
+      55
+    ],
+    "background_delta_ire": [
+      -25,
+      25
+    ],
+    "note": "Low light and noise limit useful shadow recovery. Keep intended darkness; inspect skin and practical lights for each shot instead of chasing a fixed IRE."
+  },
+  "default_style": "natural",
+  "compare_styles": [
+    "natural",
+    "soft_film",
+    "cinematic_teal"
+  ]
+}

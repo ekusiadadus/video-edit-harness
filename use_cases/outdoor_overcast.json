@@ -1,0 +1,49 @@
+{
+  "name": "outdoor_overcast",
+  "label": "Outdoor Overcast",
+  "description": "Add modest separation to flat daylight while keeping soft shadow detail.",
+  "grade": {
+    "curve": [
+      0,
+      0.045,
+      0.175,
+      0.405,
+      0.66,
+      0.85,
+      0.985
+    ],
+    "saturation": 1.025,
+    "rgb_gains": [
+      1.002,
+      1,
+      0.998
+    ],
+    "shadow_tint": [
+      0,
+      0,
+      0
+    ],
+    "highlight_tint": [
+      0,
+      0,
+      0
+    ]
+  },
+  "brightness_guidance": {
+    "subject_ire": [
+      45,
+      70
+    ],
+    "background_delta_ire": [
+      -25,
+      20
+    ],
+    "note": "Cloud cover shifts during a take. Skin and wardrobe need shot-specific assessment; avoid forcing a fixed brightness."
+  },
+  "default_style": "natural",
+  "compare_styles": [
+    "natural",
+    "clean_editorial",
+    "warm_documentary"
+  ]
+}

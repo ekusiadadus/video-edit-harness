@@ -1,0 +1,7 @@
+{
+  "audience": "初めて話を聞く視聴者",
+  "target_duration_seconds": 600,
+  "goals": [{"id": "main", "text": "結論と根拠を音声だけで追えるようにする"}],
+  "must_keep_word_ids": [],
+  "priority": "意味と自然な語尾を優先する"
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Video Editing"
+  short_description: "Reviewable spoken-video edits and FCP handoff"
+  default_prompt: "Use $video-editing to work on this footage with a session and explicit evidence for each review stage."

@@ -1,0 +1,31 @@
+{
+  "name": "cinematic_teal",
+  "label": "Cinematic Teal",
+  "description": "Subtle cool shadows with warm highlights; review faces and practical lights.",
+  "defaults": {
+    "intensity": 0.55
+  },
+  "grade": {
+    "exposure_stops": 0.0,
+    "contrast": 1.05,
+    "saturation": 0.98,
+    "black_lift": 0.002,
+    "highlight_rolloff": 0.11,
+    "rgb_gains": [
+      1.002,
+      1.0,
+      1.002
+    ],
+    "shadow_tint": [
+      -0.008,
+      0.003,
+      0.008
+    ],
+    "highlight_tint": [
+      0.006,
+      0.001,
+      -0.004
+    ],
+    "monochrome": false
+  }
+}

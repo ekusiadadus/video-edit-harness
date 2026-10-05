@@ -1,0 +1,31 @@
+{
+  "name": "warm_documentary",
+  "label": "Warm Documentary",
+  "description": "Gentle warmth and softer highlights for people and lived-in spaces.",
+  "defaults": {
+    "intensity": 0.65
+  },
+  "grade": {
+    "exposure_stops": 0.0,
+    "contrast": 0.98,
+    "saturation": 1.02,
+    "black_lift": 0.005,
+    "highlight_rolloff": 0.08,
+    "rgb_gains": [
+      1.01,
+      1.0,
+      0.99
+    ],
+    "shadow_tint": [
+      0.003,
+      0.001,
+      -0.003
+    ],
+    "highlight_tint": [
+      0.006,
+      0.002,
+      -0.004
+    ],
+    "monochrome": false
+  }
+}

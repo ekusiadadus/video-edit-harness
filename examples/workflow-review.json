@@ -1,0 +1,12 @@
+{
+  "render_sha256": "REPLACE_WITH_EXACT_VIDEO_SHA256",
+  "checks": [
+    {"id": "meaning", "status": "pending", "basis": "text", "note": "元発話と構成を比較する"},
+    {"id": "pacing", "status": "pending", "basis": "listening", "note": "間と話の流れを聴く"},
+    {"id": "audio_only", "status": "pending", "basis": "listening", "note": "音声だけで理解できるか聴く"},
+    {"id": "cut_boundaries", "status": "pending", "basis": "listening", "note": "語尾と呼吸を聴く"},
+    {"id": "captions", "status": "pending", "basis": "visual", "note": "字幕を確認する"},
+    {"id": "color", "status": "pending", "basis": "visual", "note": "白と肌を確認する"}
+  ],
+  "resolved_feedback_ids": []
+}
