@@ -54,6 +54,7 @@ class SkillDistribution(unittest.TestCase):
             out=root/'dist'
             out.mkdir()
             (out/'obsolete-release.zip').write_bytes(b'old release')
+            (out/'video_edit_harness-0.1.0a4-unrelated.whl').write_bytes(b'not a planned artifact')
             with patch.object(package,'ROOT',root), patch('sys.argv',['package_release','--output',str(out)]):
                 package.main()
             portable=out/'video-editing-skill-v0.1.0-alpha.4.zip'

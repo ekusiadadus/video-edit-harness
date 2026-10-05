@@ -39,9 +39,9 @@ def main():
                 output.write(skill/relative, Path('.agents/skills')/name/relative)
         output.write(ROOT/'LICENSE', 'LICENSE')
     # Only this release's named artifacts belong in its checksum inventory.
-    files = sorted(archives + [plugin_archive] +
-                   list(args.output.glob(f'video_edit_harness-{version}-*.whl')) +
-                   list(args.output.glob(f'video_edit_harness-{version}.tar.gz')))
+    builds = [args.output / f'video_edit_harness-{version}-py3-none-any.whl',
+              args.output / f'video_edit_harness-{version}.tar.gz']
+    files = sorted(archives + [plugin_archive] + [path for path in builds if path.is_file()])
     manifest_path = args.output / 'RELEASE-MANIFEST.json'
     manifest_path.write_text(json.dumps({
         'version': tag,
