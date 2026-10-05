@@ -33,6 +33,8 @@ def prepare(fixture, output):
     timing = json.loads(payloads['timing.json'])
     if timing.get('source_sha256') != digest:
         raise ValueError('Word timing belongs to a different source')
+    if provenance.get('voice', {}).get('language') not in ('ja', 'en') or timing.get('language') != provenance['voice']['language']:
+        raise ValueError('Fixture voice and measured transcript languages must agree (ja or en)')
     output.mkdir(parents=True, exist_ok=False)
     for name, data in payloads.items():
         (output / name).write_bytes(data)

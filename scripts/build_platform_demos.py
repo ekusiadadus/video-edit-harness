@@ -1,11 +1,11 @@
 """Rebuild public demos from a prepared, licensed synthetic fixture (no API calls)."""
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import textwrap
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -25,12 +25,49 @@ def probe(path):
     return json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(path)]))
 
 
-def card(path, title, subtitle, lines=(), size=(1280, 720)):
+def display_font(px, font=None):
+    return ImageFont.truetype(str(font), px) if font else ImageFont.load_default(size=px)
+
+
+def language_content(language):
+    if language == 'ja':
+        return {
+            'banner': '動画編集ハーネス / 合成素材デモ',
+            'intro': ('話を残して、長い間を短く。', '同じ机の片付けの話を、用途に合わせて編集。', ['YouTube：2つのコツ / TikTok：1つのコツ']),
+            'command': ('2つのコマンド。共通の編集手順。', 'Claude Codeでの入力例：', ['/youtube sample.mp4', '/tiktok sample.mp4', 'Codex：$youtube / $tiktok']),
+            'end': ('動画・字幕・編集できるタイムライン', '素材と結び付いた編集計画、確認履歴、持ち運べる成果物。', ['オリジナルの図とAI音声。個人の映像は含みません。', '技術検証済み。人による試聴・FCP確認は未実施。']),
+            'before': '編集前 / 同じ話に長い間がある状態',
+            'after': '編集後 / 話を残して、間を{gap:.2f}秒短縮',
+            'portrait': 'TikTokの結果 / 1つのコツ・縦長9:16・字幕付き',
+        }
+    if language == 'en':
+        return {
+            'banner': 'VIDEO EDIT HARNESS / SYNTHETIC DEMO',
+            'intro': ('Keep the story. Shorten the pause.', 'Real edits on a licensed desk-tip sample.', ['YouTube: both tips / TikTok: one complete tip']),
+            'command': ('Two commands. One workflow.', 'Example invocations in Claude Code:', ['/youtube sample.mp4', '/tiktok sample.mp4', 'Codex: $youtube / $tiktok']),
+            'end': ('Video + captions + editable timeline', 'Source-bound plans, review history and portable delivery.', ['Public illustration + AI voice. No personal footage.', 'Technical checks passed. Human listening / FCP pending.']),
+            'before': 'BEFORE / Same excerpt with the long pause',
+            'after': 'AFTER / Same words - {gap:.2f}s shorter pause',
+            'portrait': 'TIKTOK RESULT / One complete tip - 9:16 + captions',
+        }
+    raise ValueError('Demo language must be ja or en')
+
+
+def fixture_language(provenance, timing):
+    language = provenance.get('voice', {}).get('language')
+    if language not in ('ja', 'en') or timing.get('language') != language:
+        raise ValueError('Voice and measured transcript languages must agree (ja or en)')
+    return language
+
+
+def card(path, title, subtitle, lines=(), size=(1280, 720), font=None, banner='VIDEO EDIT HARNESS / SYNTHETIC DEMO'):
     im = Image.new('RGB', size, '#122536')
     d = ImageDraw.Draw(im)
     def text(x, y, value, px=42, color='white'):
-        d.text((x, y), value, font=ImageFont.load_default(size=px), fill=color)
-    text(64, 50, 'VIDEO EDIT HARNESS  /  SYNTHETIC DEMO', 24, '#83e6d1')
+        while d.textbbox((0, 0), value, font=display_font(px, font))[2] > size[0]-128 and px > 18:
+            px -= 2
+        d.text((x, y), value, font=display_font(px, font), fill=color)
+    text(64, 50, banner, 24, '#83e6d1')
     text(64, 180, title, 64)
     text(64, 280, subtitle, 30, '#d2dde3')
     for i, line in enumerate(lines):
@@ -38,7 +75,7 @@ def card(path, title, subtitle, lines=(), size=(1280, 720)):
     im.save(path)
 
 
-def make_segment(source, target, log, duration=None, start=0, still=False, label=None):
+def make_segment(source, target, log, duration=None, start=0, still=False, label=None, font=None):
     inputs = ['-loop', '1', '-framerate', '30', '-t', str(duration), '-i', str(source)] if still else ['-ss', str(start), '-i', str(source)]
     if still:
         inputs += ['-f', 'lavfi', '-t', str(duration), '-i', 'anullsrc=r=48000:cl=stereo']
@@ -51,7 +88,7 @@ def make_segment(source, target, log, duration=None, start=0, still=False, label
         overlay = target.with_suffix('.png')
         im = Image.new('RGBA',(1280,720),(0,0,0,0)); draw = ImageDraw.Draw(im)
         draw.rectangle((0,0,1280,68), fill='#122536')
-        draw.text((30,18),label,font=ImageFont.load_default(size=30),fill='white'); im.save(overlay)
+        draw.text((30,18),label,font=display_font(30, font),fill='white'); im.save(overlay)
         inputs += ['-loop','1','-framerate','30','-t',str(duration),'-i',str(overlay)]
         filters = ['-filter_complex',f'[0:v]{vf}[base];[base][1:v]overlay=0:0:shortest=1:format=auto,{tail}[v]']
         video_map = '[v]'
@@ -59,9 +96,15 @@ def make_segment(source, target, log, duration=None, start=0, still=False, label
 
 
 
-def build(sample, out, docs, font=None, youtube_session=None, tiktok_session=None):
+def build(sample, out, docs, font=None, youtube_session=None, tiktok_session=None, language=None):
     sample, out, docs = sample.resolve(), out.resolve(), docs.resolve()
     provenance = read(sample/'provenance.json')
+    timing = read(sample/'timing.json')
+    actual_language = fixture_language(provenance, timing)
+    language = language or actual_language
+    if language != actual_language:
+        raise ValueError('Requested demo language does not match the actual voice and word timing')
+    content = language_content(language)
     source = sample/'sample.mp4'
     if provenance.get('source_kind') != 'synthetic' or provenance['source_sha256'] != fingerprint(source)['sha256']:
         raise ValueError('Only a hash-verified public synthetic fixture may enter demo generation')
@@ -90,42 +133,51 @@ def build(sample, out, docs, font=None, youtube_session=None, tiktok_session=Non
     normalized = out/'before-normalized.mp4'
     run(['ffmpeg','-hide_banner','-nostdin','-y','-i',str(source),'-c:v','copy','-af','loudnorm=I=-18:TP=-1.5:LRA=7','-c:a','aac','-b:a','192k','-ar','48000','-ac','2',str(normalized)],out/'before-normalize.log')
     # These are the actual word times of the published fixture, not synthetic alignment.
-    timing = read(sample/'timing.json')
-    first = [w for w in timing['words'] if w['id'] <= 17]
+    words = timing['words']
+    gap, split = max((right['start']-left['end'], index) for index, (left, right) in enumerate(zip(words, words[1:])))
+    if gap < 1:
+        raise ValueError('Expected a measured sentence gap of at least one second')
+    first = words[:split+1]
     captions = out/'tiktok-captions.srt'
     def stamp(seconds):
         ms = round(seconds*1000); h, ms = divmod(ms,3600000); m, ms = divmod(ms,60000); s, ms=divmod(ms,1000)
         return f'{h:02}:{m:02}:{s:02},{ms:03}'
-    captions.write_text(f"1\n{stamp(first[0]['start'])} --> {stamp(first[-1]['end'])}\n机を片付けるコツは、\n使うものだけを戻すことです。\n",encoding='utf-8')
-    chosen_font = Path(font) if font else Path(caption_font([{'text':'日本語'}]).path)
+    script = provenance['voice']['script'][0]
+    caption_text = script.replace('、', '、\n', 1) if language=='ja' else '\n'.join(textwrap.wrap(script, width=28))
+    tt_start = read(Path(renderings['tiktok']['render']['path'])/'frame-mapping.json')['sequence'][0]['source_start']
+    captions.write_text(f"1\n{stamp(max(0, first[0]['start']-tt_start))} --> {stamp(first[-1]['end']-tt_start)}\n{caption_text}\n",encoding='utf-8')
+    font_path = font or getattr(caption_font([{'text':'日本語' if language=='ja' else 'English'}]), 'path', None)
+    chosen_font = Path(font_path) if font_path else None
     vertical = export_vertical(tt, out/'vertical', framing='fit', subtitles=captions, font=chosen_font)
-    shutil.copyfile(out/'vertical/video.mp4', out/'tiktok-demo.mp4')
-    shutil.copyfile(yt, out/'youtube-result.mp4')
+    shutil.copyfile(out/'vertical/video.mp4', out/f'tiktok-demo-{language}.mp4')
+    shutil.copyfile(yt, out/f'youtube-result-{language}.mp4')
+    shutil.copyfile(Path(renderings['youtube']['render']['path'])/'subtitles.srt', out/f'youtube-result-{language}.srt')
+    shutil.copyfile(captions, out/f'tiktok-demo-{language}.srt')
     intro = out/'intro.png'; command = out/'command.png'; end = out/'end.png'
-    card(intro, 'Keep the story. Shorten the pause.', 'Real edits on a licensed desk-tip sample.', ['YouTube: both tips  /  TikTok: one complete tip'])
-    card(command, 'Two commands. One workflow.', 'Example invocations in Claude Code:', ['/youtube sample.mp4', '/tiktok sample.mp4', 'Codex: $youtube / $tiktok'])
-    card(end, 'Video + captions + editable timeline', 'Source-bound plans, review history and portable delivery.', ['Public illustration + AI voice. No personal footage.', 'Technical checks passed. Human listening / FCP pending.'])
-    # Matched before/after excerpt starts on the same phrase and ends on the same phrase.
-    excerpt_start, excerpt_end = 3.48, 8.24
+    for image, key in [(intro, 'intro'), (command, 'command'), (end, 'end')]:
+        card(image, *content[key], font=chosen_font, banner=content['banner'])
+    # Anchor the matched excerpt to the actual frame-mapped sentence boundary.
+    excerpt_start = max(yt_mapping['sequence'][0]['source_start'], yt_mapping['sequence'][0]['source_end']-1.32)
+    excerpt_end = min(yt_mapping['sequence'][1]['source_end'], yt_mapping['sequence'][1]['source_start']+1.48)
     before_duration = excerpt_end-excerpt_start
     after_duration = before_duration-removed_gap
     segments = [
         (intro, 2, 0, True, None),
-        (normalized, before_duration, excerpt_start, False, 'BEFORE  /  Same excerpt with the long pause'),
-        (yt, after_duration, excerpt_start, False, f'AFTER  /  Same words - {removed_gap:.2f}s shorter pause'),
+        (normalized, before_duration, excerpt_start, False, content['before']),
+        (yt, after_duration, excerpt_start-yt_mapping['sequence'][0]['source_start'], False, content['after'].format(gap=removed_gap)),
         (command, 3, 0, True, None),
-        (out/'tiktok-demo.mp4', float(vertical['duration']), 0, False, 'TIKTOK RESULT  /  One complete tip - 9x16 + captions'),
+        (out/f'tiktok-demo-{language}.mp4', float(vertical['duration']), 0, False, content['portrait']),
         (end, 2.5, 0, True, None),
     ]
     clips = []
     for i,(media,dur,start,still,label) in enumerate(segments):
-        target=out/f'part-{i}.mp4'; make_segment(media,target,out/f'part-{i}.log',dur,start,still,label); clips.append(target)
+        target=out/f'part-{i}.mp4'; make_segment(media,target,out/f'part-{i}.log',dur,start,still,label,chosen_font); clips.append(target)
     concat = out/'concat.txt'
     concat.write_text(''.join(f"file '{p.name}'\n" for p in clips))
-    overview = out/'youtube-demo.mp4'
+    overview = out/f'youtube-demo-{language}.mp4'
     run(['ffmpeg','-hide_banner','-nostdin','-y','-f','concat','-safe','0','-i',str(concat),'-c','copy','-movflags','+faststart',str(overview)],out/'concat.log')
     outputs={}
-    for name,path,dims in [('youtube',overview,(1280,720)),('tiktok',out/'tiktok-demo.mp4',(1080,1920)),('youtube-result',out/'youtube-result.mp4',(1280,720))]:
+    for name,path,dims in [('youtube',overview,(1280,720)),('tiktok',out/f'tiktok-demo-{language}.mp4',(1080,1920)),('youtube-result',out/f'youtube-result-{language}.mp4',(1280,720))]:
         info=probe(path); v=next(s for s in info['streams'] if s['codec_type']=='video')
         if (v['width'],v['height'])!=dims or v['r_frame_rate']!='30/1' or v.get('sample_aspect_ratio')!='1:1' or any(v.get(k)!='bt709' for k in ['color_space','color_transfer','color_primaries']) or not any(s['codec_type']=='audio' and s['codec_name']=='aac' for s in info['streams']):
             raise ValueError(f'{name}: format check failed')
@@ -137,7 +189,7 @@ def build(sample, out, docs, font=None, youtube_session=None, tiktok_session=Non
     palette=out/'palette.png'
     run(['ffmpeg','-hide_banner','-nostdin','-y','-i',str(overview),'-vf','fps=3,scale=480:-2:flags=lanczos,palettegen=max_colors=48',str(palette)],out/'palette.log')
     run(['ffmpeg','-hide_banner','-nostdin','-y','-i',str(overview),'-i',str(palette),'-filter_complex','[0:v]fps=3,scale=480:-2:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=4',str(docs/'youtube-preview.gif')],out/'gif.log')
-    result={'source_sha256':provenance['source_sha256'],'source_kind':'synthetic','font_sha256':fingerprint(chosen_font)['sha256'],'pause_removed_seconds':removed_gap,'retained_words':{'youtube':41,'tiktok':17},'comparison_source_interval':[excerpt_start,excerpt_end],'outputs':outputs,'human_listening':'not_performed','fcp_gui':'not_performed','platform_playback':'not_performed','screen_recording':False}
+    result={'language':language,'source_sha256':provenance['source_sha256'],'source_kind':'synthetic','font_sha256':fingerprint(chosen_font)['sha256'] if chosen_font else None,'pause_removed_seconds':removed_gap,'retained_words':{mode: result['retained_words'] for mode, result in renderings.items()},'comparison_source_interval':[excerpt_start,excerpt_end],'outputs':outputs,'human_listening':'not_performed','fcp_gui':'not_performed','platform_playback':'not_performed','screen_recording':False}
     (out/'manifest.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
     print(json.dumps(result,ensure_ascii=False,indent=2))
 
@@ -148,7 +200,8 @@ if __name__=='__main__':
     parser.add_argument('--out',type=Path,required=True)
     parser.add_argument('--docs-output',type=Path,default=ROOT/'docs/demo')
     parser.add_argument('--font',type=Path)
+    parser.add_argument('--language',choices=['ja','en'],help='Must match the fixture voice and measured transcript')
     parser.add_argument('--youtube-session',type=Path)
     parser.add_argument('--tiktok-session',type=Path)
     a=parser.parse_args()
-    build(a.sample,a.out,a.docs_output,a.font,a.youtube_session,a.tiktok_session)
+    build(a.sample,a.out,a.docs_output,a.font,a.youtube_session,a.tiktok_session,a.language)

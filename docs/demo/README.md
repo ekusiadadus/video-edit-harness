@@ -1,46 +1,49 @@
-# Public demo / 公開デモ
+# Public demos / 公開デモ
 
-[Watch the sound-enabled overview](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-demo.mp4) · [YouTube result](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-result.mp4) · [TikTok result](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/tiktok-demo.mp4)
+The two versions use separate speech, captions, illustration text and presentation cards. English is not a relabelled Japanese recording. Each README shows only its matching preview.
 
-The overview shows a brief promise, a matched before/after excerpt, two example requests, the actual portrait result and the output types. English labels serve both READMEs; the underlying Japanese speech says:
+| Language | Overview with sound | YouTube edit | TikTok edit |
+| --- | --- | --- | --- |
+| English | [Overview](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-demo-en.mp4) | [Landscape result](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-result-en.mp4) | [Portrait result](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/tiktok-demo-en.mp4) |
+| 日本語 | [音声付き概要](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-demo-ja.mp4) | [横長の編集結果](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-result-ja.mp4) | [縦長の編集結果](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/tiktok-demo-ja.mp4) |
+
+These alpha.4 assets remain a draft until the [release gates](../RELEASE_VALIDATION.md) pass. Download URLs become public when that release is published.
+
+Both overviews show the same sequence: promise → matched before/after excerpt → example commands → portrait result → output types. YouTube retains both complete tips and shortens the long pause. TikTok keeps one complete tip, with captions below the preserved landscape illustration. Before/after audio uses the same -18 LUFS normalization target. Sentence anchors and comparison ranges come from each language's own measured timing and frame mapping; token counts and durations are not copied across languages.
+
+English script:
+
+> The trick to a tidy desk is to put back only what you use. Keep the things you use most within reach, so the next task is easier to start.
+
+日本語の音声：
 
 > 机を片付けるコツは、使うものだけを戻すことです。よく使うものを手前に置くと、次の作業を始めやすくなります。
 
-“Put back only what you use. Keeping frequent-use items within reach makes the next task easier to start.” The input has a two-second inserted pause between the two complete sentences. YouTube retains all 41 API-timed tokens and shortens the pause; TikTok retains the complete first tip (17 tokens). Their final source ranges come from the real word timing and frame mapping. Both comparison sides use a -18 LUFS normalization target; this is a project choice. Cuts shorten the gap by approximately 1.97 seconds; the full edit also removes the unused ending tail.
-
 ## Source and evidence
 
-- Original desk illustration drawn specifically for this fixture, no people or personal footage.
-- Japanese voice generated through OpenAI `gpt-4o-mini-tts`, built-in `marin`, with smooth, calm narration instructions.
-- Word timing measured through OpenAI API transcription on this explicitly authorized synthetic sample. Cloud timing may use `whisper-1`; no local ASR runs.
-- Input video SHA-256: `ec53da5b25575d541396be276c6307c5c2b9ef03dc1ce1b8f880d1390ae12d6b`.
-- Public ZIP contains exactly `sample.mp4`, `timing.json`, `provenance.json`, `LICENSE`. It includes no API responses with private paths or credentials.
-- Fixture and public graphics are distributed under the repository's MIT license. AI voice is disclosed; no impersonated speaker or custom voice.
+- Original desk illustrations; no people, children's videos or private Downloads footage.
+- Separate English/Japanese AI speech generated with OpenAI `gpt-4o-mini-tts`, built-in `marin`, smooth conversational instructions. No real speaker recording or impersonation.
+- English timing was re-measured per original sentence WAV to recover zero-duration words omitted by whole-source timing, then mapped with exact PCM concatenation offsets. These are API-measured times, not guessed alignment.
+- Word timing measured through the OpenAI API on explicitly authorized generated media. Cloud `whisper-1` is permitted; no local ASR runs.
+- Each `demo-fixture-{en,ja}-v0.1.0-alpha.4.zip` contains exactly `sample.mp4`, `timing.json`, `provenance.json`, `LICENSE`. Source SHA and language are verified before use.
+- `DEMO-MANIFEST.json` records separate source identities, languages, retained tokens, comparison ranges, full-decode checks and final output hashes. `DEMO-SHA256SUMS` covers the exact public inventory, including separate SRT captions.
+- MIT code/illustrations and disclosed synthetic AI voice. API raw responses, credentials and private paths are excluded.
 
-The overview is composed from actual input/edit files and presentation cards. Its command card is labeled as example invocations; it is **not** a Codex/Claude screen recording or FCP GUI proof. Technical checks cover full decode, audio, dimensions, 30 fps, square pixels and BT.709 tags. Human listening, aesthetic acceptance, FCP GUI and destination-platform playback remain separate checks. The fixture is a short offline onboarding example, not a 10–15-minute real-talk benchmark.
+The command cards are **examples**, not Codex/Claude screen recordings or FCP GUI proof. Technical checks cover full decode, audio, dimensions, 30 fps, square pixels and BT.709 tags. Human listening, aesthetic acceptance, FCP GUI and platform playback remain separate checks. These short fixtures are offline onboarding examples, not real 10–15-minute talk benchmarks.
 
-## Reproduce from a clean clone, without API keys
+## Reproduce without API keys
 
-Prepare the pinned checkout using the [installation guide](../SKILL_INSTALL.md). Download `demo-fixture-v0.1.0-alpha.4.zip` and `DEMO-SHA256SUMS` from the release. Verify the checksum before extracting; it must match the published asset. Run from the checkout:
+Follow the [installation guide](../SKILL_INSTALL.md), download the matching fixture and verify it against `DEMO-SHA256SUMS`. English example:
 
 ```sh
-uv run python scripts/prepare_demo.py --fixture /path/to/demo-fixture-v0.1.0-alpha.4.zip \
-  --output output/demo-sample
-uv run python scripts/render_demo_sample.py --sample output/demo-sample \
-  --session output/demo-youtube --mode youtube
-uv run python scripts/render_demo_sample.py --sample output/demo-sample \
-  --session output/demo-tiktok --mode tiktok
-uv run python scripts/build_platform_demos.py --sample output/demo-sample \
-  --youtube-session output/demo-youtube --tiktok-session output/demo-tiktok \
-  --out output/demo-presentation --docs-output output/demo-images
+uv run python scripts/prepare_demo.py --fixture /path/to/demo-fixture-en-v0.1.0-alpha.4.zip \
+  --output output/demo-sample-en
+uv run python scripts/build_platform_demos.py --sample output/demo-sample-en \
+  --language en --out output/demo-presentation-en --docs-output output/demo-images-en
 ```
 
-Alternatively omit the two session arguments: the presentation builder creates both sessions itself. No ignored author-side source path is required. Existing output folders are never removed or reused. `--font /path/to/CJK-font.ttc` selects a local font; otherwise the builder detects Hiragino on macOS or Noto Sans CJK on Linux. Install a CJK font if neither exists. Encoded byte hashes depend on FFmpeg and fonts; reproduction checks source identity and behavior, not bit-identical output across machines.
+日本語版は `demo-fixture-ja-v0.1.0-alpha.4.zip` と `--language ja` を使い、出力先も別の新しいフォルダにしてください。音声と実測文字起こしの言語が異なる場合は、生成を開始せずエラーになります。準備後のプロジェクトはクラウド送信を禁止し、再生成にAPIキーは不要です。
 
-The prepare step verifies a strict ZIP inventory and both provenance/timing source hashes, then reseals the measured timing for your path. Its project explicitly denies cloud upload. Rendering records `automation` selection and `not_human_reviewed`; generation never invents a passing human review. The portrait result uses the production default fit/padding: it preserves every part of the source illustration and puts captions below it. Center crop remains an explicit, separately reviewed choice.
+To reuse existing sessions, add `--youtube-session PATH --tiktok-session PATH` after rendering with `scripts/render_demo_sample.py`. Existing output directories are never replaced. Use `--font /path/to/font.ttc` to select a local font; Japanese needs Hiragino or Noto Sans CJK. Encoded hashes vary with FFmpeg/fonts; source identity and behavior are the portable checks. Automated fixture selection is recorded as `automation` / `not_human_reviewed`.
 
-For actual agent invocation, follow the README sample prompt instead of the deterministic renderer. Start with a preview and inspect the outputs before requesting a full render or delivery.
-
-**日本語：** 公開サンプルと実測単語時刻だけで再現できます。APIキーは不要で、送信禁止を保存します。READMEでは小さなGIFを一つだけ表示し、音声付きMP4・YouTube全編・TikTok結果にリンクします。子供の映像やDownloadsの個人素材は含みません。人による試聴、FCP取り込み、投稿先の確認を済ませたという表示はしません。
-
-Older alpha.2 synthetic walkthrough assets (`preview.gif`, `poster.png`) remain for historical references; they are not the current README hero.
+Older unlocalised graphics remain historical references; `en/` and `ja/` contain the current README previews.

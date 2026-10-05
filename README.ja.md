@@ -4,11 +4,11 @@
 
 **Codex・Claude Codeでローカルの話す動画を編集するハーネスとスキルです。** 不要な間の短縮、場面に合う色、聞きやすい音声、字幕、Final Cut Proへの受け渡しを扱います。内容と仕上がりを確認しながら、素材のハッシュ、修正履歴、納品時の証拠を一緒に管理できます。
 
-[![編集前後のデモ](docs/demo/youtube-preview.gif)](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-demo.mp4)
+[![日本語の編集前後デモ](docs/demo/ja/youtube-preview.gif)](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-demo-ja.mp4)
 
-**[音声付きで見る：編集前 → 編集後 → TikTok](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-demo.mp4)** · [YouTube版の全編](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-result.mp4) · [TikTok版の縦動画](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/tiktok-demo.mp4)
+**[日本語音声付きで見る：編集前 → 編集後 → TikTok](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-demo-ja.mp4)** · [日本語YouTube版の全編](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-result-ja.mp4) · [日本語TikTok版の縦動画](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/tiktok-demo-ja.mp4) · [English demo](README.md)
 
-デモはオリジナルのイラストとAI生成の日本語音声です。YouTube版は二つの助言を残し、TikTok版は一つを最後まで伝えます。同じ発話を使って約2秒の間の短縮を比較できます。実際のローカル編集結果から構成した紹介動画で、画面収録ではありません。[素材の出典とオフライン再現手順](docs/demo/README.md)。
+この日本語デモにはオリジナルのイラスト、合成した日本語音声、日本語の字幕とラベルを使用しています。[英語デモ](README.md)には別の英語音声・字幕・ラベルを使用しています。どちらも合成素材の例で、YouTube版は二つの助言を残し、TikTok版は一つを最後まで伝えます。実際のローカル編集結果を使った比較であり、画面収録ではありません。自動検証やデモだけでは、人による試聴の承認、FCP GUIでの読み込み、実写素材の品質は証明されません。[素材の出典とオフライン再現手順](docs/demo/README.md)。
 
 ## 編集を依頼する
 
@@ -41,14 +41,14 @@ claude plugin marketplace add ekusiadadus/video-edit-harness
 claude plugin install video-editing@video-edit-harness
 ```
 
-正確に `/youtube`・`/tiktok` と入力したい場合は単体スキルを使います。[導入方法・ZIPの検証・バージョン診断](docs/SKILL_INSTALL.ja.md)。GitHubで配布するコミュニティ版で、公式キュレーションへの掲載ではありません。
+正確に `/youtube`・`/tiktok` と入力したい場合は単体スキルを使います。[導入方法・ZIPの検証・バージョン診断](docs/SKILL_INSTALL.ja.md)。公開予定のGitHubリリースはコミュニティ配布版で、公式キュレーションへの掲載ではありません。
 
 ## APIキーなしで試す
 
-リリースの[公開用合成サンプル](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/demo-fixture-v0.1.0-alpha.4.zip)を取得し、`DEMO-SHA256SUMS` で確認します。実測の単語時刻とライセンスを含みます。
+v0.1.0-alpha.4の公開後に[日本語の合成サンプル](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/demo-fixture-ja-v0.1.0-alpha.4.zip)を取得し、`DEMO-SHA256SUMS` で確認します。実測の単語時刻とライセンスを含みます。
 
 ```sh
-uv run python scripts/prepare_demo.py --fixture /path/to/demo-fixture-v0.1.0-alpha.4.zip \
+uv run python scripts/prepare_demo.py --fixture /path/to/demo-fixture-ja-v0.1.0-alpha.4.zip \
   --output output/my-sample
 ```
 
