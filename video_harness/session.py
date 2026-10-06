@@ -953,7 +953,7 @@ class Session:
                         read(basis['mapping']['path']),request,actor,note)
         else:
             proposal=prepare_retime(basis['source']['path'],request,actor,note)
-            setting={'version':1,'proposal':proposal,'input_mapping_sha256':digest(read(basis['mapping']['path']))}
+            setting={'version':2,'proposal':proposal,'input_mapping_sha256':digest(read(basis['mapping']['path']))}
         invalidated=[key for key in ('cue_plan','video_effects','composition_guides') if cfg.get(key)]
         changes={'retime':setting,'cue_plan':None,'video_effects':None,'composition_guides':[]}
         migration = None

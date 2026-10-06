@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 
 from .common import ROOT, fingerprint, probe, read, run, write
 from .edl import derive_edit, validate_plan, write_srt
-from .fcp import export_timeline
+from .fcp import export_timeline, export_full_timeline
 from .media import loudness_filter, stream_bounds, verify
 from .color import build_lut
 from .profiles import resolve
@@ -272,8 +272,9 @@ def render_edit(cfg, plan, out, preview=True):
             (out/'subtitles.srt').write_text(remapped_subtitles(setting), encoding='utf-8')
             total = float(Fraction(setting['proposal']['mapping']['output_frame_count'], 1) /
                           Fraction(setting['proposal']['mapping']['fps']))
-            export_timeline(retimed, probe(retimed), [(0, total)], out/'timeline.fcpxml',
-                            cfg.get('name', 'Retimed Speech Edit'))
+            export_full_timeline(retimed, probe(retimed), setting['proposal']['mapping']['output_frame_count'],
+                                 setting['proposal']['mapping']['fps'], out/'timeline.fcpxml',
+                                 cfg.get('name', 'Retimed Speech Edit'))
         write(out/'speech-assembly.json', assembly_evidence)
         from .caption_timing import write_caption_evidence
         write_caption_evidence(out, plan, read(out/'frame-mapping.json'),

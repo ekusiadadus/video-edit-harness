@@ -41,7 +41,8 @@ def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clo
     if not isinstance(original_mapping, dict) or original_mapping.get("retime") is not None:
         raise ValueError("Settings migration cannot compose a previously retimed mapping")
     old_sha = digest(original_mapping)
-    new_mapping = remap_visual_mapping(original_mapping, compiled_retime)
+    new_mapping = remap_visual_mapping(original_mapping, compiled_retime,
+        include_scene_boundaries=cfg.get('retime', {}).get('version') == 2)
     new_sha = digest(new_mapping)
     fps = Fraction(original_mapping["fps"])
     old_count = original_mapping["frame_count"]

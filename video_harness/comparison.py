@@ -307,7 +307,8 @@ def _timing_mapping(render, mapping, cfg):
         raise ValueError('Retime mapping differs from requested operations')
     if original.get('edit_basis') == 'visual':
         from .retime_mapping import remap_visual_mapping
-        expected = remap_visual_mapping(original, compiled)
+        expected = remap_visual_mapping(original, compiled,
+            include_scene_boundaries=setting.get('version') == 2)
     else:
         from .speech_retime import remap_speech_mapping
         expected = remap_speech_mapping(original, compiled)

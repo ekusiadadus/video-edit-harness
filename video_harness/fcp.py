@@ -96,6 +96,32 @@ def inspect_xml(path: Path) -> dict:
             "media_links": media_links, "warnings": sorted(set(warnings))}
 
 
+def export_full_timeline(source, probe, frame_count, fps, output, name):
+    """Export a verified generated picture's full frame range, including its tail.
+
+    The generic exporter accepts the reported media end and recovers exact
+    nominal-frame duration. Keep source-edit range validation unchanged.
+    """
+    if type(frame_count) is not int or frame_count <= 0:
+        raise ValueError('Full timeline needs a positive frame count')
+    video = next((row for row in probe.get('streams', []) if row.get('codec_type') == 'video'), None)
+    if video is None:
+        raise ValueError('Full timeline needs a video stream')
+    try:
+        rate = Fraction(str(fps))
+        observed_rate = Fraction(video['r_frame_rate'])
+        observed_count = int(video['nb_frames'])
+        reported_end = _seconds(video.get('duration') or probe.get('format', {}).get('duration'))
+    except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
+        raise ValueError('Full timeline needs observed frame count, FPS and duration') from exc
+    if rate <= 0 or observed_rate != rate or observed_count != frame_count:
+        raise ValueError('Full timeline differs from its frame mapping')
+    expected_end = Fraction(frame_count, 1) / rate
+    if abs(reported_end - expected_end) > 1 / rate:
+        raise ValueError('Full timeline duration differs from its frame mapping')
+    return export_timeline(source, probe, [(0, reported_end)], output, name)
+
+
 def export_timeline(source: Path, probe: dict, keep: list[tuple[float, float]],
                     output: Path, name: str, *, ordered: bool = False) -> dict:
     """Export frame-aligned source ranges as one contiguous FCPXML 1.10 project.

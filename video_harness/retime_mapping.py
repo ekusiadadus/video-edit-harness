@@ -54,7 +54,7 @@ def conform_source_frames(source_first: int, source_end: int, source_fps: str,
         for j in range(count)]
 
 
-def remap_visual_mapping(original_mapping: dict, compiled_retime: dict) -> dict:
+def remap_visual_mapping(original_mapping: dict, compiled_retime: dict, *, include_scene_boundaries=False) -> dict:
     """Bind each retimed output frame to its original video source frame.
 
     A visual row's source_frame_map records FFmpeg frame selection after the
@@ -118,10 +118,18 @@ def remap_visual_mapping(original_mapping: dict, compiled_retime: dict) -> dict:
     if cursor != count:
         raise ValueError("original visual sequence does not cover frame_count")
 
+    if type(include_scene_boundaries) is not bool:
+        raise ValueError('include_scene_boundaries must be boolean')
     references = []
+    scene_boundaries = []
+    previous_scene = None
     sequence = []
     for output_frame, base in enumerate(frame_map):
-        row = rows[bisect_right(ends, base)]
+        scene = bisect_right(ends, base)
+        if previous_scene is not None and scene != previous_scene:
+            scene_boundaries.append(output_frame)
+        previous_scene = scene
+        row = rows[scene]
         offset = base - row["output_first_frame"]
         source_frame = (row["source_frame_map"][offset] if "source_frame_map" in row
                         else row["source_first_frame"] + offset)
@@ -157,4 +165,6 @@ def remap_visual_mapping(original_mapping: dict, compiled_retime: dict) -> dict:
                   sequence=sequence, retime={"input_mapping_sha256": digest(original_mapping),
                                              "compiled_mapping": deepcopy(compiled_retime),
                                              "frames": references})
+    if include_scene_boundaries:
+        result['retime']['scene_boundaries'] = scene_boundaries
     return result

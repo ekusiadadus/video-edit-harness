@@ -236,7 +236,7 @@ def render_visual_edit(cfg, plan, out, preview=True):
             from .retime_mapping import remap_visual_mapping
             from .render_cache import digest
             setting=effective['retime']
-            if not isinstance(setting,dict) or set(setting)!={'version','proposal','input_mapping_sha256'} or setting['version']!=1:
+            if not isinstance(setting,dict) or set(setting)!={'version','proposal','input_mapping_sha256'} or type(setting['version']) is not int or setting['version'] not in (1,2):
                 raise ValueError('Use a session source-bound retime candidate')
             if effective['input_color']!='rec709':raise ValueError('Session retime needs a Rec.709 source stage')
             from .production import frozen_pattern
@@ -249,7 +249,8 @@ def render_visual_edit(cfg, plan, out, preview=True):
             evidence=render_retime(out/'visual-base.mp4',setting['proposal'],visual_input,
                                    pcm_output=out/'visual-retimed.wav')
             write(out/'retime-evidence.json',evidence)
-            mapping=remap_visual_mapping(mapping,evidence['mapping'])
+            mapping=remap_visual_mapping(mapping,evidence['mapping'],
+                                         include_scene_boundaries=setting['version'] == 2)
             base={**base,'duration':mapping['duration'],'frame_count':mapping['frame_count']}
             subtitle_text=captions_srt(evidence['captions'])
         if has_transitions:
@@ -267,8 +268,9 @@ def render_visual_edit(cfg, plan, out, preview=True):
         write(out / 'plan.json', normalized)
         (out / 'subtitles.srt').write_text(subtitle_text, encoding='utf-8')
         if effective.get('retime') or has_transitions:
-            from .fcp import export_timeline
-            export_timeline(visual_input,probe(visual_input),[(0,base['duration'])],out/'timeline.fcpxml',cfg.get('name','Retimed Visual Edit'))
+            from .fcp import export_full_timeline
+            export_full_timeline(visual_input, probe(visual_input), mapping['frame_count'],
+                                 mapping['fps'], out/'timeline.fcpxml', cfg.get('name','Retimed Visual Edit'))
         else:
             _write_xml(out / 'timeline.fcpxml', normalized, mapping, assets, cfg.get('name', 'Visual Edit'))
         production = resolve_production(effective, mapping)

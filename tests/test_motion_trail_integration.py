@@ -32,6 +32,36 @@ class MotionTrailIntegrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             resolve([tiny])
 
+    def test_retimed_scene_boundaries_keep_ramp_fragments_out_of_cut_guard(self):
+        from video_harness.time_mapping import compile_retime
+        from video_harness.retime_mapping import remap_visual_mapping
+        original={'version':4,'edit_basis':'visual','fps':'24','duration':'2','frame_count':48,
+            'sequence':[{'id':str(i),'asset_id':'source','source_path':'/local/source.mp4',
+                'source_sha256':'a'*64,'source_fps':'24','source_first_frame':a,
+                'source_end_frame_exclusive':b,'output_first_frame':a,'output_end_frame_exclusive':b,
+                'output_start':str(Fraction(a,24)),'output_end':str(Fraction(b,24))}
+                for i,(a,b) in enumerate(((0,24),(24,48)))]}
+        compiled=compile_retime(48,'24',[{'id':'ramp','kind':'ramp','source_first_frame':0,
+            'source_end_frame_exclusive':24,'speed_start':.5,'speed_end':1.5,'reason':'Observed scene'}],[])
+        mapped=remap_visual_mapping(original,compiled,include_scene_boundaries=True)
+        self.assertEqual(mapped['retime']['scene_boundaries'],[24])
+        self.assertGreater(len(mapped['sequence']),2)
+        event={'id':'trail','type':'motion_trail','output_start':'1/6','output_end':'5/12',
+            'strength':.6,'reason':'Same scene through speed changes','parameters':{'history_frames':4}}
+        def resolve(mapping,event):
+            return resolve_effects({'version':1,'mapping_sha256':digest(mapping),'events':[event]},mapping)
+        self.assertEqual(resolve(mapped,event)['events'][0]['id'],'trail')
+        with self.assertRaisesRegex(ValueError,'cross a mapped cut'):
+            resolve(mapped,{**event,'output_end':'5/4'})
+        legacy=remap_visual_mapping(original,compiled,include_scene_boundaries=False)
+        self.assertNotIn('scene_boundaries',legacy['retime'])
+        with self.assertRaisesRegex(ValueError,'cross a mapped cut'):
+            resolve(legacy,event)
+        for invalid in ([24,24],[True],[-1],[48]):
+            bad=copy.deepcopy(mapped);bad['retime']['scene_boundaries']=invalid
+            with self.assertRaisesRegex(ValueError,'scene boundaries'):
+                resolve(bad,event)
+
     def test_decoded_trail_uses_only_past_event_frames_and_copies_audio(self):
         for rate in (Fraction(30),Fraction(30000,1001)):
             with tempfile.TemporaryDirectory() as temp:

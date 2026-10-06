@@ -71,6 +71,28 @@ class FCPTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             export_timeline(self.directory / "missing.mov", probe(), [(0, 1)], self.output, "test")
 
+    def test_generated_full_range_recovers_rounded_down_tail_and_checks_mapping(self):
+        from video_harness.fcp import export_full_timeline
+        from fractions import Fraction
+        for count, rate in ((245, Fraction(24)), (11, Fraction(30000,1001))):
+            with self.subTest(count=count, rate=rate):
+                observed = probe()
+                end = Fraction(count,1)/rate
+                observed['streams'][0].update(r_frame_rate=str(rate), avg_frame_rate=str(rate),
+                    nb_frames=str(count), duration=f'{float(end):.6f}')
+                result = export_full_timeline(self.source, observed, count, str(rate), self.output, 'Whole')
+                self.assertEqual(Fraction(result['duration'].removesuffix('s')),end)
+                self.assertEqual(Fraction(ET.parse(self.output).find('.//asset-clip').get('duration').removesuffix('s')),end)
+                self.output.unlink()
+                with self.assertRaisesRegex(ValueError,'mapping'):
+                    export_full_timeline(self.source,observed,count+1,str(rate),self.output,'Bad count')
+                with self.assertRaisesRegex(ValueError,'mapping'):
+                    export_full_timeline(self.source,observed,count,str(rate+1),self.output,'Bad FPS')
+                self.assertFalse(self.output.exists())
+        observed['streams'][0]['duration']='1'
+        with self.assertRaisesRegex(ValueError,'duration'):
+            export_full_timeline(self.source,observed,count,str(rate),self.output,'Bad duration')
+
     def test_iphone_nominal_rate_and_full_source_tail(self):
         iphone = probe()
         iphone["streams"][0].update(avg_frame_rate="253800/8461", r_frame_rate="30/1",

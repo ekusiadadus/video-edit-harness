@@ -208,7 +208,7 @@ def verify_production(production, operation='embedded_use'):
 def prepare_fcp_handoff(cfg, production, out):
     """Prepare a legal explicit handoff, without claiming GUI fidelity."""
     from .common import fingerprint, read, run, write
-    from .fcp import export_timeline
+    from .fcp import export_full_timeline
     from .production_fcp import export_production_xml
     out = Path(out)
     mode = cfg.get('fcp_handoff', 'mix')
@@ -257,8 +257,21 @@ def prepare_fcp_handoff(cfg, production, out):
         if any(s['codec_type'] == 'audio' for s in probe(picture)['streams']):
             raise ValueError('Finished picture unexpectedly contains audio')
         base = out / 'finished-picture.fcpxml'
-        export_timeline(picture, probe(picture), [(0, duration)], base,
-                        cfg.get('name', 'Production Mix'))
+        frame_mapping = read(out / 'frame-mapping.json')
+        if 'frame_count' in frame_mapping and 'fps' in frame_mapping:
+            picture_count, picture_rate = frame_mapping['frame_count'], frame_mapping['fps']
+        else:
+            # Legacy speech mappings retain exact frame dimensions in XML
+            # evidence, rather than duplicating fps/count at the top level.
+            from fractions import Fraction
+            xml_evidence = frame_mapping['xml']
+            picture_rate = 1 / Fraction(xml_evidence['frame_duration'].removesuffix('s'))
+            exact_count = Fraction(xml_evidence['duration'].removesuffix('s')) * picture_rate
+            if exact_count.denominator != 1:
+                raise ValueError('Speech XML duration does not contain complete frames')
+            picture_count = exact_count.numerator
+        export_full_timeline(picture, probe(picture), picture_count,
+                             picture_rate, base, cfg.get('name', 'Production Mix'))
     gain_inputs = None
     if measured_audio is not None:
         if mode != 'editable':

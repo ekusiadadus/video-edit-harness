@@ -4,6 +4,8 @@ Alpha.7 supports an opt-in production workflow for registered music, sound effec
 
 The development checkout adds `session motion-cuts` for reviewed cut-position proposals based on observed image motion. Supply source-frame choices, ROIs and observed nonspoken intervals; uncertain motion leaves the plan unchanged. See [usage and limits](docs/MOTION_CUTS.ja.md). The development `session transitions` command creates explicit, source-bound dissolve/push candidates with composite feedback, natural comparison, exact-render visual review and baked MP4/FCP handoff. See [usage and limits](docs/TRANSITIONS.ja.md). Real-media acceptance and FCP GUI proof remain outstanding.
 
+The development checkout also exercises beat cuts, picture-speed ramps, zooms, trails and titles together on real dance footage. New visual retime candidates retain actual shot boundaries, allowing fresh trails across speed changes within one shot while rejecting trails across cuts. See [retime limits](docs/RETIME.ja.md) and [real-media evidence](docs/EDITING_PATTERNS_IMPLEMENTATION_STATUS.ja.md). TikTok browser login, API connection and native music/effect application are separate states; local effects are not presented as TikTok-native execution.
+
 English | [日本語](README.ja.md)
 
 Turn local spoken footage into coherent edits with **Codex or Claude Code**: shorter unnecessary pauses, scene-appropriate color, clear audio, matching captions and an editable Final Cut Pro timeline. You choose the story and review the result; the harness keeps source hashes, revisions and delivery evidence together.

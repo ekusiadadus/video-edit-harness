@@ -27,6 +27,14 @@ uv run video-harness tiktok-api refresh --network
 
 投稿を希望する場合でも、Content Posting APIの別製品・scope・審査・利用者操作・対象動画の権利確認が必要。このクライアントには投稿処理を含めない。TikTok側のCMLや「最新の流行」をDisplay APIの動画一覧から推定して、作品への利用権や編集効果として自動採用しない。
 
+## ネイティブ音楽・エフェクトの現在の境界（2026-10-07確認）
+
+「TikTokと接続したらTikTokの曲やエフェクトをMP4へ付けられる」とは扱わない。[Direct Postの現行スキーマ](https://developers.tiktok.com/docs/en/content-posting-api-reference-direct-post)には投稿設定と完成素材の転送はあるが、動画への曲やエフェクトの指定はない。Display API接続を完了しても、この編集機能は増えない。
+
+[Symphony Creative Studioの編集機能](https://ads.tiktok.com/resources/help/article/how-to-edit-videos-with-symphony-creative-studio)には音楽と区間エフェクトがある。Studioで使える機能を、そのまま公開APIの機能として推測しない。[Symphony APIの公式入口](https://ads.tiktok.com/creative/creativeCenter/tools/api?aioChannel=creative_center)と[Business APIのVideo Soundtrack仕様](https://www.postman.com/tiktok/tiktok-api-for-business/request/hvcbkdi/video-soundtrack)は別の接続経路として、アカウントの利用権限・仕様・素材と音楽の用途を確認する。現在のクライアントにはこれらの処理を実装・接続していない。
+
+現在の実環境は`status`で未構成・未接続、リモート検証未実施。開発者サイトのログイン／Sandboxテストユーザー登録は済んでいても、ローカルの認証設定と本人API応答は別の証拠。Businessログイン待ちのStudioからは素材転送・曲／効果適用を実施していない。ローカルで描画した音ハメ・残像・ズームを「TikTokネイティブ」と表示しない。ユーザーが完成MP4を自分で投稿する現在の方針も維持する。
+
 ## 公式資料
 
 - [Desktop Login Kit：redirect、state、PKCE](https://developers.tiktok.com/docs/en/login-kit-desktop)

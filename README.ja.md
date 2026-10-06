@@ -8,6 +8,8 @@ alpha.7では、自然な編集を既定にBGM・効果音・補助素材・音�
 
 エフェクトの局所修正は `session effects`、対応パラメーターの確認は `effects-catalog` を使用します。滑らかな手動アンカーズーム・彩度演出と、同期再生・音声切替付き比較ページを追加中です。[効果の指定方法](docs/VIDEO_EFFECTS.ja.md)と[高度な編集の実装計画](docs/ADVANCED_EDITING_MAYA_PLAN_2026.ja.md)を参照してください。
 
+開発版では、ダンスの音ハメカット・速度ランプ・ズーム・残像・文字を組み合わせた実素材の比較を検証しています。新しいvisual変速候補は実際のショット境界を保持し、同一ショットの速度変更をまたぐ残像を許可します。実際のカットをまたぐ残像は拒否します。[時間変更の制約](docs/RETIME.ja.md)と[実素材の検証状況](docs/EDITING_PATTERNS_IMPLEMENTATION_STATUS.ja.md)を参照してください。TikTokのブラウザーログイン、API接続、ネイティブ音楽／エフェクトの適用は別の状態です。現在のローカル複合演出をTikTokネイティブ適用とは表示しません。
+
 固定領域と追跡した人物・字幕領域の保護には `composition_guides`、ローカル追跡には `tracking track`／`tracking validate` を使用します。`session track-effect` は観察した区間の追跡ズームと、文字の重なり・ズーム見切れの検査を未採用候補にします。[追跡と配置検査](docs/TRACKING.ja.md)にOpenCV・MediaPipeの選択と制限を記載しています。`retime prepare`／`retime render` で変速・静止保持、音声伸縮、字幕時刻の移行を単独のMP4へ描画できます。[時間変更の操作と制限](docs/RETIME.ja.md)を参照してください。visualセッションの未採用候補と変速済み映像のFCP受け渡しに対応します。FCPで編集できる時間変更は未対応です。alpha.7の発話セッションでは、単語保護と観察済みの非発話区間を伴う候補を描画できます。
 
 alpha.7には、観察した位置へ短い文字を追従させる `tracked_title` を追加しています。`session track-effect --effect tracked_title --title-parameters-file label.json` で未採用候補を作れます。[使い方と制限](docs/TRACKING.ja.md)を確認してください。

@@ -208,7 +208,19 @@ def resolve_effects(setting, mapping, assets=None):
         # rows also split at holds and speed spans without introducing a cut.
         if event['type'] == 'motion_trail' and 'content_map' not in event:
             start,end = _time(event['output_start'],'start'),_time(event['output_end'],'end')
-            if any(start < _time(row['output_start'],'cut') < end for row in mapping['sequence'] if row.get('output_start') is not None):
+            boundaries = mapping.get('retime', {}).get('scene_boundaries')
+            if boundaries is not None:
+                if (not isinstance(boundaries, list)
+                        or any(type(frame) is not int or not 0 < frame < count for frame in boundaries)
+                        or boundaries != sorted(set(boundaries))):
+                    raise ValueError('Invalid retimed scene boundaries')
+                cuts = [Fraction(frame, 1) / rate for frame in boundaries]
+            else:
+                # Older retimed renders lack scene identity. Preserve their
+                # conservative guard rather than infer scene continuity.
+                cuts = [_time(row['output_start'], 'cut') for row in mapping['sequence']
+                        if row.get('output_start') is not None]
+            if any(start < cut < end for cut in cuts):
                 raise ValueError('Motion trail cannot cross a mapped cut; split the event')
     from .cues import _asset_map, _check_asset
     registry = _asset_map(assets or [])
