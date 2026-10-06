@@ -151,20 +151,8 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
             # Keep the musical period exactly len(chunk) samples. A short
             # taper around each seam removes clicks without changing cue/beat
             # timing; the resulting dip still needs an audible phrase review.
-            clip = np.tile(chunk, (math.ceil(target / len(chunk)), 1))[:target].copy()
-            taper = min(round(.01 * RATE), len(chunk) // 4)
-            seam_gain = np.ones(target, dtype=np.float32) if gain_output is not None else None
-            if taper:
-                for seam in range(len(chunk), target, len(chunk)):
-                    left = min(taper, seam)
-                    right = min(taper, target - seam)
-                    left_taper = np.linspace(1, 0, left, dtype=np.float32)
-                    right_taper = np.linspace(0, 1, right, dtype=np.float32)
-                    clip[seam - left:seam] *= left_taper[:, None]
-                    clip[seam:seam + right] *= right_taper[:, None]
-                    if seam_gain is not None:
-                        seam_gain[seam - left:seam] *= left_taper
-                        seam_gain[seam:seam + right] *= right_taper
+            from .loop_audio import loop_pcm
+            clip, seam_gain, taper = loop_pcm(chunk, target, capture_gain=gain_output is not None)
         else:
             if len(chunk) < target - 1:
                 raise ValueError(f"cue is shorter than output range: {cue['id']}")
@@ -193,11 +181,14 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
                 raise ValueError(f"invalid effective gain: {cue['id']}")
             gain_curves[cue["id"]] = curve
         output[first:last] += clip * gain[:, None]
+        seam_taper = min(480, len(chunk) // 4) if cue['loop'] else 0
         evidence_cues.append({"id": cue["id"], "asset_id": cue["asset_id"],
                               "source_rms": cue_rms, "applied_gain_db": gain_db,
                               "duck": bool(cue["duck"] and duck_envelope is not None),
                               "loop": cue["loop"], "loop_period_samples": len(chunk) if cue["loop"] else None,
-                              "loop_seam_taper_seconds": .01 if cue["loop"] else 0})
+                              "loop_seam_taper_seconds": seam_taper / RATE,
+                              "loop_seam_taper_samples": seam_taper,
+                              "loop_seam_taper_clock": ('original_cue_pcm' if retime_evidence else 'output_cue_pcm') if cue['loop'] else None})
         if retime_evidence:
             evidence_cues[-1]['content_retime'] = retime_evidence
     peak_before = float(np.max(np.abs(output)))

@@ -18,10 +18,18 @@ def _time(cue, key):
     return _seconds(cue.get(key, 0), key)
 
 
-def _content(cue, sha):
-    return digest({'asset_id': cue['asset_id'], 'source_sha256': sha,
+def _content(cue, sha, *, loop=False):
+    content = {'asset_id': cue['asset_id'], 'source_sha256': sha,
                    **{key: str(_time(cue, key)) for key in
-                      ('source_start', 'source_end', 'fade_in', 'fade_out')}})
+                      ('source_start', 'source_end', 'fade_in', 'fade_out')}}
+    if loop:
+        content['loop'] = True
+    return digest(content)
+
+
+def _loop_period(cue):
+    # Match the original mixer's normalized decoded source period exactly.
+    return round(float(_time(cue, 'source_end') - _time(cue, 'source_start')) * RATE)
 
 
 def _compiled(mapping):
@@ -70,6 +78,11 @@ def make_audio_retime(cue, assets, compiled, backend='rubberband'):
                 'mapping_sha256': digest(mapping), 'original_start_frame': first,
                 'original_end_frame_exclusive': end, 'source_sha256': sha,
                 'content_sha256': _content(cue, sha), 'backend': backend}
+    if cue.get('loop', False):
+        period = _loop_period(cue)
+        metadata.update(version=2, loop_period_samples=period,
+                        loop_seam_taper_samples=min(480, period // 4),
+                        content_sha256=_content(cue, sha, loop=True))
     selected = [j for j, base in enumerate(mapping['frame_map']) if first <= base < end]
     if not selected:
         raise ValueError('SFX retime cue interval is omitted')
@@ -84,12 +97,23 @@ def validate_audio_retime(cue, assets=None, fps=None):
     metadata = cue.get('audio_retime')
     if metadata is None and 'audio_retime' not in cue:
         return None
-    if cue.get('role') != 'sfx' or cue.get('loop', False):
-        raise ValueError('Content retime requires a nonlooped SFX cue')
-    if (not isinstance(metadata, dict) or set(metadata) != KEYS or
-            type(metadata['version']) is not int or metadata['version'] != 1 or
+    if cue.get('role') != 'sfx' or type(cue.get('loop', False)) is not bool:
+        raise ValueError('Content retime requires an SFX cue with a boolean loop policy')
+    if (not isinstance(metadata, dict) or
+            type(metadata.get('version')) is not int or metadata['version'] not in (1, 2) or
+            set(metadata) != (KEYS if metadata['version'] == 1 else KEYS | {'loop_period_samples', 'loop_seam_taper_samples'}) or
             not isinstance(metadata['backend'], str) or metadata['backend'] not in {'rubberband', 'phase_vocoder'}):
         raise ValueError('Invalid SFX audio_retime metadata')
+    loop = metadata['version'] == 2
+    if cue.get('loop', False) != loop:
+        raise ValueError('SFX retime loop policy changed')
+    if loop:
+        period = _loop_period(cue)
+        if (period <= 0 or type(metadata['loop_period_samples']) is not int or
+                type(metadata['loop_seam_taper_samples']) is not int or
+                metadata['loop_period_samples'] != period or
+                metadata['loop_seam_taper_samples'] != min(480, period // 4)):
+            raise ValueError('SFX retime loop period or seam taper changed')
     mapping = _compiled(metadata['mapping'])
     rate = Fraction(mapping['fps'])
     if fps is not None and Fraction(str(fps)) != rate:
@@ -104,13 +128,14 @@ def validate_audio_retime(cue, assets=None, fps=None):
         asset = _asset_map(assets).get(cue.get('asset_id'), {})
         if (asset.get('sha256') or asset.get('file_sha256')) != sha:
             raise ValueError('SFX retime source SHA changed')
-    if metadata['content_sha256'] != _content(cue, sha):
+    if metadata['content_sha256'] != _content(cue, sha, loop=loop):
         raise ValueError('SFX retime source trim or original fades changed')
     first, end = metadata['original_start_frame'], metadata['original_end_frame_exclusive']
     if type(first) is not int or type(end) is not int or not 0 <= first < end <= mapping['input_frame_count']:
         raise ValueError('SFX retime original bounds are invalid')
     old_duration = Fraction(end - first, 1) / rate
-    if _time(cue, 'source_start') < 0 or _time(cue, 'source_end') - _time(cue, 'source_start') < old_duration:
+    source_duration = _time(cue, 'source_end') - _time(cue, 'source_start')
+    if _time(cue, 'source_start') < 0 or source_duration <= 0 or (not loop and source_duration < old_duration):
         raise ValueError('SFX retime source too short for original cue')
     if any(_time(cue, key) < 0 for key in ('fade_in', 'fade_out')) or sum(
             _time(cue, key) for key in ('fade_in', 'fade_out')) > old_duration:
@@ -136,9 +161,15 @@ def render_retimed_sfx(chunk, cue, log_dir=None):
     first = _sample_boundary(metadata['original_start_frame'], RATE, fps)
     end = _sample_boundary(metadata['original_end_frame_exclusive'], RATE, fps)
     target = end - first
-    if len(chunk) < target - 1:
+    if metadata['version'] == 2:
+        if len(chunk) != metadata['loop_period_samples']:
+            raise ValueError('SFX decoded loop period differs from original mix clock')
+        from .loop_audio import loop_pcm
+        clip, _, _ = loop_pcm(chunk, target)
+    elif len(chunk) < target - 1:
         raise ValueError('SFX source shorter than original PCM interval')
-    clip = chunk[:target].copy()
+    else:
+        clip = chunk[:target].copy()
     if len(clip) < target:
         clip = np.pad(clip, ((0, target-len(clip)), (0, 0)))
     for key, at_start in (('fade_in', True), ('fade_out', False)):
@@ -148,7 +179,7 @@ def render_retimed_sfx(chunk, cue, log_dir=None):
             if at_start:
                 clip[:count] *= ramp[:, None]
             else:
-                clip[-count:] *= ramp[::-1, None]
+                clip[-count:] *= np.linspace(1, 0, count, dtype=np.float32)[:, None]
     timeline = np.zeros((_sample_boundary(mapping['input_frame_count'], RATE, fps), 2), dtype=np.float32)
     timeline[first:end] = clip
     result, evidence = retime_audio(timeline, RATE, mapping, backend=metadata['backend'], log_dir=log_dir)
@@ -157,4 +188,7 @@ def render_retimed_sfx(chunk, cue, log_dir=None):
         'metadata_sha256': digest(metadata), 'audio': evidence,
         'original_cue_samples': [first, end], 'output_cue_samples': [new_first, new_end],
         'fade_policy': 'original_pcm_before_content_retime',
-        'duck_policy': 'new_output_speech_after_content_retime'}
+        'duck_policy': 'new_output_speech_after_content_retime',
+        'loop_policy': 'original_period_and_seams_before_content_retime' if metadata['version'] == 2 else 'none',
+        'loop_period_samples': metadata.get('loop_period_samples'),
+        'loop_seam_taper_samples': metadata.get('loop_seam_taper_samples')}

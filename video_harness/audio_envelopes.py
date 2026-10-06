@@ -188,7 +188,7 @@ def load_audio_envelopes(path, *, expected_cues=None, expected_assets=None,
         identity_keys = {"id", "asset_id", "role", "loop", "duck", *_TIMES}
         if not isinstance(cue, dict) or set(cue) not in (identity_keys, identity_keys | {'audio_retime_sha256'}):
             raise ValueError("invalid audio gain cue identity")
-        if 'audio_retime_sha256' in cue and (cue.get('role') != 'sfx' or cue.get('loop') or
+        if 'audio_retime_sha256' in cue and (cue.get('role') != 'sfx' or
                 not isinstance(cue['audio_retime_sha256'], str) or not _HEX.fullmatch(cue['audio_retime_sha256'])):
             raise ValueError('invalid audio gain SFX retime binding')
         if (not isinstance(cue["id"], str) or not cue["id"] or cue["id"] in curves or

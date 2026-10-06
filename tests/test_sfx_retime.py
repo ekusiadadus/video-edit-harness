@@ -120,9 +120,9 @@ class SfxRetimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_audio_retime(changed_source)
 
-    def test_rejects_music_and_looped_sfx(self):
+    def test_rejects_music_and_changed_loop_policy(self):
         cue, assets, compiled, _ = self.fixture()
-        for changed in (dict(cue, role="music"), dict(cue, loop=True)):
+        for changed in (dict(cue, role="music"),):
             with self.subTest(changed=changed["role"], loop=changed["loop"]):
                 with self.assertRaises(ValueError):
                     make_audio_retime(changed, assets, compiled)
@@ -130,6 +130,65 @@ class SfxRetimeTests(unittest.TestCase):
         for changed in (dict(sealed, role="music"), dict(sealed, loop=True)):
             with self.assertRaises(ValueError):
                 validate_audio_retime(changed)
+
+    def test_loop_preserves_original_seams_and_freeze_resume_phase(self):
+        from video_harness.loop_audio import loop_pcm
+        cue, assets, compiled, samples = self.fixture(fade_in=1, fade_out=1)
+        cue.update(loop=True, source_end='1/30')
+        sealed = self.sealed(cue, assets, compiled)
+        self.assertEqual(sealed['audio_retime']['version'], 2)
+        self.assertEqual(sealed['audio_retime']['loop_period_samples'], 1600)
+        original, _, taper = loop_pcm(samples[:1600], 7*1600)
+        original[:1600] *= np.linspace(0, 1, 1600, dtype=np.float32)[:, None]
+        original[-1600:] *= np.linspace(1, 0, 1600, dtype=np.float32)[:, None]
+        output, evidence = render_retimed_sfx(samples[:1600], sealed)
+        expected = np.concatenate((original[:3*1600], np.zeros((3*1600, 2), dtype=np.float32), original[3*1600:]))
+        np.testing.assert_array_equal(output, expected)
+        self.assertEqual(evidence['loop_seam_taper_samples'], taper)
+        self.assertEqual(evidence['loop_policy'], 'original_period_and_seams_before_content_retime')
+        for key in ('loop_period_samples', 'loop_seam_taper_samples'):
+            changed = deepcopy(sealed)
+            changed['audio_retime'][key] += 1
+            with self.assertRaisesRegex(ValueError, 'period|taper'):
+                validate_audio_retime(changed)
+        with self.assertRaisesRegex(ValueError, 'loop policy'):
+            validate_audio_retime(dict(sealed, loop=False))
+
+    def test_looped_mixer_gain_evidence_retains_original_period_binding(self):
+        from video_harness.audio_mix import render_mix
+        from video_harness.audio_envelopes import load_audio_envelopes
+        cue, assets, compiled, _ = self.fixture()
+        cue.update(loop=True, source_end='1/100')
+        sealed = self.sealed(cue, assets, compiled)
+        root = Path(self.temporary.name)
+        evidence = render_mix(None, [sealed], assets, root/'loop.wav', Fraction(15, 30), gain_output=root/'loop-gain')
+        manifest, _ = load_audio_envelopes(root/'loop-gain', expected_cues=[sealed])
+        self.assertEqual(manifest['cues'][0]['source_period_samples'], 480)
+        self.assertEqual(evidence['cues'][0]['content_retime']['loop_period_samples'], 480)
+        self.assertEqual(evidence['cues'][0]['loop_seam_taper_seconds'], .0025)
+        self.assertEqual(evidence['cues'][0]['loop_seam_taper_samples'], 120)
+        self.assertEqual(evidence['cues'][0]['loop_seam_taper_clock'], 'original_cue_pcm')
+        self.assertTrue(manifest['cues'][0]['cue']['loop'])
+
+    def test_shared_loop_matches_legacy_pcm_and_gain_at_partial_final_seam(self):
+        from video_harness.loop_audio import loop_pcm
+        for period, target in ((3, 20), (15, 46), (2000, 4011)):
+            with self.subTest(period=period):
+                chunk = np.random.default_rng(7).uniform(-.2, .2, (period, 2)).astype(np.float32)
+                expected = np.tile(chunk, ((target+period-1)//period, 1))[:target].copy()
+                gain = np.ones(target, dtype=np.float32)
+                taper = min(480, period//4)
+                if taper:
+                    for seam in range(period, target, period):
+                        left, right = min(taper, seam), min(taper, target-seam)
+                        a, b = np.linspace(1, 0, left, dtype=np.float32), np.linspace(0, 1, right, dtype=np.float32)
+                        expected[seam-left:seam] *= a[:, None]
+                        expected[seam:seam+right] *= b[:, None]
+                        gain[seam-left:seam] *= a
+                        gain[seam:seam+right] *= b
+                actual, curve, _ = loop_pcm(chunk, target, capture_gain=True)
+                np.testing.assert_array_equal(actual, expected)
+                np.testing.assert_array_equal(curve, gain)
 
     def test_stereo_freeze_is_silence_then_resumes_source_at_exact_frame(self):
         cue, assets, compiled, samples = self.fixture()
@@ -231,6 +290,25 @@ class SfxRetimeTests(unittest.TestCase):
                 frequency = np.argmax(spectrum) * RATE / len(piece)
                 self.assertLessEqual(abs(frequency-expected), 4)
         self.assertEqual(evidence['metadata_sha256'], digest(sealed['audio_retime']))
+
+    @unittest.skipUnless(shutil.which('rubberband'), 'Rubber Band CLI required')
+    def test_looped_tone_ramp_stretches_original_periods_with_pitch_preserved(self):
+        cue, assets, _, _ = self.fixture(frames=60, first=0, end=60)
+        cue.update(loop=True, source_end='1/5')
+        mapping = compile_retime(60, '30', [{'id': 'ramp', 'kind': 'ramp',
+            'source_first_frame': 0, 'source_end_frame_exclusive': 60,
+            'speed_start': .5, 'speed_end': 1.5, 'reason': 'Loop content changes speed'}])
+        sealed = self.sealed(cue, assets, mapping, backend='rubberband')
+        times = np.arange(9600)/RATE
+        chunk = np.column_stack((.1*np.sin(2*np.pi*440*times), .1*np.sin(2*np.pi*660*times))).astype(np.float32)
+        result, evidence = render_retimed_sfx(chunk, sealed, Path(self.temporary.name)/'loop-ramp-logs')
+        self.assertEqual(result.shape, (96000, 2))
+        self.assertEqual(evidence['loop_period_samples'], 9600)
+        for first in (12000, 60000):
+            for channel, expected in ((0, 440), (1, 660)):
+                piece = result[first:first+12000, channel]
+                frequency = np.argmax(np.abs(np.fft.rfft(piece*np.hanning(len(piece))))) * RATE/len(piece)
+                self.assertLessEqual(abs(frequency-expected), 4)
 
     def test_editable_handoff_rejects_source_rate_sfx(self):
         from video_harness.production_fcp import export_production_xml
