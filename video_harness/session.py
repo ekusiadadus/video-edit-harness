@@ -219,6 +219,8 @@ class Session:
                     check_ref(candidate[key])
             if candidate.get('direction'):
                 check_ref(candidate['direction'])
+            if candidate.get('motion_template'):
+                check_ref(candidate['motion_template'])
             if candidate.get('comparison_selection'):
                 check_ref(candidate['comparison_selection'])
         for comparison in state.get('candidate_comparisons', []):
@@ -704,7 +706,7 @@ class Session:
             self._save(state, 'project_revised', actor, {'note': note, 'keys': sorted(changes)})
         return state['project']
 
-    def create_candidate(self, changes, actor, note, *, direction_resolution=None, expected_project=None, base_render_id=None):
+    def create_candidate(self, changes, actor, note, *, direction_resolution=None, expected_project=None, base_render_id=None, motion_template=None):
         """Snapshot a comparison direction without changing adopted inputs."""
         from .patterns import resolve_pattern, resolve_asset_policy
         from .profiles import resolve
@@ -771,6 +773,8 @@ class Session:
                     'pattern': pattern, 'actor': actor, 'note': note, 'created_at': now()}
             if direction_resolution is not None:
                 item['direction'] = self._artifact('direction-resolution', direction_resolution)
+            if motion_template is not None:
+                item['motion_template'] = self._artifact('motion-template', motion_template)
             state.setdefault('candidates', []).append(item)
             self._save(state, 'candidate_created', actor, {'candidate_id': item['id'], 'note': note})
         return item
@@ -1025,6 +1029,30 @@ class Session:
         return self.create_candidate({'video_effects': effects}, actor, note,
                                      expected_project=state['project'], base_render_id=render_id)
 
+    def propose_motion_template(self, render_id, request, actor, note):
+        """Expand a versioned local recipe into an unadopted effects candidate."""
+        from .motion_templates import compile_template
+        from .video_effects import revise_effects
+        state = self._load()
+        self._verify(state)
+        render = self._find_render(state, render_id)
+        self._verify_render(render)
+        cfg = read(render['project']['path'])
+        mapping = read(render['files']['mapping']['path'])
+        operations = compile_template(request, mapping)
+        from .production import frozen_pattern
+        pattern = frozen_pattern(cfg)
+        if pattern['id'] == 'natural' or pattern['intensity'] == 'off':
+            raise ValueError('Motion templates conflict with natural/off; select an enabled editing pattern')
+        effects = revise_effects(cfg.get('video_effects'), mapping, operations, cfg.get('assets', []))
+        evidence = {'version': 1, 'request': deepcopy(request), 'operations': operations,
+                    'mapping': deepcopy(render['files']['mapping']),
+                    'base_render_id': render_id, 'video': deepcopy(render['files']['video']),
+                    'actor': actor, 'note': note, 'requires_review': True}
+        return self.create_candidate({'video_effects': effects}, actor, note,
+                                     expected_project=state['project'], base_render_id=render_id,
+                                     motion_template=evidence)
+
     def propose_direction(self, request, actor, note, *, preference=None, trend=None):
         """Create reviewable candidates from explicit direction; never adopt them."""
         from .direction import resolve_direction
@@ -1111,6 +1139,8 @@ class Session:
                     'comparison_selection': self._artifact('comparison-selection', selection),
                     'selected_render_id': render['id'], 'selected_video_sha256': selection['render_sha256'],
                     'selection_position': mapped}
+            if render['files'].get('motion_template'):
+                item['motion_template'] = deepcopy(render['files']['motion_template'])
             state.setdefault('candidates', []).append(item)
             self._save(state, 'comparison_selection_proposed', actor,
                        {'candidate_id': item['id'], 'render_id': render['id'], 'note': note,
@@ -1202,6 +1232,13 @@ class Session:
                          'process_birth': process_birth(os.getpid())}
             if candidate_id:
                 operation['candidate_id'] = candidate_id
+            recipe = inputs.get('motion_template')
+            if not candidate_id and state.get('adopted_candidate_id'):
+                adopted = self._find_candidate(state, state['adopted_candidate_id'])
+                if all(adopted.get(key) == inputs.get(key) for key in ('project', 'plan', 'brief')):
+                    recipe = adopted.get('motion_template')
+            if recipe:
+                operation['motion_template'] = deepcopy(recipe)
             operation['process_identity_status'] = 'known' if operation['process_birth'] else 'unknown'
             state['operation'] = operation
             state['phase'] = 'rendering'
@@ -1244,6 +1281,9 @@ class Session:
             files['production'] = fingerprint(folder / 'production.json')
         if (folder / 'effects-evidence.json').is_file():
             files['effects'] = fingerprint(folder / 'effects-evidence.json')
+        if operation.get('motion_template'):
+            check_ref(operation['motion_template'])
+            files['motion_template'] = deepcopy(operation['motion_template'])
         if (folder / 'audio-cuts.json').is_file():
             files['audio_cuts'] = fingerprint(folder / 'audio-cuts.json')
         if (folder / 'transition-evidence.json').is_file():

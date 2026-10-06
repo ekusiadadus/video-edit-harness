@@ -175,4 +175,6 @@ Source-bound J/L cuts use `session audio-cuts` to propose actual source pre/post
 
 `motion_trail` applies a requested, bounded trail from actual past frames within one shot, with copied audio and unchanged timing. It is opt-in. [Controls and review limits](docs/VIDEO_EFFECTS.ja.md).
 
+The development `motion-templates` catalog and `session motion-template` command expand versioned compound recipes into ordinary unadopted effect candidates. `beat_focus` combines zoom and saturation; `reveal_callout` moves from zoom to a keyword label. Reduced-motion variants, strict frame bounds and sealed recipe/render provenance retain the existing comparison and review workflow. These are local baked recipes; beat analysis, depth and native Motion/TikTok templates are separate capabilities. [操作と制約](docs/MOTION_TEMPLATES.ja.md).
+
 Experimental `tracked_background` creates per-frame local GrabCut masks from observed tracking, with manual binary-mask corrections, to suppress the background while retaining foreground. Lost/stale masks fail; exact-render contour review is required. [Controls and limits](docs/TRACKING.ja.md). An eight-frame real-footage trial retained wall/ceiling as foreground; the agent rejected the visual result, and no human review is recorded. Review full contours and correct masks manually before use. This is not universal person matting.

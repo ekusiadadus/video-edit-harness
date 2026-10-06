@@ -17,6 +17,7 @@ def parser():
  s.add_parser('production',help='Editing patterns and local asset rights; use production --help')
  s.add_parser('tiktok-api',help='Official TikTok OAuth and read-only Display API; use tiktok-api --help')
  s.add_parser('effects-catalog',help='Versioned controls for parameterized local video effects')
+ s.add_parser('motion-templates',help='Versioned compound local-effect recipes and reduced-motion variants')
  s.add_parser('tracking',help='Local subject tracking proposals; use tracking --help')
  s.add_parser('retime',help='Source-bound speed ramps and holds; use retime --help')
  for name in ['doctor','presets']:s.add_parser(name)
@@ -104,6 +105,9 @@ def main():
   if args.cmd=='effects-catalog':
    from .effect_catalog import catalog as effects_catalog
    print(json.dumps(effects_catalog(),ensure_ascii=False,indent=2));return
+  if args.cmd=='motion-templates':
+   from .motion_templates import catalog as template_catalog
+   print(json.dumps(template_catalog(),ensure_ascii=False,indent=2));return
   if args.cmd=='tiktok-export':
    from .vertical import export_vertical
    print(json.dumps(export_vertical(args.source,args.output,args.framing,args.subtitles,args.font),ensure_ascii=False,indent=2));return
