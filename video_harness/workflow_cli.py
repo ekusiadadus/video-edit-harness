@@ -115,6 +115,8 @@ def parser():
     a=command('retime',note=True)
     a.add_argument('render_id')
     a.add_argument('--request-file',type=Path,required=True)
+    a.add_argument('--timeline-settings', choices=['migrate', 'clear'], default='migrate',
+                   help='Migrate compatible visual settings; clear explicitly removes old timeline settings')
     a=command('track-effect',note=True)
     a.add_argument('render_id')
     a.add_argument('--box',type=float,nargs=4,required=True)
@@ -262,7 +264,7 @@ def dispatch(args):
     if action == 'motion-cuts': return session.propose_motion_cut(args.render_id,_object(args.request_file),args.actor,args.note)
     if action == 'tracking-source': return session.tracking_source(args.render_id)
     if action == 'retime-source': return session.retime_source(args.render_id)
-    if action == 'retime': return session.propose_retime(args.render_id,_object(args.request_file),args.actor,args.note)
+    if action == 'retime': return session.propose_retime(args.render_id,_object(args.request_file),args.actor,args.note,timeline_settings=args.timeline_settings)
     if action == 'track-effect':
         from .tracking_cli import read_corrections
         return session.propose_tracking(args.render_id,args.box,args.first_frame,args.end_frame,args.actor,args.note,

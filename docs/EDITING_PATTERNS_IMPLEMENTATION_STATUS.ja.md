@@ -1,5 +1,12 @@
 # 編集パターン実装の進捗と検証台帳
 
+## 2026-10-07: 変速後の既存演出とパルス位相の移行（alpha.7後の開発版）
+
+- visual `session retime`の既定`--timeline-settings migrate`は、実renderの対応表へ束縛したcue・固定保護領域を元区間の逆フレーム対応で移行し、採用中のprojectを変更しない。候補に旧／新対応表SHA、区間、actor／理由、元render SHAを持つ改変検査済み証跡を保持する。明示`clear`は失効項目を返す。
+- `zoom_pulse`／`smooth_zoom`／`saturation_pulse`は元区間の相対フレームを`phase_map`に保持し、静止保持で演出値も保持、加速で元値を省略する。元のパルスを新しい尺全体へ再配分しない。元／新区間4096フレーム、FFmpeg式65536文字まで。追跡領域の衝突検査も同じ位相を使用する。
+- BGMは元素材開始から新しい出力時計で通常再生し、既存拍基準は宣言済みcue相対オフセットを保持する。曲を映像と同じ速度に伸縮する機能ではない。動画overlay／効果音／比較wipe／残像／keywordタイトルは完全な一対一平行移動のみ対応。素材内容、タイトルの動き、フェード自体の変速は引き続き実装対象。古い対応表、消失区間、曖昧な映像拍基準、追跡、深度、発話設定の移行を拒否する。
+- 全586試験成功（262.611秒）: `output/implementation-maya/retime-settings-full-suite.log`。実FFmpegのズーム・彩度の旧／新フレーム比較、候補描画の実対応表SHA、採用状態不変、証跡改変拒否を検査。6配布物の監査、3スキル検査、クリーンwheel smokeも成功。人の見た目・試聴受入、FCP GUI、YouTube用途の確定、最終MP4、全計画の完成は未証明。YouTube投稿はユーザー本人が行う。公開alpha.7には未収録。[操作と制限](RETIME.ja.md)。
+
 ## 2026-10-06: 追跡マスクによる背景抑制（alpha.6後の開発版）
 
 - `session track-effect --effect tracked_background` が保持pre-effects映像の追跡からOpenCV GrabCutの実前景マスクを生成し、未採用候補の背景減光・低彩度化へ接続する。連番の全サイズ二値PNG、素材・追跡・手動補正のSHA、エンジン版、actor／理由を保持。矩形塗りの代用はしない。

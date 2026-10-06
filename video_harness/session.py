@@ -221,6 +221,8 @@ class Session:
                 check_ref(candidate['direction'])
             if candidate.get('motion_template'):
                 check_ref(candidate['motion_template'])
+            if candidate.get('retime_settings_migration'):
+                check_ref(candidate['retime_settings_migration'])
             if candidate.get('comparison_selection'):
                 check_ref(candidate['comparison_selection'])
         for comparison in state.get('candidate_comparisons', []):
@@ -707,7 +709,7 @@ class Session:
             self._save(state, 'project_revised', actor, {'note': note, 'keys': sorted(changes)})
         return state['project']
 
-    def create_candidate(self, changes, actor, note, *, direction_resolution=None, expected_project=None, base_render_id=None, motion_template=None):
+    def create_candidate(self, changes, actor, note, *, direction_resolution=None, expected_project=None, base_render_id=None, motion_template=None, retime_settings_migration=None):
         """Snapshot a comparison direction without changing adopted inputs."""
         from .patterns import resolve_pattern, resolve_asset_policy
         from .profiles import resolve
@@ -778,6 +780,8 @@ class Session:
                 item['direction'] = self._artifact('direction-resolution', direction_resolution)
             if motion_template is not None:
                 item['motion_template'] = self._artifact('motion-template', motion_template)
+            if retime_settings_migration is not None:
+                item['retime_settings_migration'] = self._artifact('retime-settings-migration', retime_settings_migration)
             state.setdefault('candidates', []).append(item)
             self._save(state, 'candidate_created', actor, {'candidate_id': item['id'], 'note': note})
         return item
@@ -872,15 +876,19 @@ class Session:
         return {'render_id':render_id,'source':fingerprint(folder/'visual-base.mp4'),
                 'mapping':fingerprint(mapping),'stage':'pre_retime_visual_assembly','review_required':True}
 
-    def propose_retime(self, render_id, request, actor, note):
+    def propose_retime(self, render_id, request, actor, note, *, timeline_settings='migrate'):
         from .retime import prepare_retime
         from .render_cache import digest
         from .production import frozen_pattern
         require_note(note);actor_name(actor)
+        if timeline_settings not in {'migrate', 'clear'}:
+            raise ValueError('timeline_settings must be migrate or clear')
         state=self._load();self._idle(state);self._verify(state)
         render=self._find_render(state,render_id);self._verify_render(render)
         cfg=read(render['project']['path']);pattern=frozen_pattern(cfg)
         if pattern['id']=='natural' or pattern['intensity']=='off':raise ValueError('Retime conflicts with natural/off')
+        if cfg.get('depth_layer'):
+            raise ValueError('Retime changes the depth source; remove the layer and regenerate depth on the new picture')
         basis=self.retime_source(render_id)
         if cfg.get('edit_basis') != 'visual':
             assembly=read(Path(render['path'])/'speech-assembly.json')
@@ -893,9 +901,27 @@ class Session:
             proposal=prepare_retime(basis['source']['path'],request,actor,note)
             setting={'version':1,'proposal':proposal,'input_mapping_sha256':digest(read(basis['mapping']['path']))}
         invalidated=[key for key in ('cue_plan','video_effects','composition_guides') if cfg.get(key)]
-        candidate=self.create_candidate({'retime':setting,'cue_plan':None,'video_effects':None,'composition_guides':[]},
-                                         actor,note,expected_project=state['project'],base_render_id=render_id)
+        changes={'retime':setting,'cue_plan':None,'video_effects':None,'composition_guides':[]}
+        migration = None
+        if timeline_settings == 'migrate':
+            if cfg.get('edit_basis') != 'visual':
+                if invalidated:
+                    raise ValueError('Speech timeline setting migration is not supported; use explicit clear or rebuild settings on the new timeline')
+            else:
+                from .retime_settings import migrate_visual_settings
+                original_mapping=read(render['files']['mapping']['path'])
+                if digest(original_mapping) != setting['input_mapping_sha256']:
+                    raise ValueError('Existing settings refer to a different retime stage; rebuild from the original edit')
+                migrated=migrate_visual_settings(cfg,original_mapping,proposal['mapping'])
+                changes.update(migrated['changes'])
+                migration={**migrated['evidence'], 'actor':actor, 'reason':note,
+                           'base_render_id':render_id, 'base_render_sha256':render['files']['video']['sha256'],
+                           'adopted':False, 'review_required':True}
+                invalidated=[]
+        candidate=self.create_candidate(changes, actor,note,expected_project=state['project'],
+            base_render_id=render_id,retime_settings_migration=migration)
         return {'candidate':candidate,'basis':basis,'invalidated_timeline_settings':invalidated,
+                'timeline_settings_mode':timeline_settings,'migration':migration,
                 'adopted':False,'review_required':True}
 
     def tracking_source(self, render_id):

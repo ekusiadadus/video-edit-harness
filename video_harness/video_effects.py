@@ -8,6 +8,7 @@ from __future__ import annotations
 from fractions import Fraction
 import hashlib
 import json
+import math
 from pathlib import Path
 import subprocess
 import uuid
@@ -15,6 +16,9 @@ import uuid
 TYPES = {'zoom_pulse', 'split_screen', 'monochrome', 'color_frame',
          'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe', 'keyword_title', 'tracked_title', 'motion_trail', 'tracked_background'}
 INTENSITY = {'low': .35, 'medium': .65, 'high': 1.0}
+PHASE_TYPES = {'zoom_pulse', 'smooth_zoom', 'saturation_pulse'}
+MAX_PHASE_FRAMES = 4096
+MAX_PHASE_EXPRESSION_CHARS = 65536
 
 
 def _digest(value):
@@ -62,7 +66,7 @@ def _frame(time, rate, field):
 
 def _canonical_event(row, rate, count):
     required = {'id', 'type', 'output_start', 'output_end', 'strength', 'reason'}
-    if not isinstance(row, dict) or not required <= set(row) or set(row) - required - {'parameters', 'effect_version', 'font_sha256', 'layout_binding'}:
+    if not isinstance(row, dict) or not required <= set(row) or set(row) - required - {'parameters', 'effect_version', 'font_sha256', 'layout_binding', 'phase_map'}:
         raise ValueError('Effect event needs exact id, type, times, strength, reason')
     if not isinstance(row['id'], str) or not row['id'].strip():
         raise ValueError('Effect id must be nonempty')
@@ -109,7 +113,7 @@ def _canonical_event(row, rate, count):
             raise ValueError('Only text effects accept a font binding')
         if type(row.get('effect_version', 1)) is not int or row.get('effect_version', 1) != 1:
             raise ValueError('Unsupported effect version')
-        if row['type'] not in {'comparison_wipe','motion_trail','tracked_background'} and last - first < 3:
+        if row['type'] not in {'comparison_wipe','motion_trail','tracked_background'} and last - first < 3 and 'phase_map' not in row:
             raise ValueError('Smooth pulse effects require at least three frames')
         from .effect_catalog import validate_parameters
         result['parameters'] = validate_parameters(row['type'], row.get('parameters', {}))
@@ -130,6 +134,25 @@ def _canonical_event(row, rate, count):
             _tracking_data(result,rate)
     elif 'parameters' in row or 'effect_version' in row or 'font_sha256' in row or 'layout_binding' in row:
         raise ValueError('Legacy effects do not accept parameters; use a versioned new effect')
+    if 'phase_map' in row:
+        if row['type'] not in PHASE_TYPES:
+            raise ValueError('Phase map is unsupported for this effect type')
+        phase = row['phase_map']
+        if not isinstance(phase, dict) or set(phase) != {'version', 'original_frame_count', 'frames'} or type(phase['version']) is not int or phase['version'] != 1:
+            raise ValueError('Phase map requires exact version, original_frame_count and frames')
+        original_count, frames = phase['original_frame_count'], phase['frames']
+        if type(original_count) is not int or not 1 <= original_count <= MAX_PHASE_FRAMES:
+            raise ValueError('Phase map original_frame_count is out of bounds')
+        if row['type'] in {'smooth_zoom', 'saturation_pulse'} and original_count < 3:
+            raise ValueError('Smooth pulse phase map needs at least three original frames')
+        if not isinstance(frames, list) or len(frames) != last - first or len(frames) > MAX_PHASE_FRAMES:
+            raise ValueError('Phase map length must equal the event frame count within limits')
+        if any(type(frame) is not int or not 0 <= frame < original_count for frame in frames):
+            raise ValueError('Phase map frames must be old-relative integer indices in bounds')
+        if any(left > right for left, right in zip(frames, frames[1:])):
+            raise ValueError('Phase map frames must be nondecreasing')
+        result['phase_map'] = {'version': 1, 'original_frame_count': original_count, 'frames': frames.copy()}
+        _mapped_envelope(result, rate, 'on')
     return result
 
 
@@ -340,15 +363,67 @@ def _pulse(variable, first, last, easing):
     return f'({triangle})*({triangle})*(3-2*({triangle}))'
 
 
+def _old_envelope_value(event, old_index):
+    """Evaluate an original pulse at one old-relative frame index."""
+    original_count = event['phase_map']['original_frame_count']
+    if event['type'] == 'zoom_pulse':
+        # These are the legacy zoom_pulse midpoint and half-width rules.
+        midpoint = (original_count - 1) / 2
+        half = max(1, original_count / 2)
+        return max(0.0, 1 - abs(old_index - midpoint) / half)
+    progress = old_index / (original_count - 1)
+    triangle = 1 - abs(2 * progress - 1)
+    if event['parameters']['easing'] == 'cosine':
+        return (1 - math.cos(math.pi * triangle)) / 2
+    return triangle * triangle * (3 - 2 * triangle)
+
+
+def _phase_value(event, output_frame, rate):
+    """Return an unweighted mapped pulse envelope, or zero outside its interval."""
+    first = _frame(_time(event['output_start'], 'start'), rate, 'start')
+    frames = event['phase_map']['frames']
+    offset = output_frame - first
+    if offset < 0 or offset >= len(frames):
+        return 0.0
+    return _old_envelope_value(event, frames[offset])
+
+
+def _mapped_envelope(event, rate, variable):
+    """Select the original pulse value for each new frame, including holds."""
+    phase = event['phase_map']
+    first = _frame(_time(event['output_start'], 'start'), rate, 'start')
+    last = _frame(_time(event['output_end'], 'end'), rate, 'end')
+    values = [f'{_old_envelope_value(event, old_index):.12f}' for old_index in phase['frames']]
+    runs = []
+    for offset, value in enumerate(values):
+        if not runs or runs[-1][1] != value:
+            runs.append((first + offset, value))
+
+    def tree(items):
+        if len(items) == 1:
+            return items[0][1]
+        middle = len(items) // 2
+        return f'if(lt({variable},{items[middle][0]}),{tree(items[:middle])},{tree(items[middle:])})'
+
+    expression = (f'if(lt({variable},{first}),0,'
+                  f'if(gte({variable},{last}),0,{tree(runs)}))')
+    if len(expression) > MAX_PHASE_EXPRESSION_CHARS:
+        raise ValueError('Phase map exceeds FFmpeg expression size limit')
+    return expression
+
+
 def _filter_graph(events, width, height, rate):
     zooms = [event for event in events if event['type'] == 'zoom_pulse']
     terms = []
     for event in zooms:
         first = round(_time(event['output_start'], 'start') * rate)
         last = round(_time(event['output_end'], 'end') * rate)
-        midpoint = (first + last - 1) / 2
-        half = max(1, (last - first) / 2)
-        terms.append(f'{event["strength"]:.6f}*max(0,1-abs(on-{midpoint:.3f})/{half:.3f})')
+        if 'phase_map' in event:
+            terms.append(f'{event["strength"]:.6f}*({_mapped_envelope(event, rate, "on")})')
+        else:
+            midpoint = (first + last - 1) / 2
+            half = max(1, (last - first) / 2)
+            terms.append(f'{event["strength"]:.6f}*max(0,1-abs(on-{midpoint:.3f})/{half:.3f})')
     envelope = '0'
     for term in terms:
         envelope = f'max({envelope},{term})'
@@ -360,7 +435,8 @@ def _filter_graph(events, width, height, rate):
         params = event['parameters']
         first = round(_time(event['output_start'], 'start') * rate)
         last = round(_time(event['output_end'], 'end') * rate) - 1
-        envelope = _pulse('on', first, last, params['easing'])
+        envelope = (_mapped_envelope(event, rate, 'on') if 'phase_map' in event
+                    else _pulse('on', first, last, params['easing']))
         scale = (params['max_scale'] - 1) * event['strength']
         if event['type']=='tracked_zoom':
             doc=_tracking_data(event,rate)
@@ -378,7 +454,8 @@ def _filter_graph(events, width, height, rate):
         params = event['parameters']
         first = _seconds(event, 'output_start')
         last = _seconds(event, 'output_end') - float(1 / rate)
-        envelope = _pulse('t', first, last, params['easing'])
+        envelope = (_mapped_envelope(event, rate, 'n') if 'phase_map' in event
+                    else _pulse('t', first, last, params['easing']))
         reduction = (1 - params['minimum_saturation']) * event['strength']
         target = f'vsaturation{i}'
         graph += f';[{current}]hue=s=\'1-{reduction:.9f}*({envelope})\'[{target}]'

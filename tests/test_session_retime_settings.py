@@ -1,0 +1,61 @@
+"""Synthetic render integration for separately reviewable setting migration."""
+from pathlib import Path
+import tempfile
+import unittest
+
+from tests import test_visual_editing as helpers
+from video_harness.common import read, write
+from video_harness.render_cache import digest
+from video_harness.session import Session
+
+
+class SessionRetimeSettingTests(unittest.TestCase):
+    def test_default_migration_renders_exact_mapping_without_adopting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg, plan = helpers.VisualEditingTests().fixture(root, source_audio=True)
+            cfg.update(edit_basis='visual', fcp_handoff='video_only',
+                editing_pattern={'id': 'playful_short', 'music': 'off', 'sfx': 'off',
+                                 'beat_sync': 'off', 'visual_assets': 'own_only'})
+            project = root / 'project.json'
+            write(project, cfg)
+            session = Session.start(project, root / 'session')
+            session.propose_visual(plan, 'codex')
+            session.approve('codex', 'Synthetic selected ranges')
+            initial = session.render(preview=False, actor='codex')
+            mapping = read(initial['files']['mapping']['path'])
+            bounds = {'output_start': '1/5', 'output_end': '2/5', 'reason': 'Synthetic emphasis'}
+            session.update_project({
+                'cue_plan': {'version': 1, 'mapping_sha256': digest(mapping),
+                    'cues': [{'id': 'label', 'role': 'title', 'text': 'X', **bounds}]},
+                'video_effects': {'version': 1, 'mapping_sha256': digest(mapping),
+                    'events': [{'id': 'accent', 'type': 'monochrome', 'strength': .5, **bounds}]},
+                'composition_guides': [{'id': 'ui', 'kind': 'ui', 'rect': [.8, .8, 1, 1], **bounds}],
+            }, 'codex', 'Bind settings to observed fixture mapping')
+            observed = session.render(preview=False, actor='codex')
+            before = session._load()['project']
+            request = {'operations': [{'id': 'hold', 'kind': 'freeze', 'source_frame': 3,
+                'output_frames': 2, 'reason': 'Synthetic frame hold'}]}
+            migrated = session.propose_retime(observed['id'], request, 'codex', 'Preserve placed accents')
+            self.assertEqual(migrated['timeline_settings_mode'], 'migrate')
+            self.assertEqual(migrated['invalidated_timeline_settings'], [])
+            self.assertEqual(session._load()['project'], before)
+            changed = read(migrated['candidate']['project']['path'])
+            for row in (changed['cue_plan']['cues'][0], changed['video_effects']['events'][0],
+                        changed['composition_guides'][0]):
+                self.assertEqual((row['output_start'], row['output_end']), ('1/5', '3/5'))
+            rendered = session.render(preview=False, actor='codex', candidate_id=migrated['candidate']['id'])
+            actual = read(rendered['files']['mapping']['path'])
+            self.assertEqual(digest(actual), migrated['migration']['new_mapping_sha256'])
+            self.assertEqual(read(rendered['files']['result']['path'])['technical_status'], 'pass')
+            self.assertEqual(session._load()['project'], before)
+            cleared = session.propose_retime(observed['id'], request, 'codex', 'Explicitly rebuild accents',
+                                             timeline_settings='clear')
+            self.assertEqual(set(cleared['invalidated_timeline_settings']),
+                             {'cue_plan', 'video_effects', 'composition_guides'})
+            self.assertIsNone(read(cleared['candidate']['project']['path'])['cue_plan'])
+            migration_ref = migrated['candidate']['retime_settings_migration']
+            with Path(migration_ref['path']).open('a') as stream:
+                stream.write('changed')
+            with self.assertRaises(ValueError):
+                session._verify(session._load())

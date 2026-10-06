@@ -81,7 +81,9 @@ def _envelope(frame, first, last, easing):
 
 
 def _pulse_amount(event, frame, rate):
-    from .video_effects import _time
+    from .video_effects import _time, _phase_value
+    if 'phase_map' in event:
+        return event['strength'] * _phase_value(event, frame, rate)
     first=float(_time(event['output_start'],'start')*rate)
     end=float(_time(event['output_end'],'end')*rate)
     midpoint=(first+end-1)/2
@@ -116,7 +118,9 @@ def _framewise_checks(events, guide, titles, rate):
         for e in zooms:
             if e['type']=='zoom_pulse':continue
             p=e['parameters'];a=float(_time(e['output_start'],'start')*rate);b=float(_time(e['output_end'],'end')*rate)-1
-            scale=1+(p['max_scale']-1)*e['strength']*_envelope(frame,a,b,p['easing'])
+            from .video_effects import _phase_value
+            envelope = _phase_value(e, frame, rate) if 'phase_map' in e else _envelope(frame,a,b,p['easing'])
+            scale=1+(p['max_scale']-1)*e['strength']*envelope
             if e['type']=='tracked_zoom':
                 anchor=tracks[e['id']][frame];x=(anchor[0]+anchor[2])/2;y=(anchor[1]+anchor[3])/2
             else:x,y=p['anchor_x'],p['anchor_y']
