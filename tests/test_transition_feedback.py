@@ -50,6 +50,11 @@ class TransitionFeedbackTests(unittest.TestCase):
         self.assertEqual(before["frame_correspondence"][0]["references"][0]["source_frame"], 10)
         at_cut = map_output(attached, 10 / 30)
         frame = at_cut["frame_correspondence"][0]
+        self.assertEqual(at_cut["boundaries"][0]["scope"], "original cut reference only")
+        self.assertEqual((at_cut["boundaries"][0]["left_sequence_id"],
+                          at_cut["boundaries"][0]["right_sequence_id"]),
+                         ("segment-0", "segment-1"))
+        self.assertEqual(at_cut["cut_reference"]["label"], "original cut reference only")
         self.assertEqual((frame["spatial_operator"], frame["direction"]), ("push", "up"))
         self.assertEqual([r["asset_id"] for r in frame["references"]], ["asset-0", "asset-1"])
         self.assertEqual([r["source_first_frame"] for r in at_cut["source_spans"]],

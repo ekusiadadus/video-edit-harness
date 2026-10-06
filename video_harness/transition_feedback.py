@@ -104,7 +104,10 @@ def map_transition_output(mapping, start, end):
                           "source_start": float(Fraction(frame, 1) / source_rate),
                           "source_end": float(Fraction(frame + 1, 1) / source_rate)})
     from .feedback import _map_visual
+    cut_reference = _map_visual(original, start, end)
     return {"output_start": start, "output_end": end, "source_spans": spans,
+            "boundaries": [{**boundary, "scope": "original cut reference only"}
+                           for boundary in cut_reference["boundaries"]],
             "frame_correspondence": correspondences,
             "source_time_scope": "discrete composed frame coverage",
-            "cut_reference": {"label": "original cut reference only", **_map_visual(original, start, end)}}
+            "cut_reference": {"label": "original cut reference only", **cut_reference}}
