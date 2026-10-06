@@ -19,6 +19,7 @@ def parser():
  s.add_parser('effects-catalog',help='Versioned controls for parameterized local video effects')
  s.add_parser('motion-templates',help='Versioned compound local-effect recipes and reduced-motion variants')
  s.add_parser('tracking',help='Local subject tracking proposals; use tracking --help')
+ s.add_parser('depth',help='Explicit relative-depth fields and unadopted local image-layer candidates')
  s.add_parser('retime',help='Source-bound speed ramps and holds; use retime --help')
  for name in ['doctor','presets']:s.add_parser(name)
  for name in ['inspect','preview','compare','render','plan','resolve']:
@@ -85,6 +86,9 @@ def candidate_profiles(cfg,args,overrides):
 
 def main():
  import sys
+ if len(sys.argv)>1 and sys.argv[1]=='depth':
+  from .depth_cli import main as depth_main
+  return depth_main(sys.argv[2:])
  if len(sys.argv)>1 and sys.argv[1]=='tracking':
   from .tracking_cli import main as tracking_main
   return tracking_main(sys.argv[2:])
