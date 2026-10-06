@@ -172,3 +172,5 @@ Import the page's downloaded selection with `session select-comparison SESSION -
 Development source-bound J/L cuts use `session audio-cuts` to propose actual source pre/post audio handles while preserving picture frames. Transcript-backed speech handles rebuild captions; untranscribed visual handles require an explicit nonspoken declaration and listening review. Retime combinations and editable FCP handoff remain unsupported. [操作・レビュー条件](docs/AUDIO_CUTS.ja.md). This capability is absent from published alpha.6.
 
 Development `motion_trail` applies a requested, bounded trail from actual past frames within one shot, with copied audio and unchanged timing. It is opt-in and absent from published alpha.6. [Controls and review limits](docs/VIDEO_EFFECTS.ja.md).
+
+Development `tracked_background` creates per-frame local GrabCut masks from observed tracking, with manual binary-mask corrections, to suppress the background while retaining foreground. Lost/stale masks fail; exact-render contour review is required. [Controls and limits](docs/TRACKING.ja.md). This feature is absent from published alpha.6.

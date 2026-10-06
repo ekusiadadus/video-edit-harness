@@ -154,10 +154,13 @@ def verify_production(production, operation='embedded_use'):
     if production.get('effects', {}).get('events'):
         if production['effects'].get('mapping_sha256') != production.get('mapping_sha256'):
             raise ValueError('Video effects are stale against the production mapping')
-        from .video_effects import _tracking_data
+        from .video_effects import _tracking_data, _mask_data
         from fractions import Fraction
         import json
         for event in production['effects']['events']:
+            if event['type']=='tracked_background':
+                doc=json.loads(Path(event['parameters']['mask_path']).read_text())
+                _mask_data(event,Fraction(doc['fps']))
             if event['type'] in {'tracked_zoom','tracked_title'}:
                 doc=json.loads(Path(event['parameters']['track_path']).read_text())
                 _tracking_data(event,Fraction(doc['fps']))

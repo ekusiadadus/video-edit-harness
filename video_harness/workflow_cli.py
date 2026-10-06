@@ -106,7 +106,9 @@ def parser():
     a.add_argument('--end-frame',type=int,required=True)
     a.add_argument('--algorithm',choices=['lk','csrt','pose'],default='csrt')
     a.add_argument('--model',type=Path)
-    a.add_argument('--effect',choices=['tracked_zoom','tracked_title'],default='tracked_zoom')
+    a.add_argument('--effect',choices=['tracked_zoom','tracked_title','tracked_background'],default='tracked_zoom')
+    a.add_argument('--background-parameters-file',type=Path,help='Background dim, saturation and feather JSON')
+    a.add_argument('--mask-corrections-file',type=Path,help='Absolute output frame numbers to full-size binary PNG paths')
     a.add_argument('--title-parameters-file',type=Path,help='Label text, placement and readable style JSON')
     a.add_argument('--title-version',type=int,choices=[1,2],default=1,
                    help='1: explicit lines; 2: measured Japanese/English wrapping (text-layout extra)')
@@ -243,7 +245,9 @@ def dispatch(args):
             algorithm=args.algorithm,model_path=args.model,max_scale=args.max_scale,strength=args.strength,
             corrections=read_corrections(args.corrections_file) if args.corrections_file else None,
             effect=args.effect,title_parameters=_object(args.title_parameters_file) if args.title_parameters_file else None,
-            title_version=args.title_version)
+            title_version=args.title_version,
+            background_parameters=_object(args.background_parameters_file) if args.background_parameters_file else None,
+            mask_corrections=_read_mask_corrections(args.mask_corrections_file) if args.mask_corrections_file else None)
     if action == 'direction':
         return session.propose_direction(_object(args.request_file), args.actor, args.note,
                                          preference=args.preference,
@@ -280,3 +284,11 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     except (ValueError, FileNotFoundError, FileExistsError, KeyError, TypeError) as error:
         p.exit(2, f'Error: {error}\n')
+
+
+def _read_mask_corrections(path):
+    import re
+    data=_object(path)
+    if any(not re.fullmatch('0|[1-9][0-9]*',key) or not isinstance(value,str) or not value.strip() for key,value in data.items()):
+        raise ValueError('Mask corrections map absolute frame numbers to PNG paths')
+    return {int(key):str(Path(value).resolve(strict=True)) for key,value in data.items()}

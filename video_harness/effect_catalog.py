@@ -12,6 +12,17 @@ import math
 
 
 _EFFECTS = {
+    "tracked_background": {
+        "version":1,"intent":"Keep an observed foreground mask while gently suppressing its background; reject stale or lost masks.",
+        "input_count":1,"backend":"local_burned",
+        "parameters":{
+            "mask_path":{"type":"file","default":None},
+            "mask_sha256":{"type":"sha256","default":None},
+            "background_dim":{"type":"number","minimum":.5,"maximum":1,"default":.85},
+            "background_saturation":{"type":"number","minimum":0,"maximum":1,"default":.5},
+            "feather_pixels":{"type":"number","minimum":0,"maximum":20,"default":3},
+        },
+    },
     "motion_trail": {
         "version":1, "intent":"Briefly blend actual past frames within one shot; preserve sound and timing.",
         "input_count":1, "backend":"local_burned",
@@ -183,4 +194,24 @@ def validate_parameters(kind: str, parameters: dict | None, *, version: int = 1)
             if not isinstance(value, str) or value not in spec["values"]:
                 raise ValueError(f"{kind}.{name} must be one of {', '.join(spec['values'])}")
             normalized[name] = value
+    return normalized
+
+
+def validate_background_controls(parameters=None):
+    """Validate user controls before any tracking or mask work is started."""
+    parameters={} if parameters is None else parameters
+    keys={'background_dim','background_saturation','feather_pixels'}
+    if not isinstance(parameters,dict) or set(parameters)-keys:
+        raise ValueError('Background parameters accept dim, saturation and feather controls only')
+    normalized={}
+    for key in keys:
+        spec=_EFFECTS['tracked_background']['parameters'][key]
+        value=parameters.get(key,spec['default'])
+        try:
+            valid=not isinstance(value,bool) and isinstance(value,(int,float)) and math.isfinite(value) and spec['minimum']<=value<=spec['maximum']
+        except OverflowError:
+            valid=False
+        if not valid:
+            raise ValueError(f'Invalid background control: {key}')
+        normalized[key]=float(value)
     return normalized

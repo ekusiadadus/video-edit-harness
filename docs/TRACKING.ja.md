@@ -94,3 +94,31 @@ uv run video-harness tracking validate track.json --source input.mp4 --first-fra
 ## 時間を変える編集の実装状態
 
 `time_mapping.compile_retime` はスピードランプと静止保持の出力→原動画フレーム対応表を生成します。発話などの保護区間に触れる変更を拒否し、間引き／重複フレームを記録します。`retime prepare`／`retime render` が対応表どおりの単独MP4、音声伸縮、観察した字幕のSRT移行を扱います。[時間変更の手順](RETIME.ja.md)を参照してください。セッション候補・FCP時間変更・既存cueや追跡の移行は未接続です。時間を変更した映像に古い追跡を流用せず、実際の入力を再追跡します。
+
+## マスクで背景を抑える（alpha.6後の開発版）
+
+`tracked_background` は、追跡した対象の枠を初期条件に、各フレームでローカルOpenCV GrabCutの前景マスクを作ります。枠をそのまま塗る方式ではありません。前景を残し、背景の明るさ・彩度を指定した分だけ抑えます。元の音声・尺・フレーム対応を維持します。自然版には追加せず、未採用候補から比較してください。
+
+```json
+{"background_dim":0.85,"background_saturation":0.5,"feather_pixels":3}
+```
+
+```sh
+uv run video-harness session track-effect SESSION RENDER_ID --effect tracked_background --box 0.15 0.05 0.85 0.95 --first-frame 0 --end-frame 24 --algorithm csrt --background-parameters-file background.json --strength 0.65 --actor codex --note '全身を確認して背景を控えめにする候補'
+```
+
+枠・フレーム番号・観察文は構造例です。**実際の保持したpre-effects映像で、残す対象の全体が枠に入っているか**確認してください。GrabCutは枠の外を背景として扱います。胴体だけの枠では頭や手足が失われます。pose方式は胴体枠なので、この効果には全指定フレームの手動マスクが必要です。CSRT/LKの追跡成功も輪郭や人物全体の正しさを保証しません。
+
+`background_dim` は0.5〜1、`background_saturation` は0〜1、`feather_pixels` は0〜20。強さが低いほど背景変更が弱くなります。枠が追跡を失った区間、背景の種がない枠、前景のないマスクは拒否します。変形した画角にマスクを読み替えないため、重なるズーム・split・comparison・残像・別マスクも拒否します。修正した区間だけを再提案してください。
+
+`--mask-corrections-file` は、絶対出力フレーム番号と手動PNGの対応です。pre-effects映像と同じ幅・高さの8bitグレースケールで、残す前景を255（白）、背景を0（黒）にしてください。透明PNGや中間灰色は受け付けません。
+
+```json
+{"12":"/absolute/path/to/frame-12-mask.png"}
+```
+
+手動PNGはそのフレームの自動マスク全体を置き換えます。追跡枠の修正は従来の`--corrections-file`です。手動マスクだけでは追跡喪失を隠しません。両方の入力・実行actor・理由・SHAを保存します。`subject_mask`の返り値が指すmanifestと連番PNGを保持し、後から別のマスクへ黙って差し替えないでください。
+
+候補の全編で、髪・指・衣装・遮蔽・輪郭の点滅・背景の混入を確認します。生成タイトルは後段ですが、素材に焼き込まれた文字やUIも背景に含まれ得ます。`subject_masks`レビュー項目は正確なrender SHAに結び付けた視覚観察が必要です。技術試験やピクセル数は輪郭の品質承認ではありません。FCPはmix/video_onlyの焼き込みで、編集可能な切り抜きレイヤーは未対応です。
+
+方式の根拠：[OpenCV公式GrabCut解説](https://docs.opencv.org/4.x/d8/d83/tutorial_py_grabcut.html)、[FFmpeg公式maskedmerge](https://ffmpeg.org/ffmpeg-filters.html#maskedmerge)。深度推定、AI人物マッティング、自然な髪の半透明の復元は別の未実装機能です。公開済みalpha.6には含まれません。

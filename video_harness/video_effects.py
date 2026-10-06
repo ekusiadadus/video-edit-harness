@@ -13,7 +13,7 @@ import subprocess
 import uuid
 
 TYPES = {'zoom_pulse', 'split_screen', 'monochrome', 'color_frame',
-         'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe', 'keyword_title', 'tracked_title', 'motion_trail'}
+         'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe', 'keyword_title', 'tracked_title', 'motion_trail', 'tracked_background'}
 INTENSITY = {'low': .35, 'medium': .65, 'high': 1.0}
 
 
@@ -104,16 +104,22 @@ def _canonical_event(row, rate, count):
                 raise ValueError('Tracking artifact changed')
             params['track_sha256'] = sha
             _tracking_data(result, rate)
-    elif row['type'] in {'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe', 'motion_trail'}:
+    elif row['type'] in {'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe', 'motion_trail', 'tracked_background'}:
         if 'font_sha256' in row or 'layout_binding' in row:
             raise ValueError('Only text effects accept a font binding')
         if type(row.get('effect_version', 1)) is not int or row.get('effect_version', 1) != 1:
             raise ValueError('Unsupported effect version')
-        if row['type'] not in {'comparison_wipe','motion_trail'} and last - first < 3:
+        if row['type'] not in {'comparison_wipe','motion_trail','tracked_background'} and last - first < 3:
             raise ValueError('Smooth pulse effects require at least three frames')
         from .effect_catalog import validate_parameters
         result['parameters'] = validate_parameters(row['type'], row.get('parameters', {}))
         result['effect_version'] = 1
+        if row['type']=='tracked_background':
+            params=result['parameters'];sha=_sha(params['mask_path'])
+            if params['mask_sha256'] not in (None,sha):
+                raise ValueError('Subject mask artifact changed')
+            params['mask_sha256']=sha
+            _mask_data(result,rate)
         if row['type']=='motion_trail' and last-first < result['parameters']['history_frames']:
             raise ValueError('Motion trail window is shorter than its history')
         if row['type']=='tracked_zoom':
@@ -284,6 +290,19 @@ def _seconds(event, key):
     return float(_time(event[key], key))
 
 
+def _mask_data(event, rate, source=None):
+    from .subject_mask import validate_masks
+    params=event['parameters']
+    if _sha(params['mask_path']) != params['mask_sha256']:
+        raise ValueError('Subject mask artifact changed')
+    doc=validate_masks(params['mask_path'], source=source,
+        first_frame=_frame(_time(event['output_start'],'start'),rate,'start'),
+        end_frame=_frame(_time(event['output_end'],'end'),rate,'end'))
+    if Fraction(doc['fps']) != rate:
+        raise ValueError('Subject mask FPS differs from effects input')
+    return doc
+
+
 def _tracking_data(event, rate):
     from .tracking import validate_track
     params=event['parameters']
@@ -447,6 +466,14 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
             tracking_inputs.append({'event_id':event['id'],'path':event['parameters']['track_path'],
                                     'sha256':event['parameters']['track_sha256'],
                                     'algorithm':doc['algorithm'],'source_sha256':doc['source']['sha256']})
+    mask_inputs=[]
+    for event in events:
+        if event['type'] != 'tracked_background':continue
+        for other in events:
+            if other is event or other['type'] not in {'zoom_pulse','smooth_zoom','tracked_zoom','split_screen','comparison_wipe','tracked_background','motion_trail'}:continue
+            if _time(event['output_start'],'start') < _time(other['output_end'],'end') and _time(other['output_start'],'start') < _time(event['output_end'],'end'):
+                raise ValueError('Subject masks cannot overlap geometry-changing effects, trails or another mask')
+        mask_inputs.append({'event':event,'doc':_mask_data(event,rate,source)})
     width, height = int(video['width']), int(video['height'])
     if width % 2 or height % 2:
         raise ValueError('Effects source dimensions must be even')
@@ -516,6 +543,14 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
         graph += (f';[{label}][{branch}]overlay=x={overlay_x}:y=0:eof_action=pass:repeatlast=0:'
                   f"enable='gte(t,{start:.9f})*lt(t,{end:.9f})'[{target_label}]")
         label = target_label
+    for index,item in enumerate(mask_inputs,len(secondary)+1):
+        event,doc=item['event'],item['doc']
+        from .subject_background import background_graph
+        command += ['-framerate',str(rate),'-start_number',str(_frame(_time(event['output_start'],'start'),rate,'start')),
+                    '-i',str(Path(event['parameters']['mask_path']).parent/'%08d.png')]
+        fragment,next_label=background_graph(label,index,event,rate)
+        graph += ';' + fragment
+        label=next_label
     titles = []
     resource_dir = target.parent / (target.stem + '.resources-' + uuid.uuid4().hex[:8])
     for event in events:
@@ -530,7 +565,7 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
             raise ValueError('Text layout engine/model changed while rendering')
         if title['font_sha256'] != event['font_sha256']:
             raise ValueError('Text font changed while rendering')
-        input_index = len(secondary) + len(titles) + 1
+        input_index = len(secondary) + len(mask_inputs) + len(titles) + 1
         command += ['-loop', '1', '-framerate', str(rate), '-i', str(png)]
         first, last = _seconds(event, 'output_start'), _seconds(event, 'output_end')
         fade = min(.18, (last-first)/3)
@@ -619,6 +654,8 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
         for title in titles:
             if _sha(title['font_path']) != title['font_sha256'] or _sha(title['path']) != title['png_sha256']:
                 raise ValueError('Text resource changed during render')
+        for item in mask_inputs:
+            _mask_data(item['event'],rate,source)
         for item in tracking_inputs:
             if _sha(item['path'])!=item['sha256']:
                 raise ValueError('Tracking resource changed during render')
@@ -629,6 +666,9 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
             'mapping_sha256': plan['mapping_sha256'], 'events': events,
             'text_assets': titles,
             'temporal_inputs': temporal_inputs,
+            'subject_masks':[{'event_id':item['event']['id'],'manifest_sha256':item['event']['parameters']['mask_sha256'],
+                             'manifest_path':item['event']['parameters']['mask_path'],'source_sha256':item['doc']['source']['sha256'],
+                             'frames':len(item['doc']['rows']),'review_required':True} for item in mask_inputs],
             'tracking_inputs': tracking_inputs,
             'composition': composition_evidence,
             'title_collision_checks': title_collision_checks,

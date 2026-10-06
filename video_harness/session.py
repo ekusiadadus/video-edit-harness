@@ -845,7 +845,7 @@ class Session:
     def propose_tracking(self, render_id, box, first_frame, end_frame, actor, note,
                          *, algorithm='csrt', model_path=None, max_scale=1.12,
                          strength=.65, corrections=None, effect='tracked_zoom',
-                         title_parameters=None, title_version=1):
+                         title_parameters=None, title_version=1, background_parameters=None, mask_corrections=None):
         """Track observed picture and propose an unadopted zoom or readable label."""
         from fractions import Fraction
         from .tracking import track_video,validate_track
@@ -856,8 +856,8 @@ class Session:
         pattern=frozen_pattern(read(render['project']['path']))
         if pattern['id']=='natural' or pattern['intensity']=='off':
             raise ValueError('Tracking effect conflicts with natural/off; choose an enabled comparison direction')
-        if effect not in {'tracked_zoom','tracked_title'}:
-            raise ValueError('Choose tracked_zoom or tracked_title')
+        if effect not in {'tracked_zoom','tracked_title','tracked_background'}:
+            raise ValueError('Choose tracked_zoom, tracked_title or tracked_background')
         if type(title_version) is not int or title_version not in (1, 2):
             raise ValueError('title_version must be 1 or 2')
         if effect=='tracked_title':
@@ -867,6 +867,13 @@ class Session:
                 raise ValueError('Track bindings and x/y cannot be supplied for a tracked title')
         elif title_parameters is not None or title_version != 1:
             raise ValueError('Title parameters require tracked_title')
+        if effect=='tracked_background':
+            from .effect_catalog import validate_background_controls
+            background_parameters=validate_background_controls(background_parameters)
+            if algorithm=='pose' and (not isinstance(mask_corrections,dict) or set(mask_corrections)!=set(range(first_frame,end_frame))):
+                raise ValueError('Torso pose boxes need a manual full-size mask for every background-effect frame')
+        elif background_parameters is not None or mask_corrections is not None:
+            raise ValueError('Background parameters and masks require tracked_background')
         source=self.tracking_source(render_id)
         mapping=read(source['mapping']['path']);rate=Fraction(mapping['fps'])
         title_preflight = None
@@ -890,10 +897,18 @@ class Session:
         track_video(source['source']['path'],box,track_path,start_frame=first_frame,end_frame=end_frame,
                     corrections=corrections,algorithm=algorithm,model_path=model_path,actor=actor,reason=note)
         validate_track(track_path,source=source['source']['path'],first_frame=first_frame,end_frame=end_frame)
+        mask_manifest=None
+        if effect=='tracked_background':
+            from .subject_mask import prepare_masks
+            folder=self.root/'artifacts'/('mask-'+uuid.uuid4().hex[:12])
+            prepare_masks(source['source']['path'],track_path,folder,actor,note,corrections=mask_corrections)
+            mask_manifest=folder/'manifest.json'
         event={'id':'track-'+uuid.uuid4().hex[:12],'type':effect,
                'output_start':str(Fraction(first_frame,1)/rate),'output_end':str(Fraction(end_frame,1)/rate),
                'strength':strength,'reason':note,
                'parameters':{'track_path':str(track_path),**(title_parameters if effect=='tracked_title' else {'max_scale':max_scale})}}
+        if mask_manifest is not None:
+            event['parameters']={'mask_path':str(mask_manifest),**background_parameters}
         if title_preflight is not None:
             event.update(effect_version=title_version, font_sha256=title_preflight['font_sha256'])
             if title_version == 2:
@@ -910,6 +925,7 @@ class Session:
         candidate=self.create_candidate({'video_effects':effects,'composition_guides':resolved['guides']},
                                         actor,note,expected_project=state['project'],base_render_id=render_id)
         return {'candidate':candidate,'tracking':fingerprint(track_path),'basis':source,
+                **({'subject_mask':fingerprint(mask_manifest)} if mask_manifest is not None else {}),
                 **({'title_preflight':title_preflight} if title_preflight is not None else {}),
                 'adopted':False,'review_required':True}
 
@@ -1278,6 +1294,8 @@ class Session:
                     checks.append('beat_sync')
                 if production.get('effects', {}).get('events'):
                     checks.append('video_effects')
+                    if any(event['type']=='tracked_background' for event in production['effects']['events']):
+                        checks.append('subject_masks')
             if render['files'].get('audio_cuts'):
                 checks.append('audio_cuts')
             entries = report.get('checks')
@@ -1287,7 +1305,7 @@ class Session:
                 require_note(entry.get('note'))
                 if entry.get('status') not in ('pass', 'fail', 'pending') or entry.get('basis') not in ('listening', 'visual', 'text', 'signal', 'synthetic'):
                     raise ValueError('Invalid review status or observation basis')
-                expected = {'audio_cuts': {'listening'}, 'meaning': {'text', 'listening'}, 'pacing': {'listening'},
+                expected = {'subject_masks': {'visual'}, 'audio_cuts': {'listening'}, 'meaning': {'text', 'listening'}, 'pacing': {'listening'},
                             'audio_only': {'listening'}, 'cut_boundaries': {'listening'},
                             'captions': {'text', 'visual'}, 'color': {'visual'},
                             'music_fit': {'listening'}, 'asset_context': {'visual'},
