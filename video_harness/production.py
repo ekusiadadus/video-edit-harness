@@ -98,7 +98,7 @@ def resolve_production(cfg, mapping):
             raise ValueError('cue_plan needs version, mapping_sha256 and cues')
         if explicit['mapping_sha256'] != mapping_sha:
             raise ValueError('Cue plan is stale: output timeline changed')
-        cues = validate_cues(explicit['cues'], assets, duration)
+        cues = validate_cues(explicit['cues'], assets, duration, mapping.get('fps'))
         reasons = ['Explicit timeline-bound cue plan.']
     else:
         context = deepcopy(cfg.get('asset_selection_request', {}))
@@ -214,6 +214,8 @@ def prepare_fcp_handoff(cfg, production, out):
     measured_audio = cfg.get('fcp_audio_automation')
     if measured_audio is not None and (measured_audio != 'measured' or mode != 'editable'):
         raise ValueError('fcp_audio_automation measured requires explicit editable handoff')
+    if mode == 'editable' and any('phase_map' in cue for cue in production.get('cues', [])):
+        raise ValueError('Video cue phase changes require baked mix/video_only handoff')
     if mode == 'editable' and production.get('effects', {}).get('events'):
         raise ValueError('Video effects require burned mix/video_only handoff; editable FCP effects are unsupported')
     if mode == 'editable' and cfg.get('depth_layer'):

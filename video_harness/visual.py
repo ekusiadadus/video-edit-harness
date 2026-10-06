@@ -267,6 +267,8 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
     with tempfile.TemporaryDirectory(prefix="visual-overlays-") as tmp:
         root = Path(tmp)
         current = input_video
+        video_phase_layers = []
+        video_cue_clocks = []
         for index, cue in enumerate(cues):
             role = cue["role"]
             source = root / f"title-{index}.png" if role == "title" else Path(assets[cue["asset_id"]]["path"])
@@ -276,25 +278,57 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                 stream = next(s for s in _probe(source)['streams'] if s['codec_type'] == 'video')
                 source_width, source_height = check_video_geometry(stream)
                 check_overlay_video_clock(source, stream)
+                from .video_cue_phase import capture_overlay_clock
+                clock = capture_overlay_clock(current, cue, info['fps'])
+                if clock is not None:
+                    video_cue_clocks.append(clock)
             else:
                 with Image.open(source) as picture:
                     if picture.getexif().get(274, 1) != 1:
                         raise ValueError('rotated image geometry is unsupported')
                     source_width, source_height = picture.size
             placement = measure_placement(cue, width, height, source_width, source_height)
-            if role == "video":
+            if role == 'video' and 'phase_map' in cue:
+                from .video_cue_phase import retime_video_cue_layer
+                registered_asset = assets[cue['asset_id']]
+                phase_cue = {**cue, '_source_sha256': (registered_asset.get('sha256') or
+                                                     registered_asset.get('file_sha256'))}
+                layer = root / f"video-phase-{index}.mkv"
+                log_path = output.parent / f"{output.stem}-video-phase-{index}.log"
+                provenance = retime_video_cue_layer(source, phase_cue, placement,
+                                                    (width, height), info['fps'], layer,
+                                                    log_path=log_path)
+                _check_asset(cue['asset_id'], assets)
+                video_phase_layers.append(provenance)
+                first = _seconds(cue['output_start'], 'output_start') * info['fps']
+                last = _seconds(cue['output_end'], 'output_end') * info['fps']
+                if first.denominator != 1 or last.denominator != 1:
+                    raise ValueError('Video cue phase output must align to project frames')
+                overlay_input = ["-i", str(layer)]
+                source_filter = (f"settb=expr={info['fps'].denominator}/{info['fps'].numerator},"
+                                 f"setpts=N+{first.numerator},")
+                scale = "null"
+                opacity = 1
+                overlay_x = overlay_y = 0
+                enable = f"gte(n,{first.numerator})*lt(n,{last.numerator})"
+            elif role == "video":
                 overlay_input = ["-i", str(source)]
-                source_filter = (f"trim=start={cue['source_start']}:end={cue['source_end']},"
+                source_start = format(float(_seconds(cue['source_start'], 'source_start')), '.9f')
+                source_end = format(float(_seconds(cue['source_end'], 'source_end')), '.9f')
+                source_filter = (f"trim=start={source_start}:end={source_end},"
                                  f"setpts=PTS-STARTPTS+{cue['output_start']}/TB,")
             else:
                 overlay_input = ["-loop", "1", "-i", str(source)]
                 source_filter = ""
-            scale = f"scale={placement['rendered_size'][0]}:{placement['rendered_size'][1]}"
-            opacity = placement['opacity']
+            if role != 'video' or 'phase_map' not in cue:
+                scale = f"scale={placement['rendered_size'][0]}:{placement['rendered_size'][1]}"
+                opacity = placement['opacity']
+                overlay_x, overlay_y = placement['x_pixels'], placement['y_pixels']
+                enable = f"between(t,{cue['output_start']},{cue['output_end']})"
             filter_graph = (f"[1:v]{source_filter}{scale},format=rgba,"
                             f"colorchannelmixer=aa={opacity}[layer];"
-                            f"[0:v][layer]overlay=x={placement['x_pixels']}:y={placement['y_pixels']}:"
-                            f"enable='between(t,{cue['output_start']},{cue['output_end']})':"
+                            f"[0:v][layer]overlay=x={overlay_x}:y={overlay_y}:"
+                            f"enable='{enable}':"
                             "eof_action=pass:shortest=0[v]")
             if info['rec709_tags']:
                 filter_graph += ';[v]setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[retained_rec709]'
@@ -314,5 +348,7 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                      "-map", "0", "-c", "copy", *timing_options, str(output)])
     return {"output": str(output), "cues": [cue["id"] for cue in cues],
             "duration": float(duration), "preview": bool(preview),
+            "video_phase_layers": video_phase_layers,
+            "video_cue_clocks": video_cue_clocks,
             "safe_area": "overlays fit central 70 percent width and above lower 25 percent",
             "subject_clearance": "unverified; inspect every overlay against moving subjects and captions"}

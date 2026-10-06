@@ -13,7 +13,7 @@ import subprocess
 ROLES = {"music", "sfx", "image", "video", "title"}
 FIELDS = {"id", "asset_id", "role", "output_start", "output_end", "source_start",
           "source_end", "gain_db", "fade_in", "fade_out", "loop", "duck",
-          "reason", "text", "position", "opacity", "beat_anchor"}
+          "reason", "text", "position", "opacity", "beat_anchor", "phase_map"}
 
 
 def _seconds(value, name):
@@ -54,6 +54,48 @@ def _check_asset(asset_id, assets, *, verify_hash=True):
         if sha.hexdigest() != expected:
             raise ValueError(f"asset SHA-256 mismatch: {asset_id}")
     return asset
+
+
+def validate_video_phase(cue, fps):
+    """Validate old-relative video frames on an exact output frame clock."""
+    phase = cue.get("phase_map")
+    if phase is None:
+        if "phase_map" in cue:
+            raise ValueError("Video cue phase_map must be an object")
+        return None
+    if cue.get("role") != "video" or fps is None:
+        raise ValueError("Video cue phase_map requires video role and explicit FPS")
+    if cue.get("loop", False):
+        raise ValueError("Looped video phase migration is not supported yet")
+    rate = _seconds(fps, "fps")
+    if rate <= 0 or not isinstance(phase, dict) or set(phase) != {"version", "original_start_frame", "original_frame_count", "original_time_base", "original_timestamps", "frames"}:
+        raise ValueError("Invalid video cue phase_map")
+    count, frames = phase["original_frame_count"], phase["frames"]
+    if type(phase["original_start_frame"]) is not int or not 0 <= phase["original_start_frame"] <= 2**31-1:
+        raise ValueError("Invalid video cue phase_map original start frame")
+    if type(phase["version"]) is not int or phase["version"] != 1 or type(count) is not int or not 1 <= count <= 4096:
+        raise ValueError("Invalid video cue phase_map original count or version")
+    if not isinstance(phase['original_time_base'], str):
+        raise ValueError('Video cue original timebase must be a rational string')
+    tb = _seconds(phase['original_time_base'], 'original_time_base')
+    ticks = phase['original_timestamps']
+    if tb <= 0 or not isinstance(ticks, list) or len(ticks) != count or any(type(tick) is not int or not 0 <= tick <= 2**63-1 for tick in ticks):
+        raise ValueError('Invalid video cue original timestamps')
+    step = 1/(rate*tb)
+    tolerance = min(Fraction(1), step/4)
+    if any(abs(tick-(phase['original_start_frame']+index)*step) > tolerance for index, tick in enumerate(ticks)) or any(a >= b for a,b in zip(ticks,ticks[1:])):
+        raise ValueError('Video cue original timestamps must preserve the observed CFR clock')
+    start = _seconds(cue["output_start"], "output_start") * rate
+    end = _seconds(cue["output_end"], "output_end") * rate
+    if start.denominator != 1 or end.denominator != 1 or start < 0 or end <= start:
+        raise ValueError("Video cue phase_map needs an exact frame-aligned interval")
+    if not isinstance(frames, list) or len(frames) != end - start or len(frames) > 4096:
+        raise ValueError("Video cue phase_map length differs from its output interval")
+    if any(type(frame) is not int or not 0 <= frame < count for frame in frames):
+        raise ValueError("Video cue phase_map needs bounded original integer frames")
+    if any(left > right for left, right in zip(frames, frames[1:])):
+        raise ValueError("Video cue phase_map frames must be nondecreasing")
+    return {"version": 1, "original_start_frame": phase["original_start_frame"], "original_frame_count": count, "original_time_base": phase["original_time_base"], "original_timestamps": ticks.copy(), "frames": frames.copy()}
 
 
 def validate_cues(cues, assets, duration, fps=None):
@@ -108,7 +150,11 @@ def validate_cues(cues, assets, duration, fps=None):
                 raise ValueError(f"source range exceeds asset duration: {cue_id}")
         if role == "image" and (source_start or source_end):
             raise ValueError("image cues have no source time range")
-        if not cue.get("loop", False) and role in {"music", "sfx", "video"} and source_end - source_start < stop - start:
+        phase = validate_video_phase(cue, fps)
+        if phase is not None:
+            cue["phase_map"] = phase
+        required_duration = Fraction(phase["original_frame_count"], 1) / _seconds(fps, "fps") if phase else stop - start
+        if not cue.get("loop", False) and role in {"music", "sfx", "video"} and source_end - source_start < required_duration:
             raise ValueError(f"source too short without loop: {cue_id}")
         if role in {"image", "title"} and cue.get("loop"):
             raise ValueError(f"loop unsupported for {role}")

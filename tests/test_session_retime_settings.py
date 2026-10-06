@@ -10,6 +10,45 @@ from video_harness.session import Session
 
 
 class SessionRetimeSettingTests(unittest.TestCase):
+    def test_video_cue_migration_uses_sealed_observed_clock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg, plan = helpers.VisualEditingTests().fixture(root, source_audio=True)
+            cfg.update(edit_basis='visual', fcp_handoff='video_only',
+                editing_pattern={'id': 'playful_short', 'music': 'off', 'sfx': 'off',
+                                 'beat_sync': 'off', 'visual_assets': 'licensed'})
+            project = root/'project.json'
+            write(project, cfg)
+            session = Session.start(project, root/'session')
+            session.propose_visual(plan, 'codex')
+            session.approve('codex', 'Synthetic observed ranges')
+            initial = session.render(preview=False, actor='codex')
+            mapping = read(initial['files']['mapping']['path'])
+            session.update_project({'cue_plan': {'version': 1, 'mapping_sha256': digest(mapping),
+                'cues': [{'id': 'video', 'role': 'video', 'asset_id': 'video1',
+                          'output_start': '1/5', 'output_end': '2/5',
+                          'source_start': '1/10', 'source_end': '3/10', 'reason': 'Synthetic video cue'}]}},
+                'codex', 'Bind video to the observed edit')
+            observed = session.render(preview=False, actor='codex')
+            clock = read(observed['files']['overlays']['path'])['video_cue_clocks'][0]
+            before = session._load()['project']
+            request = {'operations': [{'id': 'hold', 'kind': 'freeze', 'source_frame': 3,
+                'output_frames': 2, 'reason': 'Synthetic frame hold'}]}
+            candidate = session.propose_retime(observed['id'], request, 'codex', 'Keep video synchronized')
+            changed = read(candidate['candidate']['project']['path'])
+            phase = changed['cue_plan']['cues'][0]['phase_map']
+            self.assertEqual(phase['original_timestamps'], clock['original_timestamps'])
+            self.assertEqual(phase['original_time_base'], clock['original_time_base'])
+            self.assertEqual(phase['frames'], [0, 1, 1, 1])
+            rendered = session.render(preview=False, actor='codex', candidate_id=candidate['candidate']['id'])
+            self.assertEqual(read(rendered['files']['result']['path'])['technical_status'], 'pass')
+            self.assertEqual(read(rendered['files']['overlays']['path'])['video_phase_layers'][0]['phase_map'], phase)
+            self.assertEqual(session._load()['project'], before)
+            with Path(observed['files']['overlays']['path']).open('a') as stream:
+                stream.write('changed')
+            with self.assertRaises(ValueError):
+                session.propose_retime(observed['id'], request, 'codex', 'Reject changed clock')
+
     def test_default_migration_renders_exact_mapping_without_adopting(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

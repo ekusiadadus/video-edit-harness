@@ -912,7 +912,9 @@ class Session:
                 original_mapping=read(render['files']['mapping']['path'])
                 if digest(original_mapping) != setting['input_mapping_sha256']:
                     raise ValueError('Existing settings refer to a different retime stage; rebuild from the original edit')
-                migrated=migrate_visual_settings(cfg,original_mapping,proposal['mapping'])
+                overlay_evidence = read(render['files']['overlays']['path']) if 'overlays' in render['files'] else {}
+                clocks = {row['cue_id']: row for row in overlay_evidence.get('video_cue_clocks', [])}
+                migrated=migrate_visual_settings(cfg,original_mapping,proposal['mapping'], video_clocks=clocks)
                 changes.update(migrated['changes'])
                 migration={**migrated['evidence'], 'actor':actor, 'reason':note,
                            'base_render_id':render_id, 'base_render_sha256':render['files']['video']['sha256'],
@@ -1354,6 +1356,8 @@ class Session:
                   ('subtitles', 'subtitles.srt'), ('lut', 'look.cube')]}
         if (folder / 'production.json').is_file():
             files['production'] = fingerprint(folder / 'production.json')
+        if (folder / 'overlay-evidence.json').is_file():
+            files['overlays'] = fingerprint(folder / 'overlay-evidence.json')
         if (folder / 'effects-evidence.json').is_file():
             files['effects'] = fingerprint(folder / 'effects-evidence.json')
         if (folder / 'depth-evidence.json').is_file():

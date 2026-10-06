@@ -42,6 +42,25 @@ class ProductionFCPTests(unittest.TestCase):
         Image.new('RGBA', (64, 64), 'yellow').save(picture)
         return base, mixed, [asset(music, 'music', 'm'), asset(picture, 'image', 'p')]
 
+    def test_video_phase_uses_baked_handoff_and_rejects_editable_loss(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base, mixed, _ = self.fixtures(root)
+            source = root / 'source.mp4'
+            video = asset(source, 'video', 'v')
+            production = {'assets': [video], 'cues': [{
+                'id': 'overlay', 'asset_id': 'v', 'role': 'video',
+                'output_start': '1/30', 'output_end': '7/30', 'source_start': '0', 'source_end': '1/10',
+                'phase_map': {'version': 1, 'original_start_frame': 1,
+                              'original_frame_count': 3, 'original_time_base': '1/15360',
+                              'original_timestamps': [512, 1024, 1536], 'frames': [0, 0, 1, 1, 2, 2]}}]}
+            with self.assertRaisesRegex(ValueError, 'baked'):
+                export_production_xml(base, production, mixed, root / 'editable.fcpxml', mode='editable')
+            self.assertFalse((root / 'editable.fcpxml').exists())
+            result = export_production_xml(base, production, mixed, root / 'baked.fcpxml', mode='mix')
+            self.assertEqual(result['mode'], 'mix')
+            self.assertTrue((root / 'baked.fcpxml').is_file())
+
     def test_three_modes_and_strict_readback(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

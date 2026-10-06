@@ -488,7 +488,7 @@ def _match_editable(reference, returned, production):
                 cue['beat_anchor'] = float(anchor)
                 changes.append({'cue_id': cue['id'], 'beat_anchor_before': float(before_markers[label]),
                                 'beat_anchor_after': float(anchor)})
-    revised = validate_cues(revised, assets, returned['output']['duration'])
+    revised = validate_cues(revised, assets, returned['output']['duration'], returned['output']['fps'])
     return {'version': 1, 'mapping_sha256': production['mapping_sha256'], 'cues': revised}, changes
 
 

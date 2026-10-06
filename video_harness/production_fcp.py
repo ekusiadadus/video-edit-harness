@@ -185,7 +185,13 @@ def _validate_base(root, production):
            for node in root.iter()):
         raise ValueError('base XML has unsupported spatial adjustments')
     _base_conform(root, sequence, spine)
-    cues = validate_cues(production.get('cues', []), production.get('assets', []), total)
+    format_ref = sequence.get('format')
+    format_node = root.find(f"./resources/format[@id='{format_ref}']")
+    needs_rate = any('phase_map' in cue for cue in production.get('cues', []))
+    if needs_rate and format_node is None:
+        raise ValueError('Video cue phase mapping needs a project frame duration')
+    rate = 1 / _read_time(format_node.get('frameDuration')) if needs_rate else None
+    cues = validate_cues(production.get('cues', []), production.get('assets', []), total, rate)
     return sequence, spine, total, cues
 
 
@@ -254,6 +260,8 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix', *
         raise ValueError('unsupported production FCP mode')
     if gain_inputs is not None and mode != 'editable':
         raise ValueError('measured audio automation requires editable mode')
+    if mode == 'editable' and any('phase_map' in cue for cue in production.get('cues', [])):
+        raise ValueError('Video cue phase changes require baked mix/video_only FCP handoff')
     if mode == 'editable' and production.get('depth_layer'):
         raise ValueError('Depth layer requires baked mix/video_only FCP handoff')
     output = Path(output)

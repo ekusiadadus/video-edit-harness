@@ -314,8 +314,8 @@ def render_visual_edit(cfg, plan, out, preview=True):
             'preview_scale_stage':'final composed picture' if pipeline_version==2 else 'final grade'})
         if visual_cues:
             rendered = out / 'visual-overlays.mp4'
-            render_overlays(visual_input, visual_cues, production['assets'], rendered, base['duration'], preview,
-                            preserve_audio_end=bool(effective.get('retime')))
+            write(out/'overlay-evidence.json', render_overlays(visual_input, visual_cues, production['assets'], rendered, base['duration'], preview,
+                            preserve_audio_end=bool(effective.get('retime'))))
             visual_input = rendered
         if production.get('effects', {}).get('events'):
             from .video_effects import render_effects

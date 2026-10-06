@@ -34,9 +34,9 @@ def config(**settings):
 
 
 class VisualSettingMigrationTests(unittest.TestCase):
-    def migrate(self, cfg, original=None, retime=None):
+    def migrate(self, cfg, original=None, retime=None, **extra):
         with patch("video_harness.retime_settings.resolve_production"):
-            return migrate_visual_settings(cfg, original or mapping(), retime or compiled())
+            return migrate_visual_settings(cfg, original or mapping(), retime or compiled(), **extra)
 
     def test_ramp_hold_exact_inverse_bounds_preserve_content_and_input(self):
         old = mapping()
@@ -96,9 +96,23 @@ class VisualSettingMigrationTests(unittest.TestCase):
         self.assertEqual(moved["phase_map"], {"version": 1, "original_frame_count": 5,
                                              "frames": [1, 1, 2, 2, 4, 4, 4]})
 
-    def test_video_and_sfx_require_complete_one_to_one_content(self):
+    def test_video_content_follows_original_output_frames(self):
         old = mapping()
-        for role in ("video", "sfx"):
+        cue = {"id": "video", "role": "video", "asset_id": "v", "output_start": "1/15",
+               "output_end": "1/6", "source_start": "0", "source_end": "1", "reason": "Observed video"}
+        cfg = config(cue_plan={"version": 1, "mapping_sha256": digest(old), "cues": [cue]})
+        with patch("video_harness.retime_settings.validate_cues"):
+            clock = {'original_start_frame': 2, 'original_frame_count': 3,
+                     'original_time_base': '1/30', 'original_timestamps': [2, 3, 4]}
+            result = self.migrate(cfg, old, video_clocks={'video': clock})
+        moved = result["changes"]["cue_plan"]["cues"][0]
+        self.assertEqual(moved["phase_map"], {"version": 1, "original_start_frame": 2, "original_frame_count": 3, "original_time_base": "1/30",
+                                             "original_timestamps": [2, 3, 4], "frames": [0, 0, 1, 1, 2, 2, 2]})
+        self.assertEqual(result["evidence"]["items"][0]["content_policy"], "original_output_frame_video_content")
+
+    def test_sfx_requires_complete_one_to_one_content(self):
+        old = mapping()
+        for role in ("sfx",):
             cue = {"id": "media", "role": role, "asset_id": "asset",
                    "output_start": "1/15", "output_end": "1/6", "source_start": "0",
                    "source_end": "1", "reason": "Observed synchronized media"}

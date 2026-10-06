@@ -1,5 +1,12 @@
 # 編集パターン実装の進捗と検証台帳
 
+## 2026-10-07: 動画overlayの素材フレームを変速後へ移行（alpha.7後の開発版）
+
+- 動画cueの`phase_map`に元区間のフレーム番号と、元の描画入力から実観測したtimebase／timestamp配列を保持する。素材を従来のtrim・配置・透明度・FFmpeg framesyncでRGBA透明層へ描画し、rawフレームを間引き／複製してlossless FFV1層を作る。最終MP4は通常のエンコードを通る。元素材の音を追加せず、元の音声をコピーする。
+- 異なる素材fpsで粗い時計を使うと未来フレームが選ばれる不具合を、フレームごとに大きく色が変わる素材で再現し修正。元の実時計を保持し、元／新cue開始が違う場合、ミリ秒時計、素材alphaを検査。素材SHAをstreamingで前後検査し、コマンド／stderrをローカルログへ残す。
+- visualセッションも`overlay-evidence.json`を書き、SHAを登録・再検査する。証跡のない古いrenderは元設定で再描画が必要。元／新4096フレーム上限、非ループ素材の必要尺は元区間で検査。動画ループとeditable FCP変速は明示拒否し、mix/video_onlyを使う。
+- 関連35試験成功（18.873秒）: `output/implementation-maya/video-cue-phase-coarse-clock.log`。セッション候補の実描画、採用状態不変、時計証跡の改変拒否、元と同じPCM、60fps／30000/1001と24fps混在、粗い時計、alpha、保持／間引きを検査。旧形式のFPS省略を受け入れる互換性修正後、関連14試験成功（20.479秒）と全604試験成功（275.934秒）: `video-cue-phase-compatibility.log`／`video-cue-phase-full-suite-final.log`。SFX・ループ・残像・通常cue fade・追跡／発話設定の移行、実素材の受入、最終MP4等の全計画は継続。公開alpha.7には未収録。
+
 ## 2026-10-07: keywordタイトルのフェード・riseを変速へ追従（alpha.7後の開発版）
 
 - keywordタイトルもvisual retime移行の`phase_map`へ接続。PNG入力に元の相対フレーム時刻を与えて既存FFmpeg fadeを通し、出力時計へ戻す。riseの描画位置／測定boundsも同じ元フレームから計算する。既存の非変速タイトル描画は保持する。
