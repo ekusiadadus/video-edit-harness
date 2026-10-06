@@ -15,6 +15,68 @@ from video_harness.video_effects import comparison_effect_controls, revise_compa
 
 @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')
 class ComparisonAdjustmentTests(unittest.TestCase):
+    def test_frame_range_and_anchor_move_render_and_preview_both_windows(self):
+        from video_harness.assets import register_asset
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cfg, plan = VisualEditingTests().fixture(root, source_audio=True)
+            source = root / 'pattern.mp4'
+            subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-f', 'lavfi',
+                '-i', 'testsrc2=s=128x128:r=10:d=1', '-f', 'lavfi',
+                '-i', 'sine=frequency=440:sample_rate=48000:duration=1',
+                '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', str(source)], check=True)
+            old = cfg['assets'][0]
+            metadata = {key: old[key] for key in ('asset_id', 'kind', 'creator', 'source_url',
+                'license_url', 'acquired_on', 'verified_on', 'evidence_path', 'credit',
+                'cost', 'currency', 'content_id', 'rights')}
+            cfg.update(source=str(source), edit_basis='visual', assets=[register_asset(source, metadata)])
+            write(root / 'project.json', cfg)
+            session = Session.start(root / 'project.json', root / 'session')
+            session.propose_visual(plan, 'automation')
+            session.approve('automation', 'Synthetic observed frame ranges')
+            natural = session.render(preview=False)
+            mapping = read(natural['files']['mapping']['path'])
+            setting = {'version': 1, 'mapping_sha256': digest(mapping), 'events': [
+                {'id': 'zoom', 'type': 'smooth_zoom', 'output_start': '0', 'output_end': '2/5',
+                 'strength': 1, 'parameters': {'max_scale': 1.3}, 'reason': 'Synthetic target'}]}
+            base = session.create_candidate({'editing_pattern': {'id': 'gentle_vlog',
+                'music': 'off', 'sfx': 'off', 'beat_sync': 'off'}, 'video_effects': setting},
+                'codex', 'Original zoom interval')
+            original = session.render(preview=False, candidate_id=base['id'])
+            changes = {'strength': 1, 'output_start': '2/5', 'output_end': '4/5',
+                       'parameters': {'anchor_x': .5, 'anchor_y': .5}}
+            receipt = {'version': 3, 'kind': 'comparison_selection_proposal', 'render_id': original['id'],
+                'render_sha256': original['files']['video']['sha256'], 'output_time': .2,
+                'note': 'Move zoom to second interval and target', 'adopted': False, 'final_review': False,
+                'effect_operations': [{'action': 'update', 'id': 'zoom', 'changes': changes}]}
+            before = session._load()
+            with self.assertRaises(ValueError):
+                session.candidate_from_selection({**receipt, 'version': 2}, 'codex', 'Reject v2 new fields')
+            for invalid in ({'output_start': '2/5'}, {'output_start': '1/100', 'output_end': '4/5'},
+                            {'output_start': '1/10000', 'output_end': '4/5'},
+                            {'parameters': {'max_scale': 1.5}}, {'parameters': {'anchor_x': True}},
+                            {'parameters': {'anchor_y': float('nan')}}):
+                with self.assertRaises(ValueError):
+                    session.candidate_from_selection({**receipt, 'effect_operations': [
+                        {'action': 'update', 'id': 'zoom', 'changes': invalid}]}, 'codex', 'Reject invalid range/position')
+                self.assertEqual(session._load(), before)
+            candidate = session.candidate_from_selection(receipt, 'codex', 'Apply observed range and anchor')
+            rendered = session.render(preview=False, candidate_id=candidate['id'])
+            preview = read(session.preview_effects(rendered['id'], context_frames=0)['path'])
+            self.assertEqual((preview['first_frame'], preview['end_frame_exclusive']), (0, 8))
+            alternative = deepcopy(receipt)
+            alternative['effect_operations'][0]['changes']['parameters'] = {'anchor_x': .8, 'anchor_y': .2}
+            other = session.candidate_from_selection(alternative, 'codex', 'Compare target position only')
+            other_render = session.render(preview=False, candidate_id=other['id'])
+            def decoded(render, audio=False):
+                options = ['-vn', '-f', 's16le'] if audio else ['-an', '-pix_fmt', 'rgb24', '-f', 'rawvideo']
+                return subprocess.check_output(['ffmpeg', '-v', 'error', '-i', render['files']['video']['path'], *options, '-'])
+            self.assertNotEqual(decoded(rendered), decoded(other_render))
+            self.assertNotEqual(decoded(original), decoded(rendered))
+            self.assertEqual(decoded(original, True), decoded(rendered, True))
+            self.assertEqual(session._load()['project'], before['project'])
+            self.assertEqual(session._load()['reviews'], [])
+
     def test_adjusted_snapshot_renders_changed_picture_and_same_audio_without_adoption(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -137,7 +199,9 @@ class ComparisonControlsScriptTests(unittest.TestCase):
                  'sha256': 'a' * 64, 'effect_controls': []},
                 {'label': 'effects', 'video': 'file:///effects.mp4', 'render_id': 'effects',
                  'sha256': 'b' * 64, 'effect_controls': [
-                     {'id': 'pulse', 'kind': 'saturation_pulse', 'strength': .005, 'adjustable_strength': True},
+                     {'id': 'pulse', 'kind': 'smooth_zoom', 'strength': .005, 'adjustable_strength': True,
+                      'fps': '30000/1001', 'frame_count': 30, 'first_frame': 3, 'end_frame_exclusive': 9,
+                      'adjustable_range': True, 'anchor': {'anchor_x': .5, 'anchor_y': .5}},
                      {'id': 'mono', 'kind': 'monochrome', 'strength': 1, 'adjustable_strength': False}]}]
         script = re.search(r'<script>(.*?)</script>', comparison_page(rows), re.S).group(1)
         harness = r'''
@@ -180,6 +244,18 @@ const input=(element,value)=>{element.value=value;element.events.input();};
  ids['#reset-effects'].click();receipt=await save();assert.equal(receipt.version,1);assert.equal(Object.keys(receipt).length,8);
  ids['#undo-effects'].click();assert.equal((await save()).effect_operations[0].changes.strength,.3);
  assert.equal((await save()).render_sha256,'b'.repeat(64));
+ const start=list.children[0].children[2].children[0];start.value='6';start.events.change();
+ receipt=await save();assert.equal(receipt.version,3);
+ assert.equal(receipt.effect_operations[0].changes.output_start,'6006/30000');
+ assert.equal(receipt.effect_operations[0].changes.output_end,'9009/30000');
+ const anchorX=list.children[0].children[4].children[0];anchorX.value='0.2';anchorX.events.change();
+ assert.deepEqual((await save()).effect_operations[0].changes.parameters,{anchor_x:.2});
+ ids['#undo-effects'].click();assert.equal((await save()).effect_operations[0].changes.parameters,undefined);
+ ids['#reset-effects'].click();assert.equal((await save()).version,1);
+ const invalid=list.children[0].children[2].children[0];invalid.value='2.5';invalid.events.change();
+ const lastSaved=saved;ids['#save'].click();assert.equal(saved,lastSaved);
+ assert.match(ids['#status'].textContent,/範囲/);
+ ids['#undo-effects'].click();assert.equal((await save()).version,1);
 })().catch(error=>{console.error(error);process.exitCode=1;});
 '''
         subprocess.run(['node', '-e', 'const rows=' + json.dumps(rows) + ';const script=' +

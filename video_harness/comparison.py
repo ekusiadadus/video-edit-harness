@@ -63,46 +63,65 @@ code{overflow-wrap:anywhere;font-size:11px}textarea{width:min(90%,700px)}
 <script>const rows=''' + data + ''';
 const videos=[...document.querySelectorAll('video')],seek=document.querySelector('#seek'),status=document.querySelector('#status');
 let playing=false,choice=null,audio=0;
-const staged=rows.map(()=>({values:new Map(),disabled:new Set(),history:[]}));
+const staged=rows.map(()=>({values:new Map(),ranges:new Map(),anchors:new Map(),disabled:new Set(),history:[]}));
 const effectList=document.querySelector('#effect-list'),effectSummary=document.querySelector('#effect-summary');
 const undoEffects=document.querySelector('#undo-effects'),resetEffects=document.querySelector('#reset-effects');
 function controlsFor(index){return Array.isArray(rows[index].effect_controls)?rows[index].effect_controls:[];}
-function snapshot(state){return {values:new Map(state.values),disabled:new Set(state.disabled)};}
+function snapshot(state){return {values:new Map(state.values),ranges:new Map(state.ranges),anchors:new Map(state.anchors),disabled:new Set(state.disabled)};}
 function remember(state){state.history.push(snapshot(state));}
+function frameTime(frame,fps){const [n,d='1']=String(fps).split('/');return String(BigInt(frame)*BigInt(d))+'/'+n;}
 function operationsFor(index){const state=staged[index];return controlsFor(index).flatMap(event=>{
 if(state.disabled.has(event.id))return [{action:'remove',id:event.id}];
-const strength=state.values.get(event.id);
-return strength!==undefined && strength!==Number(event.strength)
-? [{action:'update',id:event.id,changes:{strength}}] : [];});}
+const changes={},strength=state.values.get(event.id),range=state.ranges.get(event.id),anchor=state.anchors.get(event.id);
+if(strength!==undefined && strength!==Number(event.strength))changes.strength=strength;
+if(range){if(!Number.isInteger(range.first) || !Number.isInteger(range.end) || range.first<0 || range.end-range.first<(event.minimum_frames ?? 1) || range.end>event.frame_count)
+throw new Error('範囲は動画内の開始・終了フレームで指定してください');
+if(range.first!==event.first_frame || range.end!==event.end_frame_exclusive){changes.output_start=frameTime(range.first,event.fps);changes.output_end=frameTime(range.end,event.fps);}}
+if(anchor){if(Object.values(anchor).some(v=>!Number.isFinite(v) || v<0 || v>1))throw new Error('位置は0〜1の範囲で指定してください');
+const changed=Object.fromEntries(Object.entries(anchor).filter(([key,v])=>v!==event.anchor[key]));
+if(Object.keys(changed).length)changes.parameters=changed;}
+return Object.keys(changes).length?[{action:'update',id:event.id,changes}]:[];});}
+function changedCount(index){try{return operationsFor(index).length;}catch(e){return '範囲・位置を確認';}}
 function renderEffects(){effectList.replaceChildren();
 if(choice===null){effectSummary.textContent='候補を選ぶと調整できるエフェクトを表示します。';
 undoEffects.disabled=true;resetEffects.disabled=true;return;}
 const controls=controlsFor(choice),state=staged[choice];
 effectSummary.textContent=controls.length
-? rows[choice].label+'：'+controls.length+' 件。変更 '+operationsFor(choice).length+' 件。'
+? rows[choice].label+'：'+controls.length+' 件。変更 '+changedCount(choice)+' 件。'
 : rows[choice].label+'：調整できるエフェクトはありません。';
 for(const event of controls){const item=document.createElement('li');
-const title=document.createElement('span');title.textContent=String(event.kind)+' / '+String(event.id)+' ';item.append(title);
+const names={smooth_zoom:'滑らかなズーム',zoom_pulse:'ズームアクセント',saturation_pulse:'彩度アクセント',monochrome:'白黒',split_screen:'ミラー分割',comparison_wipe:'比較ワイプ',keyword_title:'キーワード',tracked_title:'追従ラベル',tracked_zoom:'追従ズーム',tracked_background:'背景強調',motion_trail:'残像',color_frame:'装飾枠'};
+const title=document.createElement('span');title.textContent=(names[event.kind] ?? String(event.kind))+' ';item.append(title);
 if(event.adjustable_strength){const strengthLabel=document.createElement('label');strengthLabel.textContent='強さ ';
 const slider=document.createElement('input');slider.type='range';slider.min=String(Math.min(0.01,Number(event.strength)));slider.max='1';slider.step='any';
 slider.value=String(state.values.get(event.id) ?? event.strength);slider.disabled=state.disabled.has(event.id);
 const value=document.createElement('output');value.textContent=slider.value;let adjusting=false;
 slider.addEventListener('input',()=>{if(!adjusting){remember(state);adjusting=true;}state.values.set(event.id,Number(slider.value));
-value.textContent=slider.value;effectSummary.textContent=rows[choice].label+'：'+controls.length+' 件。変更 '+operationsFor(choice).length+' 件。';
-undoEffects.disabled=false;resetEffects.disabled=operationsFor(choice).length===0;});
+value.textContent=slider.value;effectSummary.textContent=rows[choice].label+'：'+controls.length+' 件。変更 '+changedCount(choice)+' 件。';
+undoEffects.disabled=false;resetEffects.disabled=changedCount(choice)===0;});
 slider.addEventListener('change',()=>{adjusting=false;});
 strengthLabel.append(slider,value);item.append(strengthLabel);}
+function numeric(labelText,current,min,max,step,changed){const label=document.createElement('label');label.textContent=labelText;
+const input=document.createElement('input');input.type='number';input.value=String(current);input.min=String(min);input.max=String(max);input.step=step;input.disabled=state.disabled.has(event.id);
+input.addEventListener('change',()=>{remember(state);changed(input.value.trim()===''?NaN:Number(input.value));undoEffects.disabled=false;resetEffects.disabled=false;
+effectSummary.textContent='変更 '+changedCount(choice)+' 件。反映後の映像を確認してください。';});label.append(input);item.append(label);}
+if(event.adjustable_range){const range=state.ranges.get(event.id) ?? {first:event.first_frame,end:event.end_frame_exclusive};
+numeric('開始フレーム ',range.first,0,event.frame_count-1,'1',v=>state.ranges.set(event.id,{...(state.ranges.get(event.id) ?? range),first:v}));
+numeric('終了フレーム（含まない） ',range.end,1,event.frame_count,'1',v=>state.ranges.set(event.id,{...(state.ranges.get(event.id) ?? range),end:v}));}
+if(event.anchor){for(const [key,label] of [['anchor_x','ズーム位置・横（左0／右1） '],['anchor_y','ズーム位置・縦（上0／下1） ']]){
+const anchor=state.anchors.get(event.id) ?? event.anchor;
+numeric(label,anchor[key],0,1,'any',v=>state.anchors.set(event.id,{...(state.anchors.get(event.id) ?? anchor),[key]:v}));}}
 const offLabel=document.createElement('label');offLabel.textContent='オフ ';
 const off=document.createElement('input');off.type='checkbox';off.checked=state.disabled.has(event.id);
 off.addEventListener('change',()=>{remember(state);if(off.checked)state.disabled.add(event.id);
 else state.disabled.delete(event.id);renderEffects();});offLabel.append(off);item.append(offLabel);
 effectList.append(item);}
 undoEffects.disabled=state.history.length===0;
-resetEffects.disabled=state.history.length===0 || operationsFor(choice).length===0;}
+resetEffects.disabled=state.history.length===0 || changedCount(choice)===0;}
 undoEffects.onclick=()=>{if(choice===null)return;const state=staged[choice],previous=state.history.pop();
-if(!previous)return;state.values=previous.values;state.disabled=previous.disabled;renderEffects();};
+if(!previous)return;state.values=previous.values;state.ranges=previous.ranges;state.anchors=previous.anchors;state.disabled=previous.disabled;renderEffects();};
 resetEffects.onclick=()=>{if(choice===null)return;const state=staged[choice];
-if(!operationsFor(choice).length)return;remember(state);state.values.clear();state.disabled.clear();renderEffects();};
+if(!changedCount(choice))return;remember(state);state.values.clear();state.ranges.clear();state.anchors.clear();state.disabled.clear();renderEffects();};
 function message(text){status.textContent=text;}
 function stop(){playing=false;videos.forEach(v=>v.pause());}
 function position(t){videos.forEach(v=>{if(Number.isFinite(v.duration))v.currentTime=Math.min(t,v.duration);});seek.value=t;}
@@ -123,8 +142,8 @@ renderEffects();message('候補: '+rows[choice].label);});
 function tick(){if(playing){const t=videos[0].currentTime;seek.value=t;videos.slice(1).forEach(v=>{if(Math.abs(v.currentTime-t)>.12)v.currentTime=t;});}
 document.querySelector('#time').textContent=Number(seek.value).toFixed(2)+'秒';requestAnimationFrame(tick);}tick();
 document.querySelector('#save').onclick=()=>{if(choice===null){message('先に候補を選んでください');return;}
-const operations=operationsFor(choice);
-const result={version:operations.length?2:1,kind:'comparison_selection_proposal',render_id:rows[choice].render_id,
+let operations;try{operations=operationsFor(choice);}catch(e){message(e.message);return;}
+const result={version:operations.some(op=>op.changes && Object.keys(op.changes).some(k=>k!=='strength'))?3:(operations.length?2:1),kind:'comparison_selection_proposal',render_id:rows[choice].render_id,
 render_sha256:rows[choice].sha256,output_time:Number(seek.value),note:document.querySelector('#note').value,
 adopted:false,final_review:false};
 if(operations.length)result.effect_operations=operations;

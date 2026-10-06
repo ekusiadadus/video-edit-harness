@@ -241,22 +241,38 @@ def _check_trail_overlaps(events):
             raise ValueError('Motion trail windows cannot overlap')
 
 
-def comparison_effect_controls(plan):
+def comparison_effect_controls(plan, mapping=None):
     """Only expose edits that can be rendered without discarding sealed clocks."""
     if any('content_map' in event for event in plan['events']):
         return []  # Captured temporal stages bind the entire ordered plan.
     strength_types = {'zoom_pulse', 'smooth_zoom', 'tracked_zoom', 'saturation_pulse',
                       'color_frame', 'keyword_title', 'tracked_title',
                       'motion_trail', 'tracked_background'}
-    return [{'id': event['id'], 'kind': event['type'], 'strength': event['strength'],
+    controls = [{'id': event['id'], 'kind': event['type'], 'strength': event['strength'],
              'adjustable_strength': event['type'] in strength_types}
             for event in plan['events'] if 'phase_map' not in event]
+    if mapping is not None and controls:
+        rate, count = _mapping_shape(mapping)
+        events = {event['id']: event for event in plan['events']}
+        for row in controls:
+            event = events[row['id']]
+            row.update(fps=str(rate), frame_count=count,
+                first_frame=_frame(_time(event['output_start'], 'start'), rate, 'start'),
+                end_frame_exclusive=_frame(_time(event['output_end'], 'end'), rate, 'end'),
+                minimum_frames=(3 if event['type'] in {'smooth_zoom', 'saturation_pulse'}
+                                else event['parameters']['history_frames'] if event['type'] == 'motion_trail' else 1),
+                adjustable_range=not event['type'].startswith('tracked_'))
+            if event['type'] == 'smooth_zoom':
+                row['anchor'] = {key: event['parameters'][key] for key in ('anchor_x', 'anchor_y')}
+    return controls
 
 
-def revise_comparison_effects(setting, mapping, operations, assets=None):
+def revise_comparison_effects(setting, mapping, operations, assets=None, *, version=2):
     """Validate the small browser receipt contract before ordinary revision."""
+    if type(version) is not int or version not in (2, 3):
+        raise ValueError('Unsupported comparison adjustment version')
     plan = resolve_effects(setting, mapping, assets)
-    controls = {row['id']: row for row in comparison_effect_controls(plan)}
+    controls = {row['id']: row for row in comparison_effect_controls(plan, mapping)}
     if not isinstance(operations, list) or not operations or len(operations) > len(controls):
         raise ValueError('Comparison adjustments need existing adjustable effects')
     seen = set()
@@ -271,12 +287,32 @@ def revise_comparison_effects(setting, mapping, operations, assets=None):
             continue
         if (operation.get('action') != 'update' or set(operation) != {'action', 'id', 'changes'}
                 or not isinstance(operation['changes'], dict)
-                or set(operation['changes']) != {'strength'}
-                or not controls[event_id]['adjustable_strength']):
-            raise ValueError('Comparison adjustments support effect strength or off only')
-        strength = operation['changes']['strength']
-        if type(strength) not in (int, float) or not 0 < strength <= 1:
-            raise ValueError('Comparison effect strength must be finite and in (0, 1]')
+                or not operation['changes']
+                or set(operation['changes']) - ({'strength', 'output_start', 'output_end', 'parameters'}
+                                                if version == 3 else {'strength'})):
+            raise ValueError('Comparison adjustments contain unsupported changes')
+        changes = operation['changes']
+        control = controls[event_id]
+        if 'strength' in changes:
+            strength = changes['strength']
+            if (not control['adjustable_strength'] or type(strength) not in (int, float)
+                    or not 0 < strength <= 1):
+                raise ValueError('Comparison effect strength must be finite and in (0, 1]')
+        if {'output_start', 'output_end'} & changes.keys():
+            if (not {'output_start', 'output_end'} <= changes.keys() or not control['adjustable_range']
+                    or any(not isinstance(changes[key], str) for key in ('output_start', 'output_end'))):
+                raise ValueError('Comparison effect range needs both exact frame-aligned times')
+            rate, _ = _mapping_shape(mapping)
+            if any((_time(changes[key], key) * rate).denominator != 1
+                   for key in ('output_start', 'output_end')):
+                raise ValueError('Comparison effect range must use exact output frames')
+        if 'parameters' in changes:
+            params = changes['parameters']
+            if (not control.get('anchor') or not isinstance(params, dict)
+                    or not params or set(params) - {'anchor_x', 'anchor_y'}
+                    or any(type(value) not in (int, float) or not 0 <= value <= 1
+                           for value in params.values())):
+                raise ValueError('Comparison position needs normalized smooth zoom anchors only')
     return revise_effects(setting, mapping, operations, assets)
 
 

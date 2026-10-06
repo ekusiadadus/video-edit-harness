@@ -1224,10 +1224,10 @@ class Session:
         require_note(note)
         actor_name(actor)
         fields = {'version','kind','render_id','render_sha256','output_time','note','adopted','final_review'}
-        if isinstance(selection, dict) and type(selection.get('version')) is int and selection['version'] == 2:
+        if isinstance(selection, dict) and type(selection.get('version')) is int and selection['version'] in (2, 3):
             fields = fields | {'effect_operations'}
         if (not isinstance(selection, dict) or set(selection) != fields
-                or type(selection['version']) is not int or selection['version'] not in (1, 2)
+                or type(selection['version']) is not int or selection['version'] not in (1, 2, 3)
                 or selection['kind'] != 'comparison_selection_proposal'
                 or not isinstance(selection['render_id'], str)
                 or not isinstance(selection['render_sha256'], str)
@@ -1253,11 +1253,11 @@ class Session:
                 raise ValueError('Comparison selection source differs from session source')
             self._validate_edit_plan(plan, cfg)
             adjusted_project = None
-            if selection['version'] == 2:
+            if selection['version'] in (2, 3):
                 from .video_effects import revise_comparison_effects
                 cfg['video_effects'] = revise_comparison_effects(
                     cfg.get('video_effects'), read(render['files']['mapping']['path']),
-                    selection['effect_operations'], cfg.get('assets', []))
+                    selection['effect_operations'], cfg.get('assets', []), version=selection['version'])
                 from .production import resolve_production
                 resolve_production(cfg, read(render['files']['mapping']['path']))
                 adjusted_project = cfg
@@ -1340,7 +1340,8 @@ class Session:
                 label = cfg.get('editing_pattern', {}).get('id', 'natural')
                 from .video_effects import resolve_effects, comparison_effect_controls
                 controls = comparison_effect_controls(resolve_effects(
-                    cfg.get('video_effects'), read(render['files']['mapping']['path']), cfg.get('assets', [])))
+                    cfg.get('video_effects'), read(render['files']['mapping']['path']), cfg.get('assets', [])),
+                    read(render['files']['mapping']['path']))
                 video = Path(render['files']['video']['path']).as_uri()
                 rows.append({'label': f'{label} / {render["id"]}', 'video': video,
                              'render_id': render['id'], 'sha256': render['files']['video']['sha256'],
@@ -1764,8 +1765,8 @@ class Session:
             if not candidate.get('comparison_selection'):
                 raise ValueError('Effect preview requires a comparison adjustment candidate')
             receipt = read(candidate['comparison_selection']['path'])
-            if receipt.get('version') != 2:
-                raise ValueError('Effect preview requires version-2 comparison adjustments')
+            if receipt.get('version') not in (2, 3):
+                raise ValueError('Effect preview requires version-2/3 comparison adjustments')
             original = self._find_render(state, candidate['selected_render_id'])
             self._verify_render(original)
             if original['preview']:
@@ -1778,7 +1779,7 @@ class Session:
             cfg = read(original['project']['path'])
             expected = deepcopy(cfg)
             expected['video_effects'] = revise_comparison_effects(
-                cfg.get('video_effects'), mapping, receipt['effect_operations'], cfg.get('assets', []))
+                cfg.get('video_effects'), mapping, receipt['effect_operations'], cfg.get('assets', []), version=receipt['version'])
             if read(render['project']['path']) != expected:
                 raise ValueError('Effect preview candidate differs from the comparison adjustments')
             changed = [row['id'] for row in receipt['effect_operations']]
@@ -1789,10 +1790,14 @@ class Session:
                 raise ValueError('Effect preview must select unique changed effect ids')
             events = {event['id']: event for event in resolve_effects(
                 cfg.get('video_effects'), mapping, cfg.get('assets', []))['events']}
+            revised_events = {event['id']: event for event in resolve_effects(
+                expected['video_effects'], mapping, cfg.get('assets', []))['events']}
             rate = Fraction(str(mapping['fps']))
             intervals = [{'id': key,
-                          'first_frame': _frame(_time(events[key]['output_start'], 'start'), rate, 'start'),
-                          'end_frame_exclusive': _frame(_time(events[key]['output_end'], 'end'), rate, 'end')}
+                          'first_frame': min(_frame(_time(event['output_start'], 'start'), rate, 'start')
+                              for event in (events[key], revised_events.get(key, events[key]))),
+                          'end_frame_exclusive': max(_frame(_time(event['output_end'], 'end'), rate, 'end')
+                              for event in (events[key], revised_events.get(key, events[key])))}
                          for key in selected]
             first = max(0, min(row['first_frame'] for row in intervals) - context_frames)
             last = min(round(Fraction(str(mapping['duration'])) * rate),
