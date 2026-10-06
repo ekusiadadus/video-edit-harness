@@ -101,7 +101,8 @@ def _rows(mapping, bindings):
         if first != cursor or end <= first or source_end <= source_first or source_end > source["frame_count"]:
             raise ValueError("mapping rows must partition frame_count with valid source spans")
         canonical = conform_source_frames(source_first, source_end, source["fps"], end - first, mapping["fps"])
-        if row.get("source_frame_map") != canonical:
+        actual = row.get("source_frame_map")
+        if not isinstance(actual, list) or any(type(f) is not int for f in actual) or actual != canonical:
             raise ValueError("mapping source_frame_map differs from canonical conform")
         cursor = end
     if cursor != count:
@@ -115,6 +116,12 @@ def _source_frame(row, output_frame, output_fps, source):
     if selected:
         frame = row["source_frame_map"][relative]
     else:
+        # CFR resampling can repeat a boundary frame, but a requested handle
+        # still requires real material beyond the selected source interval.
+        if (relative < 0 and row["source_first_frame"] == 0
+                or relative >= len(row["source_frame_map"])
+                and row["source_end_frame_exclusive"] == source["frame_count"]):
+            raise ValueError("transition requires missing source pre/post handle")
         # Outside the selected range, no end-of-span clamping is permitted:
         # these are actual source handles, or compilation fails.
         frame = row["source_first_frame"] + math.ceil(
@@ -148,14 +155,15 @@ def compile_transitions(mapping: dict, request: dict, sources: dict, actor: str,
         expected = {"id", "left_segment_id", "before_frames", "after_frames", "type", "reason"}
         if kind == "push":
             expected.add("direction")
-        if set(requested) != expected or kind not in {"dissolve", "push"}:
+        if set(requested) != expected or not isinstance(kind, str) or kind not in {"dissolve", "push"}:
             raise ValueError("transition event fields or type are invalid")
         identity = _nonempty(requested["id"], "event id")
         if identity in seen:
             raise ValueError("transition event ids must be unique")
         seen.add(identity)
         _nonempty(requested["reason"], "event reason")
-        if kind == "push" and requested["direction"] not in {"left", "right", "up", "down"}:
+        if kind == "push" and (not isinstance(requested["direction"], str)
+                               or requested["direction"] not in {"left", "right", "up", "down"}):
             raise ValueError("push direction is invalid")
         left_id = _nonempty(requested["left_segment_id"], "left_segment_id")
         index = by_id.get(left_id)

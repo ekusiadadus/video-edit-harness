@@ -2,7 +2,7 @@
 
 Alpha.7 supports an opt-in production workflow for registered music, sound effects, visual assets and beat proposals. Natural editing remains the default. See the [Japanese usage guide](docs/EDITING_PATTERNS_USAGE.ja.md), [implementation plan](docs/EDITING_PATTERNS_PLAN_2026.ja.md) and [verification status](docs/EDITING_PATTERNS_IMPLEMENTATION_STATUS.ja.md). Synthetic tests do not establish human review or an FCP GUI round trip.
 
-The development checkout adds `session motion-cuts` for reviewed cut-position proposals based on observed image motion. Supply source-frame choices, ROIs and observed nonspoken intervals; uncertain motion leaves the plan unchanged. See [usage and limits](docs/MOTION_CUTS.ja.md). Overlapping transition rendering remains unimplemented.
+The development checkout adds `session motion-cuts` for reviewed cut-position proposals based on observed image motion. Supply source-frame choices, ROIs and observed nonspoken intervals; uncertain motion leaves the plan unchanged. See [usage and limits](docs/MOTION_CUTS.ja.md). Source-bound dissolve/push compilation and a local picture backend now exist, but session/feedback/delivery integration remains incomplete; see [transition development status](docs/TRANSITIONS.ja.md).
 
 English | [日本語](README.ja.md)
 

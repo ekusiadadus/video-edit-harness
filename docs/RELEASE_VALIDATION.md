@@ -1,10 +1,16 @@
+# Post-alpha.7 transition backend / 開発版の検証
+
+- Added a pure source-bound transition compiler and a streaming local Rec.709 picture backend for encoded-RGB dissolve and four-direction spatial push. Real pre/post material, exact source/base fingerprints, proposal recompilation, full decode, frame count/FPS and decoded PCM equality are checked. This is an internal backend; session candidate, composite feedback, rights-aware orchestration and delivery integration remain incomplete.
+- Local full suite: 441 tests passed in 163.438 seconds, executed alone. Focused tests cover exact indexed source-frame decode including repeated CFR references, all push directions/endpoints, rendered 24 and 30000/1001 fps fixtures, unchanged decoded audio, changed proposals/base bindings and missing handles. Raw logs: `output/implementation-maya/transition-full-suite.log`, `transition-backend-tests.log`, `transition-compiler-review.log`. The common editing skill validator passed.
+- These checks use synthetic media and establish technical behavior only. No real-media/human acceptance, FCP GUI or final YouTube MP4 is claimed. The immutable alpha.7 release does not include this backend.
+
 # Post-alpha.7 motion-cut development / 開発版の検証
 
 - Optional `session motion-cuts` measures manually selected source ROIs and ranks observed adjacent endpoint choices. Changed source intervals require declared nonspoken permission. Source hashes, actual decoded frame windows, FPS, motion/uncertainty, exact render/mapping and actor/reason are retained. Changed cuts remain proposed and require plan selection; existing render/artifacts persist. Old cue/effect/guide timing is invalidated explicitly.
 - Current attached report must describe the exact source-frame sequence; later sequence revisions clear that evidence. Synthetic actual-media integration covers opposite-direction rejection, source-frame readback after selection, permissions on both added/removed sides, stale render/report and replaced source rejection.
 - Final local full suite: 430 tests passed in a serial run. An earlier overlapping full/focused invocation hit the shared render lock and failed four tests; both invocations ended, then the complete suite passed alone. Raw logs: `output/implementation-maya/motion-serial-full-suite.log`, `motion-final-guards.log`, `motion-final-focused.log`; the failed concurrency log is retained.
 - Existing dance derivative probe measured two observed torso windows; direction difference 36.830 degrees and speed ratio 1.754 were classified compatible. This read-only flow probe did not propose/adopt a real cut or establish choreographic/narrative quality. Evidence: `output/implementation-maya/motion-real-20261006/report.json`.
-- Semantic-mask commit `79a07eb` CI `37470009064` passed all three environments. The current motion-cut commit's remote CI is separate. These development features are not in the immutable alpha.7 release. Overlapping transitions, full real-media/human acceptance, FCP/external finishing and the final MP4 remain open.
+- Semantic-mask commit `79a07eb` CI `37470009064` passed all three environments. Motion-cut commit `2c2584a` CI `37472526758` also passed all three environments. These development features are not in the immutable alpha.7 release. The transition compiler and local dissolve/push backend have synthetic frame/decode/PCM checks; session/feedback/delivery integration and real-media/human acceptance remain open, along with FCP/external finishing and the final MP4.
 
 # Post-alpha.7 semantic-mask development / 開発版の検証
 

@@ -48,6 +48,19 @@ def compile_(mapping=None, sources=None, transition=None):
 
 
 class TransitionMappingTests(unittest.TestCase):
+    def test_cfr_boundary_still_requires_real_post_handle_and_strict_types(self):
+        mapping, sources = fixture('30', ('24', '24'), spans=((0, 2), (5, 7)), lengths=(2, 2))
+        sources['asset-0']['frame_count'] = 2
+        with self.assertRaisesRegex(ValueError, 'missing source pre/post handle'):
+            compile_(mapping, sources, request(before=1, after=1))
+        mapping, sources = fixture(spans=((1, 25), (40, 64)))
+        mapping['sequence'][0]['source_frame_map'][0] = True
+        with self.assertRaisesRegex(ValueError, 'canonical'):
+            compile_(mapping, sources)
+        for event in (request(type=[]), request('push', direction=[])):
+            with self.assertRaises(ValueError):
+                compile_(transition=event)
+
     def test_exact_endpoints_audio_and_real_handles(self):
         mapping, sources = fixture()
         result = compile_(mapping, sources)
