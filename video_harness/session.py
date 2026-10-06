@@ -670,7 +670,7 @@ class Session:
         from .profiles import resolve
         from .regions import region_filter
         require_note(note)
-        allowed = {'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
+        allowed = {'depth_layer', 'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
                    'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version'}
         if not isinstance(changes, dict) or set(changes) - allowed:
@@ -692,6 +692,7 @@ class Session:
             if changes.get('editing_pattern', {}).get('id') == 'natural' and 'video_effects' not in changes:
                 cfg.pop('video_effects', None)
                 cfg.pop('retime', None)
+                cfg.pop('depth_layer', None)
             from .production import freeze_pattern
             cfg = freeze_pattern(cfg, refresh='editing_pattern' in changes)
             from .patterns import resolve_pattern, resolve_asset_policy
@@ -713,7 +714,7 @@ class Session:
         from .regions import region_filter
         require_note(note)
         actor_name(actor)
-        allowed = {'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
+        allowed = {'depth_layer', 'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
                    'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version'}
         if not isinstance(changes, dict) or set(changes) - allowed:
@@ -745,6 +746,7 @@ class Session:
             if changes.get('editing_pattern', {}).get('id') == 'natural' and 'video_effects' not in changes:
                 cfg.pop('video_effects', None)
                 cfg.pop('retime', None)
+                cfg.pop('depth_layer', None)
             from .production import freeze_pattern, frozen_pattern
             if direction_resolution is not None:
                 resolved_changes = direction_resolution.get('project_changes')
@@ -755,6 +757,7 @@ class Session:
                     cfg.pop('video_effects', None)
                     cfg.pop('retime', None)
                     cfg.pop('transitions', None)
+                    cfg.pop('depth_layer', None)
                 cfg = freeze_pattern(cfg)
             else:
                 cfg = freeze_pattern(cfg, refresh='editing_pattern' in changes)
@@ -1053,6 +1056,52 @@ class Session:
                                      expected_project=state['project'], base_render_id=render_id,
                                      motion_template=evidence)
 
+    def propose_depth_layer(self, render_id, manifest, asset_id, threshold, softness, strength, actor, note):
+        """Seal an image and depth field against a retained full-resolution grade."""
+        from .depth_artifact import validate_depth
+        from .assets import validate_asset
+        from .patterns import resolve_asset_policy
+        from .production import frozen_pattern
+        from .visual_editing import validate_depth_setting
+        actor_name(actor)
+        note = require_note(note)
+        state = self._load()
+        self._verify(state)
+        render = self._find_render(state, render_id)
+        self._verify_render(render)
+        if render['preview'] or render['plan'] != state['plan'] or render['brief'] != state['brief']:
+            raise ValueError('Depth needs a current full-resolution base render')
+        cfg = read(render['project']['path'])
+        if cfg.get('edit_basis') != 'visual' or cfg.get('visual_pipeline_version') != 2:
+            raise ValueError('Depth needs visual pipeline 2')
+        pattern = frozen_pattern(cfg)
+        if pattern['id'] == 'natural' or pattern['intensity'] == 'off':
+            raise ValueError('Depth layer conflicts with natural/off')
+        if cfg.get('fcp_handoff', 'mix') == 'editable':
+            raise ValueError('Depth layer requires baked mix or video_only FCP handoff')
+        stage = Path(render['path']) / 'visual-graded.mp4'
+        if not stage.is_file():
+            raise ValueError('Depth needs retained visual-graded.mp4')
+        stage_ref = fingerprint(stage)
+        depth = validate_depth(manifest, source=stage)
+        if depth['source'] != stage_ref:
+            raise ValueError('Depth manifest must bind the exact retained graded picture')
+        matches = [a for a in cfg.get('assets', []) if a.get('asset_id') == asset_id]
+        if len(matches) != 1:
+            raise ValueError('Depth image must have one registered asset ID')
+        image = validate_asset(matches[0], resolve_asset_policy(cfg), 'embedded_use')
+        if image['kind'] != 'image':
+            raise ValueError('Depth layer asset must be an image')
+        setting = {'version': 1, 'backend': 'local_baked', 'base_render_id': render_id,
+                   'graded_picture': stage_ref, 'manifest': fingerprint(manifest),
+                   'asset_id': asset_id, 'asset_record_sha256': image['record_sha256'],
+                   'parameters': {'threshold': threshold, 'softness': softness, 'strength': strength},
+                   'actor': actor, 'reason': note, 'review_required': True, 'adopted': False}
+        validate_depth_setting(setting, cfg, stage, check_source=True)
+        candidate = self.create_candidate({'depth_layer': setting}, actor, note,
+                                          expected_project=state['project'], base_render_id=render_id)
+        return {'candidate': candidate, 'depth_layer': setting, 'review_required': True, 'adopted': False}
+
     def propose_direction(self, request, actor, note, *, preference=None, trend=None):
         """Create reviewable candidates from explicit direction; never adopt them."""
         from .direction import resolve_direction
@@ -1281,6 +1330,10 @@ class Session:
             files['production'] = fingerprint(folder / 'production.json')
         if (folder / 'effects-evidence.json').is_file():
             files['effects'] = fingerprint(folder / 'effects-evidence.json')
+        if (folder / 'depth-evidence.json').is_file():
+            files['depth_evidence'] = fingerprint(folder / 'depth-evidence.json')
+            files['depth_manifest'] = fingerprint(read(files['depth_evidence']['path'])['setting']['manifest']['path'])
+            files['depth_picture'] = fingerprint(folder / 'visual-depth.mp4')
         if operation.get('motion_template'):
             check_ref(operation['motion_template'])
             files['motion_template'] = deepcopy(operation['motion_template'])
@@ -1425,6 +1478,8 @@ class Session:
                     checks.append('video_effects')
                     if any(event['type']=='tracked_background' for event in production['effects']['events']):
                         checks.append('subject_masks')
+                if production.get('depth_layer'):
+                    checks.append('depth_contours')
             if render['files'].get('audio_cuts'):
                 checks.append('audio_cuts')
             if render['files'].get('transitions'):
@@ -1441,7 +1496,7 @@ class Session:
                             'captions': {'text', 'visual'}, 'color': {'visual'},
                             'music_fit': {'listening'}, 'asset_context': {'visual'},
                             'asset_rights': {'text'}, 'beat_sync': {'visual'},
-                            'video_effects': {'visual'}}
+                            'video_effects': {'visual'}, 'depth_contours': {'visual'}}
                 if visual:
                     expected.update(meaning={'visual'}, pacing={'visual'}, cut_boundaries={'visual'})
                 if entry['status'] == 'pass' and entry['basis'] != 'synthetic' and entry['basis'] not in expected[entry['id']]:
@@ -1873,6 +1928,27 @@ document.getElementById('save').onclick=()=>{const time=Number(document.getEleme
             for label, ref in proof_refs.items():
                 check_ref(ref)
                 copied = proof_dir / (label + '.json')
+                if label == 'project' and read(ref['path']).get('depth_layer'):
+                    project_proof = read(ref['path'])
+                    if '_depth_project_original_sha256' in project_proof:
+                        raise ValueError('Depth project proof marker already exists')
+                    setting = project_proof['depth_layer']
+                    for key in ('manifest', 'graded_picture'):
+                        binding = setting[key]
+                        check_ref(binding)
+                        setting[key] = {'sha256': binding['sha256'], 'bytes': binding['bytes']}
+                    project_proof['_depth_project_original_sha256'] = ref['sha256']
+                    payload = json.dumps(project_proof, ensure_ascii=False, indent=2, allow_nan=False).encode()
+                    expected_sha = hashlib.sha256(payload).hexdigest()
+                    if copied.exists():
+                        if fingerprint(copied)['sha256'] != expected_sha:
+                            raise ValueError('Existing delivery proof changed: ' + label)
+                    else:
+                        write(copied, project_proof)
+                    if fingerprint(copied)['sha256'] != expected_sha:
+                        raise ValueError('Depth project proof changed during copy')
+                    proof_files[label] = str(copied.relative_to(folder))
+                    continue
                 if copied.exists():
                     if fingerprint(copied)['sha256'] != ref['sha256']:
                         raise ValueError('Existing delivery proof changed: ' + label)

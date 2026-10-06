@@ -56,6 +56,9 @@ def resolve_production(cfg, mapping):
     effects = resolve_effects(cfg.get('video_effects'), mapping, cfg.get('assets', []))
     if effects['events'] and (pattern['id'] == 'natural' or pattern['intensity'] == 'off'):
         raise ValueError('Requested video effects conflict with natural/off; select an enabled editing pattern')
+    depth_setting = cfg.get('depth_layer')
+    if depth_setting and (pattern['id'] == 'natural' or pattern['intensity'] == 'off'):
+        raise ValueError('Depth layer conflicts with natural/off')
     policy = resolve_asset_policy(cfg)
     records = cfg.get('assets', [])
     if not isinstance(records, list):
@@ -114,6 +117,14 @@ def resolve_production(cfg, mapping):
             if not assets[cue['asset_id']].get('owned_by_user', False):
                 raise ValueError('Pattern permits user-owned visual assets only')
     used = {c['asset_id'] for c in cues if c.get('asset_id')}
+    if depth_setting:
+        if depth_setting['asset_id'] not in assets:
+            raise ValueError('Depth image is not registered')
+        if pattern['visual_assets'] == 'off':
+            raise ValueError('Depth image contradicts disabled visual assets')
+        if pattern['visual_assets'] == 'own_only' and not assets[depth_setting['asset_id']].get('owned_by_user', False):
+            raise ValueError('Pattern permits user-owned visual assets only')
+        used.add(depth_setting['asset_id'])
     for event in effects['events']:
         if event['type'] in {'keyword_title','tracked_title'} and pattern['visual_assets'] == 'off':
             raise ValueError('Keyword title contradicts disabled visual assets')
@@ -131,6 +142,8 @@ def resolve_production(cfg, mapping):
             'cues': cues, 'reasons': reasons}
     if effects['events']:
         result['effects'] = effects
+    if depth_setting:
+        result['depth_layer'] = deepcopy(depth_setting)
     if composition is not None:
         result['composition'] = composition
     if explicit is None and proposed.get('selection_report') is not None:
@@ -144,6 +157,11 @@ def mix_key(production):
 
 
 def verify_production(production, operation='embedded_use'):
+    if production.get('depth_layer'):
+        setting = production['depth_layer']
+        matches = [a for a in production.get('assets', []) if a.get('asset_id') == setting.get('asset_id')]
+        if len(matches) != 1 or matches[0].get('record_sha256') != setting.get('asset_record_sha256'):
+            raise ValueError('Depth image is missing from production rights inventory')
     if 'composition' in production:
         composition = production['composition']
         if not isinstance(composition, dict) or composition.get('version') != 1 or not production.get('mapping_sha256') or composition.get('mapping_sha256') != production['mapping_sha256']:
@@ -192,6 +210,8 @@ def prepare_fcp_handoff(cfg, production, out):
         raise ValueError('Invalid fcp_handoff mode')
     if mode == 'editable' and production.get('effects', {}).get('events'):
         raise ValueError('Video effects require burned mix/video_only handoff; editable FCP effects are unsupported')
+    if mode == 'editable' and cfg.get('depth_layer'):
+        raise ValueError('Depth layer requires baked mix/video_only handoff')
     if mode == 'editable' and cfg.get('retime'):
         raise ValueError('Retime requires burned mix/video_only handoff; editable FCP time changes are unsupported')
     if mode == 'editable' and cfg.get('audio_cuts') is not None:

@@ -236,6 +236,8 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix'):
     """
     if mode not in {'mix', 'editable', 'video_only'}:
         raise ValueError('unsupported production FCP mode')
+    if mode == 'editable' and production.get('depth_layer'):
+        raise ValueError('Depth layer requires baked mix/video_only FCP handoff')
     output = Path(output)
     if mode == 'video_only':
         if output.exists():

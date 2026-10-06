@@ -66,6 +66,68 @@ def prepare_inferred_depth(source, fields, output, actor, reason, inference):
     return _prepare_depth(source, fields, output, actor, reason, inference)
 
 
+def correct_depth(manifest, corrections, output, actor, reason):
+    """Copy a validated interval with explicit frame corrections into a review-required v3 revision."""
+    if actor not in ('human', 'codex', 'claude_code', 'automation'):
+        raise ValueError('Record a real depth actor')
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError('Depth correction requires an observation reason')
+    if not isinstance(corrections, dict) or not corrections:
+        raise ValueError('Provide explicit corrected source-frame fields')
+    if any(type(frame) is not int for frame in corrections):
+        raise ValueError('Depth correction frame IDs must be integers')
+    parent_path = Path(manifest).resolve(strict=True)
+    parent_ref = fingerprint(parent_path)
+    parent = validate_depth(parent_path)
+    if parent['version'] not in (1, 2, 3):
+        raise ValueError('Depth correction parent version is unsupported')
+    if fingerprint(parent_path) != parent_ref:
+        raise ValueError('Depth parent manifest changed during validation')
+    first, end = parent['start_frame'], parent['end_frame_exclusive']
+    if any(not first <= frame < end for frame in corrections):
+        raise ValueError('Depth correction is outside parent interval')
+    target = Path(output).resolve()
+    if target.exists():
+        raise FileExistsError(target)
+    inputs = {}
+    for frame, item in corrections.items():
+        path = Path(item).resolve(strict=True)
+        ref = fingerprint(path)
+        _field(path, parent['width'], parent['height'])
+        if fingerprint(path) != ref:
+            raise ValueError('Depth correction changed during validation')
+        inputs[frame] = ref
+    rows = []
+    target.mkdir(parents=True, exist_ok=False)
+    for old in parent['rows']:
+        frame = old['frame']
+        changed = frame in inputs
+        ref = inputs[frame] if changed else old['field']
+        if fingerprint(ref['path']) != ref:
+            raise ValueError('Depth correction or parent field changed before copying')
+        values = _field(ref['path'], parent['width'], parent['height'])
+        destination = target/f'{frame:09d}.npy'
+        with destination.open('xb') as stream:
+            np.save(stream, values, allow_pickle=False)
+        if fingerprint(ref['path']) != ref:
+            raise ValueError('Depth correction or parent field changed during copying')
+        rows.append({'frame': frame, 'field': fingerprint(destination), 'input': ref,
+                     'origin': 'manual_correction' if changed else 'retained_depth',
+                     'minimum': float(values.min()), 'maximum': float(values.max())})
+    if fingerprint(parent_path) != parent_ref or fingerprint(parent['source']['path']) != parent['source']:
+        raise ValueError('Depth parent or source changed during correction')
+    document = {key: parent[key] for key in ('source', 'fps', 'width', 'height',
+                 'source_frame_count', 'start_frame', 'end_frame_exclusive',
+                 'representation', 'normalization', 'metric_distance')}
+    document.update(version=3, algorithm='manual-depth-correction-v1', actor=actor,
+                    reason=reason.strip(), rows=rows, review_required=True, adopted=False,
+                    parent=parent_ref, corrected_frames=sorted(inputs))
+    result = target/'depth.json'
+    write(result, document)
+    validate_depth(result)
+    return result
+
+
 def _prepare_depth(source, fields, output, actor, reason, inference=None):
     if actor not in ('human', 'codex', 'claude_code', 'automation'):
         raise ValueError('Record a real depth actor')
@@ -129,20 +191,29 @@ def _prepare_depth(source, fields, output, actor, reason, inference=None):
     return manifest
 
 
-def validate_depth(manifest, source=None):
+def validate_depth(manifest, source=None, *, _parents=()):
     """Revalidate exact fields/source geometry; success is not visual review."""
+    manifest_path = Path(manifest).resolve(strict=True)
+    if manifest_path in _parents:
+        raise ValueError('Depth correction lineage contains a cycle')
+    if len(_parents) >= 32:
+        raise ValueError('Depth correction lineage exceeds 32 revisions')
+    lineage = (*_parents, manifest_path)
     doc = read(manifest)
     required = {'version', 'source', 'fps', 'width', 'height', 'source_frame_count',
                 'start_frame', 'end_frame_exclusive', 'representation', 'normalization',
                 'algorithm', 'actor', 'reason', 'rows', 'review_required',
                 'metric_distance', 'adopted'}
     inferred = isinstance(doc, dict) and type(doc.get('version')) is int and doc.get('version') == 2
+    corrected = isinstance(doc, dict) and type(doc.get('version')) is int and doc.get('version') == 3
     if inferred:
         required.add('inference')
+    if corrected:
+        required.update({'parent', 'corrected_frames'})
     if (not isinstance(doc, dict) or set(doc) != required or type(doc['version']) is not int or
-            doc['version'] != (2 if inferred else 1) or doc['representation'] != 'relative_near_high_float32_0_1' or
-            doc['normalization'] != ('interval_shared_minmax' if inferred else 'explicit_shared_relative_scale') or
-            doc['algorithm'] != ('depth-anything-v2-small-hf-v1' if inferred else 'manual-relative-depth-v1') or doc['review_required'] is not True or
+            doc['version'] != (3 if corrected else 2 if inferred else 1) or doc['representation'] != 'relative_near_high_float32_0_1' or
+            (not corrected and doc['normalization'] != ('interval_shared_minmax' if inferred else 'explicit_shared_relative_scale')) or
+            doc['algorithm'] != ('manual-depth-correction-v1' if corrected else 'depth-anything-v2-small-hf-v1' if inferred else 'manual-relative-depth-v1') or doc['review_required'] is not True or
             doc['metric_distance'] is not False or doc['adopted'] is not False):
         raise ValueError('Invalid relative depth manifest contract')
     if doc['actor'] not in ('human', 'codex', 'claude_code', 'automation') or not isinstance(doc['reason'], str) or not doc['reason'].strip():
@@ -162,7 +233,8 @@ def validate_depth(manifest, source=None):
         raise ValueError('Depth rows do not cover the declared source interval')
     for frame, row in zip(range(first, end), doc['rows']):
         if (not isinstance(row, dict) or set(row) != {'frame','field','input','origin','minimum','maximum'} or
-                type(row['frame']) is not int or row['frame'] != frame or row['origin'] != ('model_relative' if inferred else 'manual_relative')):
+                type(row['frame']) is not int or row['frame'] != frame or
+                (not corrected and row['origin'] != ('model_relative' if inferred else 'manual_relative'))):
             raise ValueError('Invalid or missing depth frame provenance')
         for key in ('field', 'input'):
             ref = _reference(row[key])
@@ -178,7 +250,51 @@ def validate_depth(manifest, source=None):
         raise ValueError('Depth source changed during validation')
     if inferred:
         _validate_inference(doc)
+    if corrected:
+        _validate_correction(doc, manifest, source, lineage)
     return doc
+
+
+def _validate_correction(doc, manifest, source, lineage):
+    parent_ref = _reference(doc['parent'])
+    if Path(parent_ref['path']).resolve() == Path(manifest).resolve():
+        raise ValueError('Depth correction cannot parent itself')
+    if fingerprint(parent_ref['path']) != parent_ref:
+        raise ValueError('Depth parent manifest binding changed')
+    parent_doc = read(parent_ref['path'])
+    if (not isinstance(parent_doc, dict) or type(parent_doc.get('version')) is not int
+            or parent_doc['version'] not in (1, 2, 3)):
+        raise ValueError('Depth correction parent must be v1, v2 or v3')
+    parent = validate_depth(parent_ref['path'], source, _parents=lineage)
+    if fingerprint(parent_ref['path']) != parent_ref:
+        raise ValueError('Depth parent manifest changed during validation')
+    keys = ('source', 'fps', 'width', 'height', 'source_frame_count', 'start_frame',
+            'end_frame_exclusive', 'representation', 'normalization', 'metric_distance')
+    if any(doc[key] != parent[key] for key in keys):
+        raise ValueError('Depth correction source, interval, canvas or scale differs from parent')
+    frames = doc['corrected_frames']
+    if (not isinstance(frames, list) or not frames or
+            any(type(frame) is not int for frame in frames) or
+            frames != sorted(set(frames)) or
+            any(not doc['start_frame'] <= frame < doc['end_frame_exclusive'] for frame in frames)):
+        raise ValueError('Depth corrected frame IDs are invalid')
+    corrected = set(frames)
+    for row, original in zip(doc['rows'], parent['rows']):
+        changed = row['frame'] in corrected
+        expected_origin = 'manual_correction' if changed else 'retained_depth'
+        expected_input = row['input'] if changed else original['field']
+        if row['origin'] != expected_origin or row['input'] != expected_input:
+            raise ValueError('Depth correction row origin or input binding changed')
+        input_values = _field(row['input']['path'], doc['width'], doc['height'])
+        values = _field(row['field']['path'], doc['width'], doc['height'])
+        if not np.array_equal(values, input_values):
+            raise ValueError('Depth correction row differs from declared input')
+        if not changed and not np.array_equal(values, _field(original['field']['path'], doc['width'], doc['height'])):
+            raise ValueError('Depth retained row differs from parent')
+        if fingerprint(row['input']['path']) != row['input'] or fingerprint(row['field']['path']) != row['field']:
+            raise ValueError('Depth correction row changed during validation')
+    if fingerprint(parent_ref['path']) != parent_ref:
+        raise ValueError('Depth parent manifest changed during validation')
 
 
 def raw_field(path, width, height):

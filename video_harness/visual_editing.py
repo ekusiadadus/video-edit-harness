@@ -111,6 +111,63 @@ def _composed_output_filter(preview):
         'setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=limited')
 
 
+def validate_depth_setting(setting, cfg, graded, *, check_source=True):
+    """Reject changed grade, fields, rights, or parameters before baking."""
+    from .depth_artifact import validate_depth
+    from .patterns import resolve_asset_policy
+    from .production import frozen_pattern
+    from .depth_composite import _unit
+    from .depth_artifact import _reference
+    import re
+    required = {'version', 'backend', 'base_render_id', 'graded_picture', 'manifest',
+                'asset_id', 'asset_record_sha256', 'parameters', 'actor', 'reason',
+                'review_required', 'adopted'}
+    if (not isinstance(setting, dict) or set(setting) != required or type(setting['version']) is not int
+            or setting['version'] != 1
+            or setting['backend'] != 'local_baked' or setting['review_required'] is not True
+            or setting['adopted'] is not False or not isinstance(setting['reason'], str)
+            or not setting['reason'].strip() or setting['actor'] not in ('human','codex','claude_code','automation')):
+        raise ValueError('Invalid depth layer setting')
+    if (not isinstance(setting['base_render_id'], str) or not setting['base_render_id']
+            or not isinstance(setting['asset_id'], str) or not setting['asset_id']
+            or not isinstance(setting['asset_record_sha256'], str)
+            or re.fullmatch('[0-9a-f]{64}', setting['asset_record_sha256']) is None):
+        raise ValueError('Invalid depth layer asset or render binding')
+    _reference(setting['graded_picture'])
+    _reference(setting['manifest'])
+    pattern = frozen_pattern(cfg)
+    if pattern['id'] == 'natural' or pattern['intensity'] == 'off':
+        raise ValueError('Depth layer conflicts with natural/off')
+    if cfg.get('edit_basis') != 'visual' or visual_pipeline_version(cfg) != 2:
+        raise ValueError('Depth layer requires visual pipeline 2')
+    if cfg.get('fcp_handoff', 'mix') not in ('mix', 'video_only'):
+        raise ValueError('Depth layer requires baked mix or video_only handoff')
+    params = setting['parameters']
+    if not isinstance(params, dict) or set(params) != {'threshold','softness','strength'}:
+        raise ValueError('Invalid depth layer parameters')
+    for key in params:
+        _unit(params[key], key, positive=key == 'softness')
+    if fingerprint(setting['manifest']['path']) != setting['manifest']:
+        raise ValueError('Depth manifest changed')
+    graded = Path(graded)
+    if check_source and fingerprint(graded)['sha256'] != setting['graded_picture']['sha256']:
+        raise ValueError('Depth graded source changed; regenerate the manifest for this exact stage')
+    depth = validate_depth(setting['manifest']['path'], source=graded if check_source else None)
+    if depth['source'] != setting['graded_picture']:
+        raise ValueError('Depth manifest source differs from retained grade')
+    matches = [a for a in cfg.get('assets', []) if a.get('asset_id') == setting['asset_id']]
+    if len(matches) != 1:
+        raise ValueError('Depth image registration missing or duplicated')
+    asset = validate_asset(matches[0], resolve_asset_policy(cfg), 'embedded_use')
+    if asset['kind'] != 'image' or asset['record_sha256'] != setting['asset_record_sha256']:
+        raise ValueError('Depth image registration changed')
+    if pattern['visual_assets'] == 'off':
+        raise ValueError('Depth image contradicts disabled visual assets')
+    if pattern['visual_assets'] == 'own_only' and not asset.get('owned_by_user', False):
+        raise ValueError('Pattern permits user-owned visual assets only')
+    return asset
+
+
 def render_visual_edit(cfg, plan, out, preview=True):
     """Render reviewed v4 source-frame selections and optional licensed additions.
 
@@ -224,6 +281,7 @@ def render_visual_edit(cfg, plan, out, preview=True):
             run(['ffmpeg','-hide_banner','-nostdin','-n','-i',str(visual_input),
                  '-map','0:v:0','-map','0:a:0','-vf',_video_filter(effective,lut,False),
                  '-c:v','libx264','-preset','fast','-crf','18','-pix_fmt','yuv420p',
+                 '-color_primaries','bt709','-color_trc','bt709','-colorspace','bt709',
                  '-c:a','copy','-map_metadata','-1',
                  *(['-movie_timescale','48000'] if effective.get('retime') else []),
                  '-movflags','+faststart',str(graded)],out/'grade.log')
@@ -232,10 +290,24 @@ def render_visual_edit(cfg, plan, out, preview=True):
             if not picture or int(picture['nb_read_frames'])!=mapping['frame_count'] or _verified_rate(graded,picture,mapping['frame_count'])!=rate:
                 raise ValueError('Footage grade changed frame count or FPS')
             visual_input=graded
+        graded_picture = fingerprint(visual_input) if pipeline_version==2 else None
+        if effective.get('depth_layer'):
+            if preview:
+                raise ValueError('Depth candidate needs a full-resolution render bound to its graded source')
+            setting=effective['depth_layer']
+            asset=validate_depth_setting(setting,effective,visual_input)
+            from .depth_render import render_depth_layer
+            rendered=out/'visual-depth.mp4'
+            depth_evidence=render_depth_layer(visual_input,setting['manifest']['path'],asset,
+                policy,rendered,input_color='rec709',actor=setting['actor'],reason=setting['reason'],
+                **setting['parameters'])
+            depth_evidence['setting']=deepcopy(setting)
+            write(out/'depth-evidence.json',depth_evidence)
+            visual_input=rendered
         write(out/'visual-pipeline.json',{
             'version':pipeline_version,'grade_scope':'assembled_footage_before_overlays_and_effects' if pipeline_version==2 else 'composed_picture_after_overlays_and_effects',
             'grade_input':grade_input,'lut':fingerprint(lut),
-            'graded_picture':fingerprint(visual_input) if pipeline_version==2 else None,
+            'graded_picture':graded_picture,
             'overlay_grade':'not applied' if pipeline_version==2 else 'same final LUT as footage',
             'effect_scope':'Existing picture effects apply to composed picture; effect titles are inserted afterward',
             'secondary_color':'Overlay/comparison inputs retain their own colors in pipeline 2; no implicit common LUT',

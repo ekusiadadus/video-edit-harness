@@ -64,7 +64,7 @@ def render_depth_layer(base, depth_manifest, registered_image_asset, policy, tar
     source_binding = fingerprint(base)
     manifest_binding = fingerprint(manifest)
     depth = validate_depth(manifest, source=base)
-    if depth['source'] != source_binding:
+    if (depth['source']['sha256'], depth['source']['bytes']) != (source_binding['sha256'], source_binding['bytes']):
         raise ValueError('Depth source binding differs from base video')
     resolved_policy = resolve_asset_policy({'asset_policy': policy})
     asset = validate_asset(registered_image_asset, resolved_policy, operation='embedded_use')

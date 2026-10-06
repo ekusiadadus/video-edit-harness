@@ -5,6 +5,101 @@ import shutil
 from .common import fingerprint, read, write
 
 
+def _copy_depth_provenance(render, folder, files):
+    """Retain field lineage without distributing source footage or model weights."""
+    if 'depth_evidence' not in render['files']:
+        return
+    from .depth_artifact import validate_depth
+    evidence_ref = render['files']['depth_evidence']
+    if fingerprint(evidence_ref['path']) != evidence_ref:
+        raise ValueError('Depth render evidence changed before delivery')
+    evidence = read(evidence_ref['path'])
+    manifest_ref = evidence['setting']['manifest']
+    if fingerprint(manifest_ref['path']) != manifest_ref:
+        raise ValueError('Depth manifest changed before delivery')
+    validate_depth(manifest_ref['path'])
+    refs = {}
+    lineage = []
+    seen = set()
+    def add(ref):
+        if fingerprint(ref['path']) != ref:
+            raise ValueError('Depth provenance changed before delivery')
+        if Path(ref['path']).suffix == '.npy':
+            refs[ref['sha256']] = ref
+    def visit(ref):
+        if ref['sha256'] in seen:
+            return
+        seen.add(ref['sha256'])
+        add(ref)
+        doc = read(ref['path'])
+        item = {'manifest_sha256': ref['sha256'], 'version': doc['version'],
+                'algorithm': doc['algorithm'], 'parent_sha256': doc.get('parent', {}).get('sha256'),
+                'corrected_frames': doc.get('corrected_frames', []),
+                'source_sha256': doc['source']['sha256'],
+                'interval': [doc['start_frame'], doc['end_frame_exclusive']],
+                'fps': doc['fps'], 'width': doc['width'], 'height': doc['height'],
+                'source_frame_count': doc['source_frame_count'],
+                'representation': doc['representation'], 'normalization': doc['normalization'],
+                'rows': [{'frame': row['frame'], 'field_sha256': row['field']['sha256'],
+                          'input_sha256': row['input']['sha256'], 'origin': row['origin'],
+                          'minimum': row['minimum'], 'maximum': row['maximum']}
+                         for row in doc['rows']]}
+        if doc.get('inference'):
+            model = doc['inference']['model']
+            item['model'] = {key: model[key] for key in ('model_id', 'revision', 'license',
+                                                       'device', 'runtime', 'config', 'processor', 'inference')}
+            item['model']['files'] = {name: {'sha256': identity['sha256'], 'bytes': identity['bytes']}
+                                      for name, identity in model['files'].items()}
+            item['execution_sha256'] = doc['inference']['execution']['sha256']
+            item['raw_fields'] = [{'frame': raw['frame'], 'sha256': raw['field']['sha256']}
+                                  for raw in doc['inference']['raw_fields']]
+            item['normalization_range'] = [doc['inference']['minimum'], doc['inference']['maximum']]
+            item['temporal_consistency'] = doc['inference']['temporal_consistency']
+        lineage.append(item)
+        for row in doc['rows']:
+            add(row['field']); add(row['input'])
+        if doc.get('inference'):
+            for raw in doc['inference']['raw_fields']:
+                add(raw['field'])
+        if doc.get('parent'):
+            visit(doc['parent'])
+    visit(manifest_ref)
+    provenance_dir = folder / 'depth-provenance'
+    provenance_dir.mkdir()
+    entries = []
+    for sha, ref in sorted(refs.items()):
+        source = Path(ref['path'])
+        relative = 'depth-provenance/' + sha + source.suffix
+        target = folder / relative
+        shutil.copy2(source, target)
+        if fingerprint(target)['sha256'] != sha or fingerprint(source) != ref:
+            raise ValueError('Depth provenance changed during copy')
+        files['depth_provenance_' + sha] = fingerprint(target)
+        entries.append({'path': relative, 'sha256': sha, 'bytes': ref['bytes']})
+    image = evidence['image_asset']
+    image_identity = {key: image[key] for key in ('asset_id', 'sha256', 'bytes', 'record_sha256')}
+    summary = {'version': 1, 'render_sha256': render['files']['video']['sha256'],
+               'graded_source_sha256': evidence['base']['sha256'],
+               'manifest_sha256': manifest_ref['sha256'],
+               'original_evidence_sha256': evidence_ref['sha256'],
+               'image_asset': image_identity,
+               'parameters': evidence['parameters'],
+               'lineage': lineage,
+               'raw_image': 'external_reference_only',
+               'model_weights': 'external_reference_only',
+               'rerenderable_from_bundle_alone': False, 'entries': entries}
+    write(folder / 'depth-provenance.json', summary)
+    files['depth_provenance'] = fingerprint(folder / 'depth-provenance.json')
+    write(folder / 'depth-evidence.json', {'version': 1, 'render_sha256': summary['render_sha256'],
+        'original_evidence_sha256': summary['original_evidence_sha256'],
+        'graded_source_sha256': summary['graded_source_sha256'],
+        'manifest_sha256': summary['manifest_sha256'],
+        'image_asset': image_identity, 'parameters': summary['parameters'],
+        'provenance_sha256': files['depth_provenance']['sha256'],
+        'review_required': True, 'adopted': False})
+    files['depth_evidence'] = fingerprint(folder / 'depth-evidence.json')
+
+
 def bundle(render, brief, target, folder, accepted=False, derivative=None):
     production = None
     prepared_fcp = None
@@ -43,6 +138,7 @@ def bundle(render, brief, target, folder, accepted=False, derivative=None):
         if files[label]['sha256'] != render['files'][label]['sha256'] or fingerprint(original) != render['files'][label]:
             raise ValueError('Delivery source changed during copy: ' + label)
     render_path = Path(render['path'])
+    _copy_depth_provenance(render, folder, files)
     if prepared_fcp:
         from .delivery_production import copy_dependencies, verify_dependencies
         files.update(copy_dependencies(prepared_fcp, folder))
@@ -165,6 +261,17 @@ def verify_completion(folder):
     if (creative.get('render_id') != completion['render_id'] or not creative.get('passed')
             or creative.get('report', {}).get('render_sha256') != completion['render_sha256']):
         raise ValueError('Creative review does not match completed render')
+    if manifest['files'].get('depth_evidence'):
+        if not any(check.get('id') == 'depth_contours' and check.get('status') == 'pass'
+                   for check in creative.get('report', {}).get('checks', [])):
+            raise ValueError('Completed depth render lacks passing contour review')
+        provenance = read(folder / manifest['file_paths']['depth_provenance'])
+        depth_proof = read(folder / manifest['file_paths']['depth_evidence'])
+        if (provenance['render_sha256'] != completion['render_sha256']
+                or provenance['manifest_sha256'] not in {entry['manifest_sha256'] for entry in provenance['lineage']}
+                or depth_proof['provenance_sha256'] != manifest['files']['depth_provenance']['sha256']
+                or depth_proof['original_evidence_sha256'] != provenance['original_evidence_sha256']):
+            raise ValueError('Completed depth provenance differs from render')
     required = manifest['manual_checks_required']
     recorded = {key.removeprefix('delivery_check_') for key in completion['evidence']
                 if key.startswith('delivery_check_')}

@@ -2,7 +2,7 @@
 
 遠い画面領域に登録済みの画像を重ね、近い内容を残すローカル合成です。深度は距離のメートル値でも人物マスクでもありません。髪、手、衣装、他の出演者との重なりを含め、完成映像の確認が必要です。alpha.7には含まれません。
 
-手動の深度フィールド、またはローカルのDepth Anything V2 Smallによる推定を使います。時間方向の安定化とセッション内の採用操作との統合は未実装です。各フィールドは映像と同じ高さ・幅の `float32` NPYで、有限値0～1、近い内容ほど大きい値を指定します。対象フレーム全体で意味が共通する尺度を使ってください。フレームごとの最大・最小で自動正規化する処理はありません。
+手動の深度フィールド、またはローカルのDepth Anything V2 Smallによる推定を使います。時間方向の安定化は未実装です。セッション内の候補作成・比較・選択・採用・納品に対応します。各フィールドは映像と同じ高さ・幅の `float32` NPYで、有限値0～1、近い内容ほど大きい値を指定します。対象フレーム全体で意味が共通する尺度を使ってください。フレームごとの最大・最小で自動正規化する処理はありません。
 
 ## 準備
 
@@ -75,3 +75,50 @@ provenance.jsonには次の形式で、取得元の版と各ファイルの実SH
 推定は生の相対深度をフレームごとに保持し、指定区間全体のminimum/maximumで共通の0～1へ変換します。フレームごとの最大・最小には揃えません。生データから正規化値を再計算して完全一致を検査し、constantな推定、欠落、改変を拒否します。モデル・processor・runtime・補間条件をversion 2 manifestと独立したexecution.jsonへ保存し、SHAと内容を照合します。CLIのrun resultはこれらのartifact全体のSHAを保持します。この記録は改変検知のためのもので、署名された第三者の実行証明ではありません。近いほど大きいという向きは適用する仮定として記録し、メートルや人物マスクとは扱いません。
 
 区間共通の正規化は、推定モデル自体の時間方向の揺れを解消しません。元映像を変えず、推定artifactを残し、必要なら手動版の別artifactを作って修正してください。改訂したdepth.jsonを同じ登録画像・音声条件でrenderし、輪郭と近遠を確認します。実写3フレームの推定成功は記録済みですが、完成動画・追従品質の承認ではありません。
+
+## フレーム単位の手動修正
+
+推定結果の手や衣装の境界に問題がある場合は、元のartifactを変更せず、指定フレームのfloat32 NPYだけを改訂します。値は同じ0～1・近いほど大きい尺度で指定し、フレームごとに再正規化しません。
+
+```json
+{"version":1,"fields":[{"frame":13,"path":"corrections/000013.npy"}]}
+```
+
+```sh
+uv run video-harness depth correct output/inferred-depth/depth/fields/depth.json correction-request.json \
+  --output output/depth-revision --actor codex --note '実フレームの手の境界を修正した候補'
+uv run video-harness depth validate output/depth-revision/fields/depth.json
+```
+
+version 3 manifestは、元のmanifestのSHA、修正したフレーム、入力フィールドと保持したコピーを記録します。未指定フレームは直前の版から引き継ぎます。次の修正も別の出力フォルダーへ保存でき、以前の修正を保持します。来歴は最大32個のmanifestまで検査し、循環や改変、範囲外の指定を拒否します。元のモデル・生の推定値は親artifactを通じて検証し続けるため、親とモデルを削除しないでください。
+
+ユーザーは自然言語で「13フレーム付近で手が背景に消えないように直して」と指定できます。スキルを使うエージェントが実フレームを確認して修正用フィールドと改訂を保存します。エージェントの修正はactor=codex等で記録し、人による承認とは扱いません。対応する映像を再レンダリングし、自然版・前の版と同じ音声で比較します。
+
+
+## セッションで使う
+
+パターンを有効にし、自然版の全解像度レンダーを先に作ります。`visual_pipeline_version: 2` の出力に保持した `visual-graded.mp4` を深度の入力にしてください。フレーム番号はこの組み立て済み映像の番号で、カメラ素材の番号とは限りません。推定・手動準備・修正は上のコマンドを使います。
+
+productionへ同じ画面サイズのRGBA画像と権利根拠を登録し、素材IDで指定します。`visual_assets: licensed` または所有素材だけの `own_only` が必要です。`off`、自然パターン、演出強度off、プレビュー解像度、editable FCPは対象外です。FCPはbakedのmix/video_onlyを使います。
+
+```sh
+uv run video-harness session depth-layer SESSION BASE_RENDER_ID \
+  --manifest output/inferred-depth/depth/fields/depth.json --asset-id IMAGE_ASSET_ID \
+  --threshold 0.5 --softness 0.1 --strength 0.5 \
+  --actor codex --note '観察した遠景へ画像を重ね、自然版と比較する'
+```
+
+返されたcandidateは未採用です。自然版と同じ構成・音声で候補を全解像度レンダーし、比較してから採用します。NATURAL_RENDER_IDには同じmappingの自然版を指定してください。
+
+```sh
+uv run video-harness session render SESSION --full --candidate-id CANDIDATE_ID --actor codex
+uv run video-harness session compare-candidates SESSION NATURAL_RENDER_ID DEPTH_RENDER_ID
+uv run video-harness session adopt-candidate SESSION CANDIDATE_ID --actor codex --note '比較した結果と採用理由'
+uv run video-harness session render SESSION --full --actor codex
+```
+
+採用は人による最終レビューとは別です。合成は色補正の後、字幕や通常のエフェクトの前です。元のgraded picture、manifest、登録画像のSHAを照合し、色補正変更や改変で一致しなければ拒否します。音声や別エフェクトの改訂では深度設定を保持し、naturalへ戻す操作では解除します。色補正を変える場合は新しいgraded pictureでフィールドを作り直してください。
+
+最終レンダーの正確なSHAに対する `depth_contours` 視覚レビューが必要です。髪・手・衣装・奥の出演者・遮蔽・時間方向の揺れを実動画で確認します。実写3フレームの静止画確認では、奥の出演者が標準しきい値より低い深度になりました。床も近い領域になるため、人物全員を保護するマスクとして自動適用できる品質の証明にはなりません。
+
+納品にはフィールドと修正来歴のフレーム/SHA対応を保持します。公開用の深度証跡は元のローカルパスを除きます。モデルと元画像は外部参照で、バンドル単独の完全な再レンダリングはできません。ローカルの元artifactも保管してください。YouTube向けの完成MP4と人の視聴・試聴確認は別の納品工程です。

@@ -326,6 +326,7 @@ def _timing_evidence(renders, source, *, mode='timing'):
         production = read(render['files']['production']['path']) if 'production' in render['files'] else {}
         rows.append({'render_id': render['id'], 'video_sha256': render['files']['video']['sha256'],
                      'pattern': pattern['id'], 'fixed': fixed,
+                     'depth_layer': deepcopy(cfg.get('depth_layer')),
                      'duration_seconds': float(Fraction(output_frames, 1) / fps),
                      'original_duration_seconds': float(Fraction(base_frames, 1) / fps),
                      'retime_operations': deepcopy(operations or []),
