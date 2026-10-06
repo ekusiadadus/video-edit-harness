@@ -91,27 +91,37 @@ def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clo
                 raise ValueError("Cue plan contains a malformed cue")
             moved = interval(cue, "cue_plan")
             role = cue.get("role")
-            if role == "video":
+            sampled_visual = role == "video" or (role in {"image", "title"} and
+                ("phase_map" in cue or any(Fraction(str(cue.get(key, 0))) for key in ("fade_in", "fade_out"))))
+            if sampled_visual:
                 first, end, selected = source_frames(cue)
                 prior_phase = validate_video_phase(cue, fps)
                 clock = prior_phase or (video_clocks or {}).get(cue['id'])
-                if not clock or 'original_layer' not in clock or 'original_cue_sha256' not in clock or (not prior_phase and (clock.get('original_start_frame') != first or clock.get('original_frame_count') != end-first)):
-                    raise ValueError(f"cue_plan:{cue.get('id')} needs a fresh original render with sealed overlay layer evidence")
-                moved["phase_map"] = {"version": 2,
-                    "original_start_frame": clock['original_start_frame'],
-                    "original_frame_count": clock['original_frame_count'],
-                    "original_layer": deepcopy(clock['original_layer']),
-                    "original_cue_sha256": clock['original_cue_sha256'],
-                    "frames": [prior_phase["frames"][base-first] if prior_phase else base-first for base in selected]}
+                valid_clock = (clock and 'original_layer' in clock and 'original_cue_sha256' in clock and
+                    (prior_phase or (clock.get('original_start_frame') == first and clock.get('original_frame_count') == end-first)))
+                if not valid_clock:
+                    if role in {"image", "title"} and selected == list(range(first, end)):
+                        sampled_visual = False
+                        evidence["items"][-1]["content_policy"] = "legacy_static_fade_pure_translation"
+                    else:
+                        raise ValueError(f"cue_plan:{cue.get('id')} needs a fresh original render with sealed overlay layer evidence")
+                else:
+                    moved["phase_map"] = {"version": 2,
+                        "original_start_frame": clock['original_start_frame'],
+                        "original_frame_count": clock['original_frame_count'],
+                        "original_layer": deepcopy(clock['original_layer']),
+                        "original_cue_sha256": clock['original_cue_sha256'],
+                        "frames": [prior_phase["frames"][base-first] if prior_phase else base-first for base in selected]}
             if role == "sfx":
                 from .sfx_retime import make_audio_retime
                 moved['audio_retime'] = make_audio_retime(cue, cfg.get('assets', []), compiled_retime, audio_backend)
-            evidence["items"][-1]["content_policy"] = (
+            evidence["items"][-1].setdefault("content_policy", (
                 "normal_playback_on_new_output_clock" if role == "music" else
                 "original_output_frame_video_content" if role == "video" else
+                "original_output_frame_static_alpha" if sampled_visual else
                 "original_pcm_pitch_preserving_content_retime" if role == "sfx" else
                 "source_content_unchanged_pure_translation" if role in {"video", "sfx"} else
-                "static_content_new_output_clock_fades")
+                "static_content_without_animation"))
             if "beat_anchor" in cue:
                 anchor = _frame(cue["beat_anchor"], fps, old_count,
                                 f"cue_plan:{cue.get('id')}.beat_anchor")
@@ -231,3 +241,23 @@ def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clo
         if changes.get("video_effects", {}).get("events") and not production.get("effects", {}).get("events"):
             raise ValueError("Effect migration conflicts with the selected editing pattern")
     return {"changes": changes, "evidence": evidence}
+
+
+def validate_static_cue_selections(cues, compiled_mapping):
+    """Bind static alpha replay to actual verified first-retime frame membership."""
+    rate = Fraction(compiled_mapping['fps'])
+    frames = compiled_mapping['frame_map']
+    for cue in cues:
+        if cue['role'] not in {'image', 'title'} or 'phase_map' not in cue:
+            continue
+        phase = validate_video_phase(cue, rate)
+        first = phase['original_start_frame']
+        end = first + phase['original_frame_count']
+        if end > compiled_mapping['input_frame_count']:
+            raise ValueError('Static cue phase interval exceeds original picture')
+        selected = [(i, frame-first) for i, frame in enumerate(frames) if first <= frame < end]
+        if not selected or [frame for _, frame in selected] != phase['frames']:
+            raise ValueError('Static cue phase frame selection differs from verified picture retime')
+        if (Fraction(str(cue['output_start'])) * rate != selected[0][0] or
+                Fraction(str(cue['output_end'])) * rate != selected[-1][0] + 1):
+            raise ValueError('Static cue phase output interval differs from verified picture retime')

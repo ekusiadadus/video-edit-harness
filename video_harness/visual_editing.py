@@ -315,6 +315,11 @@ def render_visual_edit(cfg, plan, out, preview=True):
             'secondary_color':'Overlay/comparison inputs retain their own colors in pipeline 2; no implicit common LUT',
             'preview_scale_stage':'final composed picture' if pipeline_version==2 else 'final grade'})
         if visual_cues:
+            from .retime_settings import validate_static_cue_selections
+            if any(cue['role'] in {'image', 'title'} and 'phase_map' in cue for cue in visual_cues):
+                if not effective.get('retime'):
+                    raise ValueError('Static cue phase replay needs a verified picture retime')
+                validate_static_cue_selections(visual_cues, evidence['mapping'])
             rendered = out / 'visual-overlays.mp4'
             write(out/'overlay-evidence.json', render_overlays(visual_input, visual_cues, production['assets'], rendered, base['duration'], preview,
                             preserve_audio_end=bool(effective.get('retime'))))

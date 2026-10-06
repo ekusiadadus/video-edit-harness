@@ -281,17 +281,20 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                 stream = next(s for s in _probe(source)['streams'] if s['codec_type'] == 'video')
                 source_width, source_height = check_video_geometry(stream)
                 check_overlay_video_clock(source, stream)
-                from .video_cue_phase import capture_overlay_clock
-                clock = capture_overlay_clock(current, cue, info['fps']) if 'phase_map' not in cue else None
-                if clock is not None:
-                    video_cue_clocks.append(clock)
             else:
                 with Image.open(source) as picture:
                     if picture.getexif().get(274, 1) != 1:
                         raise ValueError('rotated image geometry is unsupported')
                     source_width, source_height = picture.size
             placement = measure_placement(cue, width, height, source_width, source_height)
-            exact_clock = role == 'video' and ('phase_map' in cue or cue.get('loop', False))
+            capture_static = role in {'image', 'title'} and any(
+                _seconds(cue.get(key, 0), key) for key in ('fade_in', 'fade_out'))
+            if 'phase_map' not in cue and (role == 'video' or capture_static):
+                from .video_cue_phase import capture_overlay_clock
+                clock = capture_overlay_clock(current, cue, info['fps'])
+                if clock is not None:
+                    video_cue_clocks.append(clock)
+            exact_clock = 'phase_map' in cue or (role == 'video' and cue.get('loop', False))
             fades = ''
             if 'phase_map' not in cue:
                 fade_in = _seconds(cue.get('fade_in', 0), 'fade_in')
@@ -301,17 +304,22 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                 if fade_out:
                     fade_start = _seconds(cue['output_end'], 'output_end') - fade_out
                     fades += f",fade=t=out:st={float(fade_start):.9f}:d={float(fade_out):.9f}:alpha=1"
-            if role == 'video' and 'phase_map' in cue:
+            if 'phase_map' in cue:
                 from .video_cue_phase import retime_video_cue_layer
-                registered_asset = assets[cue['asset_id']]
-                phase_cue = {**cue, '_source_sha256': (registered_asset.get('sha256') or
-                                                     registered_asset.get('file_sha256'))}
+                if role == 'title':
+                    from .common import fingerprint
+                    source_sha256 = fingerprint(source)['sha256']
+                else:
+                    registered_asset = assets[cue['asset_id']]
+                    source_sha256 = registered_asset.get('sha256') or registered_asset.get('file_sha256')
+                phase_cue = {**cue, '_source_sha256': source_sha256}
                 layer = root / f"video-phase-{index}.mkv"
                 log_path = output.parent / f"{output.stem}-video-phase-{index}.log"
                 provenance = retime_video_cue_layer(source, phase_cue, placement,
                                                     (width, height), info['fps'], layer,
                                                     log_path=log_path)
-                _check_asset(cue['asset_id'], assets)
+                if role != 'title':
+                    _check_asset(cue['asset_id'], assets)
                 video_phase_layers.append(provenance)
                 video_cue_layers.append({'cue_id': cue['id'], 'layer': provenance['phase_map']['original_layer']})
                 first = _seconds(cue['output_start'], 'output_start') * info['fps']
@@ -346,7 +354,7 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                 overlay_input = ["-loop", "1", "-i", str(source)]
                 source_filter = (f"fps=fps={info['fps']}:start_time=0:round=near,"
                     f"settb=expr={info['fps'].denominator}/{info['fps'].numerator},setpts=N,") if fades else ""
-            if role != 'video' or 'phase_map' not in cue:
+            if 'phase_map' not in cue:
                 scale = f"scale={placement['rendered_size'][0]}:{placement['rendered_size'][1]}"
                 opacity = placement['opacity']
                 overlay_x, overlay_y = placement['x_pixels'], placement['y_pixels']
@@ -369,7 +377,7 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                            "setpts=N[phase_primary];")
                 filter_graph = primary + filter_graph.replace('[0:v][layer]', '[phase_primary][layer]')
             retained_layer = None
-            if role == 'video' and 'phase_map' not in cue and clock is not None:
+            if 'phase_map' not in cue and clock is not None:
                 # Capture the actual framesync result in this very render, then
                 # let both encoders perform the same CFR output normalization.
                 # Reconstructing this result later from input PTS loses samples
@@ -406,16 +414,22 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
             _ffmpeg(command)
             if retained_layer is not None:
                 from .overlay_layers import slice_overlay_layer
+                layer_name = 'video-cue' if role == 'video' else 'visual-cue'
                 sealed = slice_overlay_layer(
                     retained_layer, clock['original_start_frame'],
                     clock['original_start_frame'] + clock['original_frame_count'],
-                    info['fps'], output.parent / f"{output.stem}-video-cue-{index}.mkv",
-                    log_path=output.parent / f"{output.stem}-video-cue-{index}.log")
+                    info['fps'], output.parent / f"{output.stem}-{layer_name}-{index}.mkv",
+                    log_path=output.parent / f"{output.stem}-{layer_name}-{index}.log")
                 clock['original_layer'] = sealed
-                from .video_cue_phase import video_cue_content_sha256
-                asset = assets[cue['asset_id']]
-                clock['original_cue_sha256'] = video_cue_content_sha256(
-                    cue, asset.get('sha256') or asset.get('file_sha256'))
+                from .video_cue_phase import static_cue_content_sha256, video_cue_content_sha256
+                if role == 'title':
+                    from .common import fingerprint
+                    source_sha256 = fingerprint(source)['sha256']
+                else:
+                    asset = assets[cue['asset_id']]
+                    source_sha256 = asset.get('sha256') or asset.get('file_sha256')
+                digest_cue = video_cue_content_sha256 if role == 'video' else static_cue_content_sha256
+                clock['original_cue_sha256'] = digest_cue(cue, source_sha256)
                 video_cue_layers.append({'cue_id': cue['id'], 'layer': sealed})
             current = target
         if cues:

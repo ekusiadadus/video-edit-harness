@@ -63,8 +63,9 @@ def validate_video_phase(cue, fps):
         if "phase_map" in cue:
             raise ValueError("Video cue phase_map must be an object")
         return None
-    if cue.get("role") != "video" or fps is None:
-        raise ValueError("Video cue phase_map requires video role and explicit FPS")
+    role = cue.get("role")
+    if role not in {"video", "image", "title"} or fps is None:
+        raise ValueError("Visual cue phase_map requires a visual role and explicit FPS")
     rate = _seconds(fps, "fps")
     if isinstance(phase, dict) and type(phase.get('version')) is int and phase['version'] == 2:
         if set(phase) != {'version', 'original_start_frame', 'original_frame_count', 'original_layer', 'original_cue_sha256', 'frames'}:
@@ -88,6 +89,8 @@ def validate_video_phase(cue, fps):
                 or any(a > b for a, b in zip(frames, frames[1:]))):
             raise ValueError('Invalid sealed video cue original frame map')
         return {**phase, 'original_layer': reference, 'frames': frames.copy()}
+    if role != 'video':
+        raise ValueError('Static cue phase_map requires sealed version-2 layer evidence')
     if cue.get('loop', False):
         raise ValueError('Video loops require sealed version-2 layer evidence')
     legacy_keys = {"version", "original_start_frame", "original_frame_count", "original_time_base", "original_timestamps", "frames"}

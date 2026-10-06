@@ -32,6 +32,23 @@ def video_cue_content_sha256(cue, source_sha256):
     return hashlib.sha256(json.dumps(content, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
+def static_cue_content_sha256(cue, source_sha256):
+    """Bind a sealed static layer to its image or generated title pixels."""
+    role = cue['role']
+    if role not in {'image', 'title'}:
+        raise ValueError('Static cue digest requires image or title role')
+    content = {'role': role, 'source_sha256': source_sha256,
+               'position': cue.get('position', 'center'),
+               'opacity': str(Fraction(str(cue.get('opacity', 1)))),
+               'fade_in': str(Fraction(str(cue.get('fade_in', 0)))),
+               'fade_out': str(Fraction(str(cue.get('fade_out', 0))))}
+    if role == 'image':
+        content['asset_id'] = cue['asset_id']
+    else:
+        content['text'] = cue['text']
+    return hashlib.sha256(json.dumps(content, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
 def capture_overlay_clock(source, cue, rate):
     """Observe the original base picture clock instead of inventing timestamps."""
     rate = Fraction(rate)
@@ -71,15 +88,18 @@ def retime_video_cue_layer(source, cue, placement, canvas_size, rate, output, *,
     from .overlay_layers import remap_overlay_layer
     phase = validate_video_phase(cue, rate)
     if phase is None or phase['version'] != 2:
-        raise ValueError('Video cue retime needs a fresh original render with sealed layer evidence')
+        raise ValueError('Visual cue retime needs a fresh original render with sealed layer evidence')
     expected_sha = cue.get('_source_sha256')
     if not isinstance(expected_sha, str) or len(expected_sha) != 64:
         raise ValueError('Video cue source SHA-256 is missing')
     source, output = Path(source), Path(output)
     if fingerprint(source)['sha256'] != expected_sha:
         raise ValueError('Video cue source SHA-256 mismatch before remap')
-    if video_cue_content_sha256(cue, expected_sha) != phase['original_cue_sha256']:
-        raise ValueError('Video cue source trim or baked placement changed; render a fresh original layer')
+    digest_cue = video_cue_content_sha256 if cue['role'] == 'video' else static_cue_content_sha256
+    if digest_cue(cue, expected_sha) != phase['original_cue_sha256']:
+        if cue['role'] == 'video':
+            raise ValueError('Video cue source trim or baked placement changed; render a fresh original layer')
+        raise ValueError('Static cue source or baked settings changed; render a fresh original layer')
     result = remap_overlay_layer(phase['original_layer'], phase['frames'], rate, canvas_size,
                                 output, log_path=log_path)
     if fingerprint(source)['sha256'] != expected_sha:

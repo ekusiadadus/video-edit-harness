@@ -34,6 +34,16 @@ def config(**settings):
 
 
 class VisualSettingMigrationTests(unittest.TestCase):
+    def test_legacy_static_fade_translation_remains_supported_but_speed_needs_samples(self):
+        old = mapping()
+        cfg = config(cue_plan={'version': 1, 'mapping_sha256': digest(old),
+                              'cues': [title(fade_in='1/30', fade_out='1/30')]})
+        result = self.migrate(cfg, old, compiled(list(range(6))))
+        self.assertNotIn('phase_map', result['changes']['cue_plan']['cues'][0])
+        self.assertEqual(result['evidence']['items'][0]['content_policy'], 'legacy_static_fade_pure_translation')
+        with self.assertRaisesRegex(ValueError, 'fresh original render'):
+            self.migrate(cfg, old)
+
     def migrate(self, cfg, original=None, retime=None, **extra):
         with patch("video_harness.retime_settings.resolve_production"):
             return migrate_visual_settings(cfg, original or mapping(), retime or compiled(), **extra)
@@ -49,7 +59,11 @@ class VisualSettingMigrationTests(unittest.TestCase):
                      video_effects={"version": 1, "mapping_sha256": digest(old), "events": [event]},
                      composition_guides=[guide])
         before = deepcopy(cfg)
-        result = self.migrate(cfg, old)
+        clock = {'original_start_frame': 2, 'original_frame_count': 3,
+                 'original_layer': {'path': '/sealed.mkv', 'sha256': 'a'*64, 'bytes': 10,
+                     'width': 160, 'height': 90, 'frame_count': 3, 'fps': '30/1'},
+                 'original_cue_sha256': 'a'*64}
+        result = self.migrate(cfg, old, video_clocks={'title': clock})
         changes = result["changes"]
         for row in (changes["cue_plan"]["cues"][0], changes["video_effects"]["events"][0],
                     changes["composition_guides"][0]):

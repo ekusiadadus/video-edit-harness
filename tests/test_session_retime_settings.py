@@ -10,6 +10,44 @@ from video_harness.session import Session
 
 
 class SessionRetimeSettingTests(unittest.TestCase):
+    def test_static_title_fade_migration_preserves_old_alpha_and_rejects_wrong_clock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg, plan = helpers.VisualEditingTests().fixture(root, source_audio=True)
+            cfg.update(edit_basis='visual', fcp_handoff='video_only',
+                editing_pattern={'id': 'playful_short', 'music': 'off', 'sfx': 'off',
+                                 'beat_sync': 'off', 'visual_assets': 'licensed'})
+            project = root/'project.json'; write(project, cfg)
+            session = Session.start(project, root/'session')
+            session.propose_visual(plan, 'codex'); session.approve('codex', 'Synthetic ranges')
+            initial = session.render(preview=False, actor='codex')
+            mapping = read(initial['files']['mapping']['path'])
+            session.update_project({'cue_plan': {'version': 1, 'mapping_sha256': digest(mapping),
+                'cues': [{'id': 'static', 'role': 'title', 'text': 'GO',
+                          'output_start': '1/10', 'output_end': '1/2',
+                          'fade_in': '1/5', 'fade_out': '1/5',
+                          'reason': 'Synthetic original title fade'}]}}, 'codex', 'Bind actual mapping')
+            observed = session.render(preview=False, actor='codex')
+            clock = read(observed['files']['overlays']['path'])['video_cue_clocks'][0]
+            before = session._load()['project']
+            request = {'operations': [{'id': 'hold', 'kind': 'freeze', 'source_frame': 2,
+                'output_frames': 2, 'reason': 'Synthetic hold inside fade'}]}
+            proposal = session.propose_retime(observed['id'], request, 'codex', 'Keep original alpha')
+            changed = read(proposal['candidate']['project']['path'])
+            phase = changed['cue_plan']['cues'][0]['phase_map']
+            self.assertEqual(phase['frames'], [0, 1, 1, 1, 2, 3])
+            self.assertEqual(phase['original_layer'], clock['original_layer'])
+            rendered = session.render(preview=False, actor='codex', candidate_id=proposal['candidate']['id'])
+            self.assertEqual(read(rendered['files']['result']['path'])['technical_status'], 'pass')
+            self.assertEqual(session._load()['project'], before)
+            self.assertEqual(session._load()['reviews'], [])
+            session._verify_render(rendered)
+            wrong = changed['cue_plan']; wrong['cues'][0]['phase_map']['frames'][1] = 0
+            bad = session.create_candidate({'cue_plan': wrong}, 'codex', 'Synthetic wrong frame',
+                                           base_render_id=rendered['id'])
+            with self.assertRaisesRegex(ValueError, 'frame selection differs'):
+                session.render(preview=False, actor='codex', candidate_id=bad['id'])
+
     def test_video_cue_migration_uses_sealed_observed_clock(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
