@@ -16,7 +16,7 @@ import uuid
 TYPES = {'zoom_pulse', 'split_screen', 'monochrome', 'color_frame',
          'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe', 'keyword_title', 'tracked_title', 'motion_trail', 'tracked_background'}
 INTENSITY = {'low': .35, 'medium': .65, 'high': 1.0}
-PHASE_TYPES = {'zoom_pulse', 'smooth_zoom', 'saturation_pulse'}
+PHASE_TYPES = {'zoom_pulse', 'smooth_zoom', 'saturation_pulse', 'keyword_title'}
 MAX_PHASE_FRAMES = 4096
 MAX_PHASE_EXPRESSION_CHARS = 65536
 
@@ -152,7 +152,10 @@ def _canonical_event(row, rate, count):
         if any(left > right for left, right in zip(frames, frames[1:])):
             raise ValueError('Phase map frames must be nondecreasing')
         result['phase_map'] = {'version': 1, 'original_frame_count': original_count, 'frames': frames.copy()}
-        _mapped_envelope(result, rate, 'on')
+        if row['type'] == 'keyword_title':
+            _mapped_title_clock(result, rate)
+        else:
+            _mapped_envelope(result, rate, 'on')
     return result
 
 
@@ -412,6 +415,63 @@ def _mapped_envelope(event, rate, variable):
     return expression
 
 
+def _mapped_title_frame(event, output_frame, rate):
+    """The old-relative source frame selected for a mapped title output frame."""
+    first = _frame(_time(event['output_start'], 'start'), rate, 'start')
+    offset = output_frame - first
+    frames = event['phase_map']['frames']
+    return frames[offset] if 0 <= offset < len(frames) else None
+
+
+def _mapped_title_clock(event, rate):
+    """An FFmpeg expression for the old-relative frame at each output frame.
+
+    The expression is used as setpts input to the *existing* fade filters. This
+    keeps their real timestamp and alpha quantization, including held frames.
+    """
+    first = _frame(_time(event['output_start'], 'start'), rate, 'start')
+    last = _frame(_time(event['output_end'], 'end'), rate, 'end')
+    runs = []
+    for offset, old_index in enumerate(event['phase_map']['frames']):
+        if not runs or runs[-1][1] != old_index:
+            runs.append((first + offset, old_index))
+
+    def tree(items):
+        if len(items) == 1:
+            return str(items[0][1])
+        half = len(items) // 2
+        return f'if(lt(N,{items[half][0]}),{tree(items[:half])},{tree(items[half:])})'
+
+    expression = f'if(lt(N,{first}),0,if(gte(N,{last}),0,{tree(runs)}))'
+    if len(expression) > MAX_PHASE_EXPRESSION_CHARS:
+        raise ValueError('Phase map exceeds FFmpeg expression size limit')
+    return expression
+
+
+def _mapped_title_rise(event, rate, travel, fade):
+    """Pixel placement from the same old frame phase used by title alpha."""
+    first = _frame(_time(event['output_start'], 'start'), rate, 'start')
+    last = _frame(_time(event['output_end'], 'end'), rate, 'end')
+    clock = f'floor(t*{rate.numerator}/{rate.denominator}+0.5)'
+    rows = []
+    for offset, old_index in enumerate(event['phase_map']['frames']):
+        old_time = float(Fraction(old_index, 1) / rate)
+        value = travel * max(0, 1 - old_time / fade)
+        if not rows or rows[-1][1] != value:
+            rows.append((first + offset, value))
+
+    def tree(items):
+        if len(items) == 1:
+            return f'{items[0][1]:.9f}'
+        half = len(items) // 2
+        return f'if(lt({clock},{items[half][0]}),{tree(items[:half])},{tree(items[half:])})'
+
+    expression = f'if(lt({clock},{first}),0,if(gte({clock},{last}),0,{tree(rows)}))'
+    if len(expression) > MAX_PHASE_EXPRESSION_CHARS:
+        raise ValueError('Phase map exceeds FFmpeg expression size limit')
+    return expression
+
+
 def _filter_graph(events, width, height, rate):
     zooms = [event for event in events if event['type'] == 'zoom_pulse']
     terms = []
@@ -645,11 +705,30 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
         input_index = len(secondary) + len(mask_inputs) + len(titles) + 1
         command += ['-loop', '1', '-framerate', str(rate), '-i', str(png)]
         first, last = _seconds(event, 'output_start'), _seconds(event, 'output_end')
-        fade = min(.18, (last-first)/3)
+        mapped_title = event['type'] == 'keyword_title' and 'phase_map' in event
+        original_duration = (float(Fraction(event['phase_map']['original_frame_count'], 1) / rate)
+                             if mapped_title else last-first)
+        fade = min(.18, original_duration/3)
         branch, target_label = f'title_input{input_index}', f'titled{input_index}'
-        graph += (f';[{input_index}:v]format=rgba,colorchannelmixer=aa={event["strength"]:.9f},'
-                  f'fade=t=in:st={first:.9f}:d={fade:.9f}:alpha=1,'
-                  f'fade=t=out:st={last-fade:.9f}:d={fade:.9f}:alpha=1[{branch}]')
+        if mapped_title and event['phase_map']['original_frame_count'] == 1:
+            # The legacy one-frame fade is transparent. FFmpeg falls back to
+            # frame-count mode when its duration rounds to zero ticks; repeated
+            # output frames must not advance that old one-frame animation.
+            graph += f';[{input_index}:v]format=rgba,colorchannelmixer=aa=0[{branch}]'
+        elif mapped_title:
+            old_clock = _mapped_title_clock(event, rate)
+            # Feed selected old-relative timestamps to the legacy fade filters,
+            # then restore output timestamps for framesync with the base video.
+            # In particular, fade's integer alpha rounding is left to FFmpeg.
+            graph += (f';[{input_index}:v]format=rgba,colorchannelmixer=aa={event["strength"]:.9f},'
+                      f"settb=expr={rate.denominator}/{rate.numerator},setpts='{old_clock}',"
+                      f'fade=t=in:st=0.000000000:d={fade:.9f}:alpha=1,'
+                      f'fade=t=out:st={original_duration-fade:.9f}:d={fade:.9f}:alpha=1,'
+                      f'setpts=N[{branch}]')
+        else:
+            graph += (f';[{input_index}:v]format=rgba,colorchannelmixer=aa={event["strength"]:.9f},'
+                      f'fade=t=in:st={first:.9f}:d={fade:.9f}:alpha=1,'
+                      f'fade=t=out:st={last-fade:.9f}:d={fade:.9f}:alpha=1[{branch}]')
         x = '0'
         if event['type'] == 'tracked_title':
             from .tracked_title import compile_title_positions
@@ -669,7 +748,11 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
             x = expression(positions, 'x_pixels')
             y = expression(positions, 'y_pixels')
         travel = min(height*.02*event['strength'], height*(1-title['bounds'][3]))
-        static_y = f'{travel:.9f}*max(0,1-(t-{first:.9f})/{fade:.9f})' if event['parameters']['motion'] == 'rise' else '0'
+        static_y = (f'{travel:.9f}*max(0,1-(t-{first:.9f})/{fade:.9f})'
+                    if event['parameters']['motion'] == 'rise' else '0')
+        if mapped_title and event['parameters']['motion'] == 'rise':
+            static_y = _mapped_title_rise(event, rate, float(f'{travel:.9f}'),
+                                          float(f'{fade:.9f}'))
         if event['type'] != 'tracked_title': y = static_y
         if event['type'] == 'keyword_title' and event['parameters']['motion'] == 'rise':
             import math
@@ -679,7 +762,12 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
             last_frame = _frame(_time(event['output_end'],'end'),rate,'end')
             title['frame_positions'] = []
             for frame in range(first_frame, last_frame):
-                offset = float(f'{travel:.9f}') * max(0, 1-(float(Fraction(frame,1)/rate)-float(f'{first:.9f}'))/float(f'{fade:.9f}'))
+                if mapped_title:
+                    old_index = _mapped_title_frame(event, frame, rate)
+                    elapsed = float(Fraction(old_index, 1) / rate)
+                else:
+                    elapsed = float(Fraction(frame, 1) / rate)-float(f'{first:.9f}')
+                offset = float(f'{travel:.9f}') * max(0, 1-elapsed/float(f'{fade:.9f}'))
                 pixels = math.floor(offset) // 2 * 2
                 bounds = list(title['bounds'])
                 bounds[1] += pixels / height; bounds[3] += pixels / height

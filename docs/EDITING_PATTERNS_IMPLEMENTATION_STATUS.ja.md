@@ -1,5 +1,11 @@
 # 編集パターン実装の進捗と検証台帳
 
+## 2026-10-07: keywordタイトルのフェード・riseを変速へ追従（alpha.7後の開発版）
+
+- keywordタイトルもvisual retime移行の`phase_map`へ接続。PNG入力に元の相対フレーム時刻を与えて既存FFmpeg fadeを通し、出力時計へ戻す。riseの描画位置／測定boundsも同じ元フレームから計算する。既存の非変速タイトル描画は保持する。
+- 整数フレーム時計を明示し、30000/1001で小数PTSが切り捨てられる1フレームのずれを修正。元1フレームの透明タイトルを複製しても表示しない。途中から見えるタイトルの新区間先頭を衝突検査から除外せず、複製した元透明フレームは対象外にする。その他のfadeフレームは保守的に可視として扱う。
+- 関連30試験成功（4.406秒）: `output/implementation-maya/retime-title-integer-clock.log`。実60fps／30000/1001、nonzero開始、保持／間引き、途中から可視、1フレーム保持で文字ROIの画素とriseの位置を検査。全594試験成功（264.232秒）: `output/implementation-maya/retime-title-full-suite.log`。最後に可視フレーム区間を全フレーム集合を作らず保持する変更後も関連30試験成功（4.550秒）: `retime-title-final-closure.log`。6配布物監査、3スキル形式、クリーンwheel smokeも成功。前回`d068d62`のCI37508827629成功を読み戻し確認。通常cueのfade・動画overlay／効果音の素材変速、追跡・発話設定移行、実素材の人の全編レビューと最終MP4は継続する。公開alpha.7には未収録。
+
 ## 2026-10-07: 変速後の既存演出とパルス位相の移行（alpha.7後の開発版）
 
 - visual `session retime`の既定`--timeline-settings migrate`は、実renderの対応表へ束縛したcue・固定保護領域を元区間の逆フレーム対応で移行し、採用中のprojectを変更しない。候補に旧／新対応表SHA、区間、actor／理由、元render SHAを持つ改変検査済み証跡を保持する。明示`clear`は失効項目を返す。

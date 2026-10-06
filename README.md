@@ -150,7 +150,7 @@ uv run --no-sync video-harness session retime SESSION RENDER_ID --request-file r
 uv run --no-sync video-harness session render SESSION --candidate-id CANDIDATE_ID --full
 ```
 
-Install the relevant optional extras and Rubber Band first; see [retime instructions](docs/RETIME.ja.md). Alpha.7 invalidates old explicit cues/effects/guides in the candidate and leaves the adopted edit unchanged. The development visual workflow migrates compatible settings and preserves original-frame zoom/saturation pulse values by default; `--timeline-settings clear` explicitly removes them. Added music is placed on the new timeline. `mix` / `video_only` FCP handoff preserves baked timing; editable retime remains unsupported. Alpha.7 also supports word-protected speech candidates with explicitly observed `nonspoken_intervals`; see the retime guide.
+Install the relevant optional extras and Rubber Band first; see [retime instructions](docs/RETIME.ja.md). Alpha.7 invalidates old explicit cues/effects/guides in the candidate and leaves the adopted edit unchanged. The development visual workflow migrates compatible settings and preserves original-frame zoom/saturation pulse values and keyword-title fade/rise by default; `--timeline-settings clear` explicitly removes them. Added music is placed on the new timeline. `mix` / `video_only` FCP handoff preserves baked timing; editable retime remains unsupported. Alpha.7 also supports word-protected speech candidates with explicitly observed `nonspoken_intervals`; see the retime guide.
 
 Requested video effects are described in [VIDEO_EFFECTS.ja.md](docs/VIDEO_EFFECTS.ja.md): restrained/pop presets and explicit timeline-bound events, verified in the rendered media.
 

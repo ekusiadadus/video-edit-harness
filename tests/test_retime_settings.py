@@ -74,6 +74,18 @@ class VisualSettingMigrationTests(unittest.TestCase):
                                              "frames": [0, 0, 1, 1, 2, 2, 2]})
         self.assertEqual(result["evidence"]["items"][0]["content_policy"], "original_frame_effect_phase")
 
+    def test_keyword_title_migrates_its_original_animation_phase(self):
+        old = mapping()
+        event = {"id": "keyword", "type": "keyword_title", "output_start": "1/15",
+                 "output_end": "1/6", "strength": .5, "reason": "Observed label",
+                 "parameters": {"text": "MOVE", "motion": "rise"}}
+        cfg = config(video_effects={"version": 1, "mapping_sha256": digest(old), "events": [event]})
+        moved = self.migrate(cfg, old)["changes"]["video_effects"]["events"][0]
+        self.assertEqual(moved["parameters"]["motion"], "rise")
+        self.assertEqual(moved["phase_map"], {"version": 1, "original_frame_count": 3,
+                                             "frames": [0, 0, 1, 1, 2, 2, 2]})
+        self.assertEqual(moved["parameters"]["text"], "MOVE")
+
     def test_existing_phase_map_is_composed_without_resetting_shape(self):
         old = mapping()
         event = {"id": "pulse", "type": "smooth_zoom", "output_start": "1/15",

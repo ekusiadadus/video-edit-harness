@@ -22,6 +22,25 @@ def asset(event_id, bounds, positions=None):
 
 
 class TitleCollisionsTest(unittest.TestCase):
+    def test_mapped_title_visible_on_new_first_frame_is_checked(self):
+        mapped = {**event('a', first=2, last=3), 'phase_map': {
+            'version': 1, 'original_frame_count': 5, 'frames': [2]}}
+        with self.assertRaisesRegex(ValueError, 'at frame 2'):
+            check_title_collisions([mapped, event('b')],
+                                   [asset('a', LEFT), asset('b', MIDDLE)], fps=1)
+
+    def test_held_transparent_original_first_frames_are_skipped(self):
+        mapped = {**event('a'), 'phase_map': {
+            'version': 1, 'original_frame_count': 5, 'frames': [0, 0, 0, 2, 4]}}
+        result = check_title_collisions([mapped, event('b')],
+                                       [asset('a', LEFT), asset('b', RIGHT)], fps=1)
+        self.assertEqual(result[0]['frames_checked'], 2)
+        self.assertEqual(result[0]['output_start'], '3')
+        bad = {**mapped, 'phase_map': {**mapped['phase_map'], 'frames': [0, 0, True, 2, 4]}}
+        with self.assertRaisesRegex(ValueError, 'invalid phase map'):
+            check_title_collisions([bad, event('b')],
+                                   [asset('a', LEFT), asset('b', RIGHT)], fps=1)
+
     def test_rise_requires_positions_and_roundoff_is_not_a_collision(self):
         rising = {**event('a'), 'parameters': {'motion': 'rise'}}
         with self.assertRaisesRegex(ValueError, 'Missing positions for rising title'):

@@ -142,7 +142,7 @@ def migrate_visual_settings(cfg, original_mapping, compiled_retime):
                 raise ValueError(f"video_effects:{event.get('id')} needs new tracking after retime")
             moved = interval(event, "video_effects")
             kind = event.get("type")
-            if kind in {"zoom_pulse", "smooth_zoom", "saturation_pulse"}:
+            if kind in {"zoom_pulse", "smooth_zoom", "saturation_pulse", "keyword_title"}:
                 first, end, selected = source_frames(event)
                 prior_phase = event.get("phase_map")
                 moved["phase_map"] = {
@@ -151,7 +151,7 @@ def migrate_visual_settings(cfg, original_mapping, compiled_retime):
                     "frames": [prior_phase["frames"][base - first] if prior_phase else base - first
                                for base in selected]}
                 evidence["items"][-1]["content_policy"] = "original_frame_effect_phase"
-            elif kind in {"comparison_wipe", "motion_trail", "keyword_title"}:
+            elif kind in {"comparison_wipe", "motion_trail"}:
                 require_translation(event, f"video_effects:{event.get('id')}")
                 evidence["items"][-1]["content_policy"] = "unchanged_phase_pure_translation"
             else:

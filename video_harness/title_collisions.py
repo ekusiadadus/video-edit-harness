@@ -1,7 +1,8 @@
 """Check measured title cards against other title cards on output frames.
 
 The first frame of each title is transparent in the effects renderer's fade-in.
-Every later frame is treated as visible, including frames in either fade.
+Every later original frame is treated as visible, including frames in either fade.
+Mapped titles may begin visibly; held original first frames remain transparent.
 """
 
 from __future__ import annotations
@@ -102,13 +103,26 @@ def check_title_collisions(events, title_assets, *, fps):
             raise ValueError(f'Missing positions for tracked title {event_id}')
         if event.get('parameters', {}).get('motion') == 'rise' and positions is None:
             raise ValueError(f'Missing positions for rising title {event_id}')
-        prepared.append((event_id, first, last, fixed, positions))
+        phase = event.get('phase_map')
+        if phase is not None:
+            if event['type'] != 'keyword_title' or not isinstance(phase, dict) or set(phase) != {'version', 'original_frame_count', 'frames'}:
+                raise ValueError(f'Title {event_id} has an invalid phase map')
+            count, frames = phase['original_frame_count'], phase['frames']
+            if type(phase['version']) is not int or phase['version'] != 1 or type(count) is not int or not 1 <= count <= 4096:
+                raise ValueError(f'Title {event_id} has an invalid phase map')
+            if not isinstance(frames, list) or len(frames) != last-first or len(frames) > 4096 or any(type(value) is not int or not 0 <= value < count for value in frames):
+                raise ValueError(f'Title {event_id} has an invalid phase map')
+            if any(left > right for left, right in zip(frames, frames[1:])):
+                raise ValueError(f'Title {event_id} has an invalid phase map')
+            visible = next((first + offset for offset, old in enumerate(frames) if old > 0), last)
+        else:
+            visible = first + 1
+        prepared.append((event_id, first, last, fixed, positions, visible))
 
     evidence = []
-    for index, (first_id, first_start, first_end, first_bounds, first_positions) in enumerate(prepared):
-        for second_id, second_start, second_end, second_bounds, second_positions in prepared[index + 1:]:
-            start = max(first_start + 1, second_start + 1)
-            end = min(first_end, second_end)
+    for index, (first_id, first_start, first_end, first_bounds, first_positions, first_visible) in enumerate(prepared):
+        for second_id, second_start, second_end, second_bounds, second_positions, second_visible in prepared[index + 1:]:
+            start, end = max(first_visible, second_visible), min(first_end, second_end)
             if start >= end:
                 continue
             for frame in range(start, end):
