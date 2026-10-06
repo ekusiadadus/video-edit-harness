@@ -632,7 +632,8 @@ def _filter_graph(events, width, height, rate):
 
 
 def render_effects(input, plan, output, assets=None, composition=None, *, preserve_audio_end=False,
-                   capture_temporal_samples=True, project_picture_sha256=None):
+                   capture_temporal_samples=True, project_picture_sha256=None,
+                   output_window=None, audio_source=None):
     """Render a sealed effect plan; preserve original audio and frame count."""
     if type(preserve_audio_end) is not bool:
         raise ValueError('preserve_audio_end must be boolean')
@@ -645,7 +646,7 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
         raise ValueError('Pass a resolved effect plan')
     if not isinstance(plan['mapping_sha256'], str) or len(plan['mapping_sha256']) != 64:
         raise ValueError('Effect plan needs a mapping hash')
-    if not plan['events']:
+    if not plan['events'] and output_window is None:
         raise ValueError('No effects to render')
     source_sha = _sha(source)
     info = _probe(source, count=True)
@@ -655,6 +656,24 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
     count = int(video['nb_read_frames'])
     rate = _verified_rate(source, video, count)
     duration = Fraction(count, 1) / rate
+    expected_count, expected_duration = count, duration
+    window_audio = None
+    if output_window is not None:
+        if (not isinstance(output_window, (list, tuple)) or len(output_window) != 2
+                or any(type(frame) is not int for frame in output_window)
+                or not 0 <= output_window[0] < output_window[1] <= count
+                or Fraction(output_window[1]-output_window[0], 1)/rate > 30):
+            raise ValueError('Effect window must select existing frames within 30 seconds')
+        if capture_temporal_samples:
+            raise ValueError('Partial previews cannot capture original temporal stages')
+        expected_count = output_window[1] - output_window[0]
+        expected_duration = Fraction(expected_count, 1) / rate
+        window_audio = Path(audio_source or source).resolve(strict=True)
+        audio_sha = _sha(window_audio)
+        if not _stream(_probe(window_audio), 'audio'):
+            raise ValueError('Window preview needs the retained finished audio')
+    elif audio_source is not None:
+        raise ValueError('Alternate audio is a window preview option only')
     # The public plan is bound to the real frame mapping by resolve_effects.
     # Here event frame validity is checked again against the observed input.
     events = [_canonical_event(event, rate, count) for event in plan['events']]
@@ -989,6 +1008,18 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
                               'mapping_sha256': plan['mapping_sha256'],
                               'input_sha256': source_sha,
                               'selected_asset_bindings': selected_asset_bindings})
+    if output_window is not None:
+        first, end = output_window
+        graph += (f';[{label}]trim=start_frame={first}:end_frame={end},'
+                  f'setpts=N*{rate.denominator}/({rate.numerator}*TB)[window_picture]')
+        label = 'window_picture'
+        audio_index = command.count('-i')
+        command += ['-i', str(window_audio)]
+        first_sample = round(Fraction(first*48000, 1)/rate)
+        end_sample = round(Fraction(end*48000, 1)/rate)
+        graph += (f';[{audio_index}:a:0]aresample=48000:first_pts=0,'
+                  f'atrim=start_sample={first_sample}:end_sample={end_sample},'
+                  'asetpts=PTS-STARTPTS[window_audio]')
     new_sample_paths = []
     command += ['-filter_complex', graph]
     for row in temporal_samples:
@@ -1009,9 +1040,10 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
                     '-level', '3', '-pix_fmt', 'bgra', '-fps_mode', 'passthrough',
                     '-f', 'matroska', str(sample_path)]
         row['_path'] = sample_path
-    command += ['-map', f'[{label}]', '-map', '0:a:0',
+    command += ['-map', f'[{label}]', '-map', '[window_audio]' if output_window is not None else '0:a:0',
                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p',
-               '-c:a', 'copy', *(['-movie_timescale','48000'] if preserve_audio_end else []),
+               *(['-c:a', 'aac', '-b:a', '384k', '-ar', '48000'] if output_window is not None else ['-c:a', 'copy']),
+               *(['-movie_timescale','48000'] if preserve_audio_end else []),
                '-movflags', '+faststart', str(target)]
     try:
         if replay_inputs:
@@ -1040,13 +1072,13 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
             raise RuntimeError(f'Effects FFmpeg failed ({run.returncode}); see {log}')
         observed = _probe(target, count=True)
         picture, sound = _stream(observed, 'video'), _stream(observed, 'audio')
-        if not picture or not sound or int(picture['nb_read_frames']) != count:
+        if not picture or not sound or int(picture['nb_read_frames']) != expected_count:
             raise ValueError('Effects changed video frame count or removed audio')
-        if _verified_rate(target, picture, count) != rate:
+        if _verified_rate(target, picture, expected_count) != rate:
             raise ValueError('Effects changed frame rate')
-        if abs(Fraction(str(picture['duration'])) - duration) > Fraction(1, 1) / rate:
+        if abs(Fraction(str(picture['duration'])) - expected_duration) > Fraction(1, 1) / rate:
             raise ValueError('Effects changed duration')
-        if sound['codec_name'] != audio['codec_name']:
+        if output_window is None and sound['codec_name'] != audio['codec_name']:
             raise ValueError('Effects changed audio codec')
         if temporal_samples:
             from .overlay_layers import _probe as probe_layer, validate_overlay_layer_reference
@@ -1071,6 +1103,8 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
                            stdout=stream, stderr=stream, check=True)
         if _sha(source) != source_sha:
             raise ValueError('Effects input changed during render')
+        if window_audio is not None and _sha(window_audio) != audio_sha:
+            raise ValueError('Retained finished audio changed during window render')
         for item in secondary:
             _check_asset(item['asset']['asset_id'], registry)
         for title in titles:
@@ -1089,6 +1123,10 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
             path.unlink(missing_ok=True)
         raise
     return {'version': 1, 'input_sha256': source_sha, 'output_sha256': _sha(target),
+            **({'output_window': {'first_frame': output_window[0], 'end_frame_exclusive': output_window[1],
+                                 'parent_frame_count': count, 'fps': str(rate), 'clock': 'full parent output clock'},
+                'finished_audio_sha256': audio_sha}
+               if output_window is not None else {}),
             'mapping_sha256': plan['mapping_sha256'], 'events': events,
             'text_assets': titles,
             'temporal_inputs': temporal_inputs,
@@ -1113,6 +1151,6 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
                                   'source_start': item['event']['parameters']['source_start'],
                                   'event_id': item['event']['id'], 'audio_used': False}
                                  for item in secondary],
-            'frame_count': count, 'fps': str(rate), 'duration': float(duration),
+            'frame_count': expected_count, 'fps': str(rate), 'duration': float(expected_duration),
             'output': str(target), 'ffmpeg_log': str(log),
             'review': 'technical full decode only; human visual/listening review pending'}

@@ -61,6 +61,41 @@ class ComparisonAdjustmentTests(unittest.TestCase):
                         {'action': 'update', 'id': 'zoom', 'changes': invalid}]}, 'codex', 'Reject invalid range/position')
                 self.assertEqual(session._load(), before)
             candidate = session.candidate_from_selection(receipt, 'codex', 'Apply observed range and anchor')
+            off_receipt = {**receipt, 'version': 2,
+                'effect_operations': [{'action':'remove','id':'zoom'}]}
+            off_candidate = session.candidate_from_selection(off_receipt, 'codex', 'Disable all effects for interval trial')
+            off_preview = read(session.preview_changes(off_candidate['id'], context_frames=0)['path'])
+            self.assertEqual((off_preview['first_frame'],off_preview['end_frame_exclusive']), (0,4))
+            self.assertFalse(off_preview['full_render'])
+            unchanged = session._load()
+            partial = read(session.preview_changes(candidate['id'], context_frames=0)['path'])
+            self.assertEqual((partial['first_frame'], partial['end_frame_exclusive']), (0, 8))
+            self.assertFalse(partial['full_render'])
+            self.assertEqual(session._load(), unchanged)
+            with self.assertRaisesRegex(ValueError, 'before adoption'):
+                session.adopt_candidate(candidate['id'], 'codex', 'Reject partial-only adoption')
+            from unittest.mock import patch
+            def fail_window(source, effects, target, *args, **kwargs):
+                Path(target).write_bytes(b'incomplete window')
+                raise RuntimeError('Synthetic window failure')
+            folders = set((session.root / 'inspections').iterdir())
+            with patch('video_harness.change_preview.render_effects', side_effect=fail_window):
+                with self.assertRaisesRegex(RuntimeError, 'window failure'):
+                    session.preview_changes(candidate['id'], context_frames=0)
+            failed = (set((session.root / 'inspections').iterdir()) - folders).pop()
+            self.assertEqual(read(failed/'result.json')['technical_status'], 'failed')
+            self.assertFalse((failed/'effect-window.mp4').exists())
+            self.assertFalse((failed/'after.mp4').exists())
+            self.assertFalse((failed/'preview.html').exists())
+            retained = Path(partial['retained_pre_effects']['path'])
+            saved = retained.read_bytes()
+            try:
+                retained.write_bytes(saved+b'stale')
+                with self.assertRaisesRegex(ValueError, 'changed'):
+                    session.preview_changes(candidate['id'], context_frames=0)
+            finally:
+                retained.write_bytes(saved)
+            self.assertEqual(session._load(), unchanged)
             rendered = session.render(preview=False, candidate_id=candidate['id'])
             preview = read(session.preview_effects(rendered['id'], context_frames=0)['path'])
             self.assertEqual((preview['first_frame'], preview['end_frame_exclusive']), (0, 8))

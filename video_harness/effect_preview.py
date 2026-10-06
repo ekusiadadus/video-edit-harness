@@ -97,14 +97,15 @@ def _check_excerpt(path, count, rate, shape, log):
          '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-'], log)
 
 
-def _page(before, after, first, end, rate):
+def _page(before, after, first, end, rate, *, after_reference_label='Parent SHA-256', partial=False):
     start = float(Fraction(first, 1) / rate)
     stop = float(Fraction(end, 1) / rate)
-    rows = [("変更前", before), ("変更後", after)]
+    rows = [("変更前", before, 'Parent SHA-256'), ("変更後", after, after_reference_label)]
     cards = ''.join(f'<article><h2>{label}</h2><video preload="metadata" playsinline '
                     f'src="{escape(ref["path"], quote=True)}"></video>'
-                    f'<p>Parent SHA-256: <code>{escape(ref["sha256"])}</code></p></article>'
-                    for label, ref in rows)
+                    f'<p>{escape(reference_label)}: <code>{escape(ref["sha256"])}</code></p></article>'
+                    for label, ref, reference_label in rows)
+    notice = '<p>変更後は区間のみの試作です。採用前に全編をレンダーし、その映像と音声を確認してください。</p>' if partial else ''
     return ('''<!doctype html><html lang="ja"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width"><title>エフェクト範囲の比較</title>
 <style>body{font:16px system-ui;background:#171717;color:#eee;margin:24px}
@@ -114,7 +115,7 @@ button,input{font:inherit;margin:6px;padding:8px}code{overflow-wrap:anywhere;fon
 <h1>エフェクト範囲の比較</h1>
 <p>元の完成動画の出力範囲: ''' + f'{start:.6f}–{stop:.6f}' + ''' 秒。この短い動画は0秒から始まります。
 音声はAACで再符号化されています。映像・音声の人による確認は未実施です。</p>
-<button id="play">再生／停止</button><button id="restart">先頭に戻す</button>
+''' + notice + '''<button id="play">再生／停止</button><button id="restart">先頭に戻す</button>
 <label>再生位置 <input id="seek" type="range" min="0" max="''' +
             f'{stop-start:.9f}' + '''" step="0.001" value="0"></label>
 <button id="audio">音声: 変更前</button><output id="time">0.000秒</output>
