@@ -1,6 +1,6 @@
 {
   "name": "video-editing",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "description": "Reviewable YouTube and TikTok editing with grading, captions and Final Cut Pro XML handoff.",
   "author": {
     "name": "Daisuke Kuriyama"

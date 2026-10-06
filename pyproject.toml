@@ -1,6 +1,6 @@
 [project]
 name = "video-edit-harness"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "Transcript-led video editing, grading and FCPXML harness for Codex and Claude Code"
 readme = "README.md"
 license = "MIT"

@@ -1,6 +1,6 @@
 # 被写体の追跡と配置検査
 
-追跡はローカル処理です。クラウド送信・人物の同定・自動採用はしません。検証した追跡位置を `tracked_zoom` のアンカーに使えます。alpha.6後の作業ツリーでは `tracked_title` による追従ラベルも描画できます。公開済みalpha.6にはこの追加を含みません。
+追跡はローカル処理です。クラウド送信・人物の同定・自動採用はしません。検証した追跡位置を `tracked_zoom` のアンカーに使えます。alpha.7では `tracked_title` による追従ラベルも描画できます。公開済みalpha.6にはこの追加を含みません。
 
 ```sh
 uv sync --locked --extra tracking
@@ -31,7 +31,7 @@ uv run video-harness session track-effect SESSION RENDER_ID --box 0.2 0.3 0.5 0.
 
 `session track-effect` は追跡した枠を `subject` 保護領域として候補に付けます。ズームによる枠の切れと、測定した文字カードとの重なりをフレームごとに検査します。胴体の枠から頭や足先の領域は推定しません。他の踊り手・未宣言の字幕・投稿UIとの関係は実動画で確認します。
 
-## 追従ラベルを提案する（alpha.6後の作業ツリー）
+## 追従ラベルを提案する（alpha.7）
 
 人物や製品の位置に合わせて、重要語だけを動かせます。ラベル内容はユーザーの意図と観察した場面から指定し、人物名や国籍を追跡結果から推測しません。
 
@@ -95,7 +95,7 @@ uv run video-harness tracking validate track.json --source input.mp4 --first-fra
 
 `time_mapping.compile_retime` はスピードランプと静止保持の出力→原動画フレーム対応表を生成します。発話などの保護区間に触れる変更を拒否し、間引き／重複フレームを記録します。`retime prepare`／`retime render` が対応表どおりの単独MP4、音声伸縮、観察した字幕のSRT移行を扱います。[時間変更の手順](RETIME.ja.md)を参照してください。セッション候補・FCP時間変更・既存cueや追跡の移行は未接続です。時間を変更した映像に古い追跡を流用せず、実際の入力を再追跡します。
 
-## マスクで背景を抑える（alpha.6後の開発版）
+## マスクで背景を抑える（alpha.7・実験的）
 
 `tracked_background` は、追跡した対象の枠を初期条件に、各フレームでローカルOpenCV GrabCutの前景マスクを作ります。枠をそのまま塗る方式ではありません。前景を残し、背景の明るさ・彩度を指定した分だけ抑えます。元の音声・尺・フレーム対応を維持します。自然版には追加せず、未採用候補から比較してください。
 
@@ -122,3 +122,5 @@ uv run video-harness session track-effect SESSION RENDER_ID --effect tracked_bac
 候補の全編で、髪・指・衣装・遮蔽・輪郭の点滅・背景の混入を確認します。生成タイトルは後段ですが、素材に焼き込まれた文字やUIも背景に含まれ得ます。`subject_masks`レビュー項目は正確なrender SHAに結び付けた視覚観察が必要です。技術試験やピクセル数は輪郭の品質承認ではありません。FCPはmix/video_onlyの焼き込みで、編集可能な切り抜きレイヤーは未対応です。
 
 方式の根拠：[OpenCV公式GrabCut解説](https://docs.opencv.org/4.x/d8/d83/tutorial_py_grabcut.html)、[FFmpeg公式maskedmerge](https://ffmpeg.org/ffmpeg-filters.html#maskedmerge)。深度推定、AI人物マッティング、自然な髪の半透明の復元は別の未実装機能です。公開済みalpha.6には含まれません。
+
+実ダンスでの確認（2026-10-06、agentによる視覚検査）：広い全身寄りの枠を使った8フレームではCSRT追跡は有効でしたが、GrabCutが背景の壁と天井照明まで前景として保持しました。このマスクは未採用です。二値マスクの成立や追跡の成功を、その人物を正しく切り抜けた証拠にしないでください。半透明マッティングや対象の意味理解は備えていません。

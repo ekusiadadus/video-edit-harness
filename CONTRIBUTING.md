@@ -7,7 +7,7 @@ uv sync --locked
 uv run python -m unittest discover -s tests -v
 uv build
 uv run python scripts/package_release.py --output dist
-uv run python scripts/smoke_wheel.py dist/video_edit_harness-0.1.0a5-py3-none-any.whl
+uv run python scripts/smoke_wheel.py dist/video_edit_harness-0.1.0a7-py3-none-any.whl
 ```
 
 Keep changes focused and preserve source media and earlier session revisions. Add tests for observable behavior and integrity failures. Cloud tests must mock providers; do not upload real footage or require secrets in CI. Treat human listening/visual decisions and FCP GUI checks separately from software success. Read AGENTS.md for editing invariants.

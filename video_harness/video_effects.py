@@ -548,7 +548,7 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
         from .subject_background import background_graph
         command += ['-framerate',str(rate),'-start_number',str(_frame(_time(event['output_start'],'start'),rate,'start')),
                     '-i',str(Path(event['parameters']['mask_path']).parent/'%08d.png')]
-        fragment,next_label=background_graph(label,index,event,rate)
+        fragment,next_label=background_graph(label,index,event,rate,count)
         graph += ';' + fragment
         label=next_label
     titles = []

@@ -1,4 +1,13 @@
-# Alpha.6 verification / 検証範囲
+# Alpha.7 verification / 検証範囲
+
+Alpha.7 is the next authorized software prerelease. It includes tracked labels/text layout, pipeline 2, protected speech retime, source-bound J/L cuts, comparison selection, opt-in trails and experimental background masks. The full MAYA implementation plan and requested final YouTube MP4 remain incomplete. The user will upload the MP4 personally; no platform post is part of this release.
+
+- Base `2c596a3`: local 411 tests passed, but remote Ubuntu CI found a one-frame background-mask boundary failure. Alpha.7 replaces overlay gating with exact trimmed-frame concatenation; regression coverage includes 30 and 30000/1001 fps and prefix/suffix-free windows. Final local suite: 411 tests passed with the expanded actual-frame regression. Remote CI results must be checked before publication.
+- Alpha.7 wheel/sdist and six-artifact archive/checksum audit passed locally. A clean wheel installation verified CLI data and code identity; all three skill validators passed. Raw evidence: `output/implementation-maya/alpha7-artifact-audit.json`, `alpha7-wheel-smoke.log` and `alpha7-*-skill.log`.
+- Real dance masking: 8 CSRT frames remained usable, but agent visual inspection rejected the generated GrabCut masks because background walls and ceiling lights were retained. No candidate was adopted and no human contour review was claimed. Local evidence: `output/implementation-maya/background-real-20261006/visual-assessment.json` and `mask-contact-sheet.jpg`.
+- Human full visual/listening acceptance, FCP GUI import/playback/re-export, motion-direction transitions, depth/semantic matting, live external finishing and final delivery remain unverified or incomplete. Published software capabilities must not be confused with these acceptance outcomes.
+
+## Historical alpha.6 verification / 検証範囲
 
 The owner requested the alpha.6 README update and release on 2026-10-06. The release includes optional patterns, assets, visual EDL, effects, local tracking and visual-session retime. It does not complete the full MAYA implementation plan.
 

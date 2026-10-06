@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.0-alpha.7 — 2026-10-06
+
+- Added tracked readable labels, Japanese/English measured wrapping, title collision checks and visual pipeline 2 to grade footage before overlays.
+- Added transcript-word-protected speech retime, observed nonspoken intervals, retained PCM and fractional-frame audio endpoint preservation.
+- Added structure comparisons and exact-render selection proposals that restore the sealed edit without automatic adoption.
+- Added source-bound J/L audio handles with audible-word captions and separate audio provenance; retime combinations and editable FCP remain unsupported.
+- Added opt-in causal motion trails and experimental tracked GrabCut background masks with manual binary-PNG corrections and contour review. A real dance mask trial retained background walls/lights and was rejected; automatic person matting quality is not established.
+- Fixed background-mask event boundaries with exact trimmed-frame concatenation; regressions cover 30 and 30000/1001 fps, interior windows and video-edge windows.
+- Refreshed README, all three skills, distribution pins and current capability limits. No posting, external service activation, human acceptance or FCP GUI proof is implied. This release does not complete the full implementation plan.
+
 ## v0.1.0-alpha.6 — 2026-10-06
 
 - Added opt-in editing patterns, licensed asset records, music/SFX mixing, beat proposals, multi-source visual EDL, immutable session candidates and comparison pages.

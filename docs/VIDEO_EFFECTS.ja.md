@@ -1,8 +1,8 @@
 # 映像効果の指定と確認
 
-この文書は作業ツリーで追加中の `video_effects` 契約を記述する。alpha.6の機能と、その後の作業ツリーの追加を区別し、利用前に現在のCLI help、実装、テストと実レンダーを確認する。映像の魅力は効果の数で測らない。話の要点、動作、感情の変化、最後の答えを先に定め、効果はその一点を読み取りやすくするために使う。
+この文書はalpha.7の `video_effects` 契約を記述する。旧alpha.6との差分と制限を確認し、利用前に現在のCLI help、実装、テストと実レンダーを確認する。映像の魅力は効果の数で測らない。話の要点、動作、感情の変化、最後の答えを先に定め、効果はその一点を読み取りやすくするために使う。
 
-## 素材と文字の色を分ける（alpha.6後の開発版）
+## 素材と文字の色を分ける（alpha.7）
 
 新しいvisualセッションは `visual_pipeline_version: 2` で作成します。カット／リタイムした原映像へLUT・固定領域補正を適用し、`visual-graded.mp4` を残してから画像・文字・エフェクトを合成します。最後の書き出しではLUTを再適用せず、プレビューサイズ・音声・Rec.709出力を整えます。`visual-pipeline.json` に処理方式、色調整の入力SHA、LUT SHA、処理対象を保存します。
 
@@ -20,7 +20,7 @@
 
 `keyword_title` は明示した重要語をフェード／短い上昇で見せる。`parameters` は `text`（最大120文字・3行）、`x`／`y`、`font_size_fraction`（0.02〜0.12）、`foreground`／`background`（`#RRGGBB`）、`motion`（`fade`／`rise`）、任意の `font_path`。文字カードの実測矩形とフォント／PNGのSHAを記録する。文字と背景の指定色は4.5:1以上を要求するが、アニメーション中の透過・完成画面・読む時間の確認を代替しない。顔・手・字幕・投稿UIを自動検出して避ける機能ではない。配置を調整して全編確認する。
 
-`tracked_title` はalpha.6後の作業ツリーで追加した追従ラベル。追跡ファイルとSHA、`placement`、間隔・微調整を指定し、全フレームの実測文字矩形で画面外や宣言領域との衝突を拒否する。`session track-effect --effect tracked_title --title-parameters-file` の手順と制限は [TRACKING.ja.md](TRACKING.ja.md) に記載している。自動で顔や空き場所を探す機能ではない。
+`tracked_title` はalpha.7で追加した追従ラベル。追跡ファイルとSHA、`placement`、間隔・微調整を指定し、全フレームの実測文字矩形で画面外や宣言領域との衝突を拒否する。`session track-effect --effect tracked_title --title-parameters-file` の手順と制限は [TRACKING.ja.md](TRACKING.ja.md) に記載している。自動で顔や空き場所を探す機能ではない。
 
 `smooth_zoom` の `parameters` は `anchor_x`／`anchor_y`（0〜1の画面座標）、`max_scale`（1〜1.5）、`easing`（`smoothstep`／`cosine`）。これは手動アンカーで、対象追跡は別の `tracked_zoom` を使い、顔・足先は観察した保護領域で宣言する。`saturation_pulse` は `minimum_saturation`（0〜1）と同じイージングを持つ。新効果は入口・出口で変化をゼロに戻し、3フレーム以上を必要とする。`strength` はズーム量・彩度低下量へ反映する。
 
@@ -90,7 +90,7 @@ uv run video-harness session effects SESSION RENDER_ID --operations-file operati
 
 フックの配置、アクセントの密度、音楽との相性は編集上の提案であり、視聴維持率の実測結果ではない。
 
-## 日本語・英語の折り返しタイトル（alpha.6後の開発版）
+## 日本語・英語の折り返しタイトル（alpha.7）
 
 `keyword_title` と `tracked_title` の `effect_version: 2` は、実フォントの幅を測って折り返します。`uv sync --locked --extra text-layout` でローカルのBudouXとregexを導入してください。既存の方式1は自動改行しません。
 
@@ -107,7 +107,7 @@ uv run video-harness session effects SESSION RENDER_ID --operations-file operati
 
 描画証拠は原文・実際の行・フォント／PNG SHA、BudouXとregexのバージョン、日本語モデルSHAを保持します。依存バージョン・モデルが変わった既存イベントは再提案が必要です。折り返し後の実測矩形を配置・追従・保護領域検査に使います。完全な日本語組版、表示時間の十分さ、字幕の意味や人の読みやすさを自動保証するものではありません。スマホ実寸で確認してください。公開済みalpha.6には未収録です。
 
-## 文字同士の重なり（alpha.6後の開発版）
+## 文字同士の重なり（alpha.7）
 
 タイトルの実測矩形を、同時に見える出力フレームで比較します。固定タイトル・riseの移動・追従ラベルを対象とし、`composition_guides` がなくても検査します。重なる場合は両方のイベントID、出力フレーム、時刻を示して描画を拒否します。位置・文字幅・表示区間を変更して新しい候補を作ってください。自動で文字を移動・省略しません。
 
@@ -115,7 +115,7 @@ uv run video-harness session effects SESSION RENDER_ID --operations-file operati
 
 既存の画像の描画方法・旧renderは維持しますが、以前通った重なった文字の再描画は新しい検査で拒否されることがあります。これまで隠れていた重なりを、黙って再出力しないための修正です。公開済みalpha.6には未収録です。
 
-## 限定した残像（alpha.6後の開発版）
+## 限定した残像（alpha.7）
 
 `motion_trail` は指定した一つのショットの区間で、現在の絵に過去の実フレームを薄く混ぜます。AI補間や未来フレームの生成は行いません。音声はコピーし、尺・フレーム数・元の対応表を維持します。自然版や既存プリセットへ自動追加しません。
 

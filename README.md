@@ -1,6 +1,6 @@
 # Video Edit Harness
 
-Alpha.6 supports an opt-in production workflow for registered music, sound effects, visual assets and beat proposals. Natural editing remains the default. See the [Japanese usage guide](docs/EDITING_PATTERNS_USAGE.ja.md), [implementation plan](docs/EDITING_PATTERNS_PLAN_2026.ja.md) and [verification status](docs/EDITING_PATTERNS_IMPLEMENTATION_STATUS.ja.md). Synthetic tests do not establish human review or an FCP GUI round trip.
+Alpha.7 supports an opt-in production workflow for registered music, sound effects, visual assets and beat proposals. Natural editing remains the default. See the [Japanese usage guide](docs/EDITING_PATTERNS_USAGE.ja.md), [implementation plan](docs/EDITING_PATTERNS_PLAN_2026.ja.md) and [verification status](docs/EDITING_PATTERNS_IMPLEMENTATION_STATUS.ja.md). Synthetic tests do not establish human review or an FCP GUI round trip.
 
 English | [日本語](README.ja.md)
 
@@ -12,9 +12,9 @@ Turn local spoken footage into coherent edits with **Codex or Claude Code**: sho
 
 This English demo uses an original illustration, synthetic English speech and English captions. The [Japanese demo](README.ja.md) has separate Japanese speech, captions and labels. Both are synthetic examples: the YouTube edit keeps both tips and TikTok keeps one complete tip. The comparison uses actual local renders; it is not a screen recording. Automated checks and these examples do not establish human listening approval, FCP GUI import or real-footage quality. [Provenance and offline reproduction](docs/demo/README.md).
 
-The development checkout after alpha.6 adds `tracked_title`: measured labels follow observed boxes through `session track-effect --effect tracked_title --title-parameters-file label.json`. Lost/stale tracking, clipping and declared-region collision fail; overlapping zoom/split/comparison geometry is unsupported. This addition is absent from the published alpha.6 assets. See [tracking](docs/TRACKING.ja.md).
+Alpha.7 adds `tracked_title`: measured labels follow observed boxes through `session track-effect --effect tracked_title --title-parameters-file label.json`. Lost/stale tracking, clipping and declared-region collision fail; overlapping zoom/split/comparison geometry is unsupported. See [tracking](docs/TRACKING.ja.md).
 
-New visual sessions in the development checkout use `visual_pipeline_version: 2`: grade assembled footage before information overlays, then finish without another LUT. Existing unversioned projects retain pipeline 1. Tracking binds to the actual graded pre-effects stage; migration requires a new candidate and new tracking. See [pipeline and migration](docs/VIDEO_EFFECTS.ja.md). Published alpha.6 does not include this change.
+New visual sessions in alpha.7 use `visual_pipeline_version: 2`: grade assembled footage before information overlays, then finish without another LUT. Existing unversioned projects retain pipeline 1. Tracking binds to the actual graded pre-effects stage; migration requires a new candidate and new tracking. See [pipeline and migration](docs/VIDEO_EFFECTS.ja.md).
 
 ## Ask for an edit
 
@@ -31,7 +31,7 @@ Add your brief, for example: “Keep the explanation coherent, shorten unnecessa
 Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), FFmpeg and ffprobe. macOS or Linux; finishing in Final Cut Pro requires macOS. Install a Japanese/CJK font when burning Japanese captions on Linux.
 
 ```sh
-git clone --branch v0.1.0-alpha.6 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.7 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 export VIDEO_EDIT_HARNESS_ROOT="$PWD"
@@ -129,7 +129,7 @@ Cloud transcription uses **OpenAI, then Azure OpenAI**, only for the source and 
 
 ## Scope and verification
 
-**Alpha:** flat speech timelines and registered multi-source visual EDL. Original video aspect is preserved; 9:16 derivatives use fit/padding by default and explicit center crop when reviewed. No automatic face identity, B-roll assembly or platform posting. Manually seeded tracking requires review. Apple Log LUTs include conversion to Rec.709; disable a second FCP Camera LUT. HDR/HLG and Apple Log 2 require another supported transform.
+**Alpha:** flat speech timelines and registered multi-source visual EDL. Original video aspect is preserved; 9:16 derivatives use fit/padding by default and explicit center crop when reviewed. No automatic face identity or B-roll assembly. The user uploads the delivered MP4 to the platform personally. Manually seeded tracking requires review. Apple Log LUTs include conversion to Rec.709; disable a second FCP Camera LUT. HDR/HLG and Apple Log 2 require another supported transform.
 
 FCPXML exports cut timing and media links. LUTs, captions, spatial masks and the final FCP audio mix need separate application and review. XML/DTD validation, hashes, full decode and frame mapping prove technical properties; they do not prove natural speech, attractive grading, actual FCP import or platform playback. The synthetic demo and automated checks do not establish real-footage quality. [Release verification and remaining checks](docs/RELEASE_VALIDATION.md).
 
@@ -138,7 +138,7 @@ make test
 uv run video-harness verify /path/to/final.mp4 --output output/final-check
 ```
 
-[Release and checksums](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.6) · [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE). Source archive, wheel, three standalone skill ZIPs and a Claude plugin ZIP are provided; this release is not published to PyPI.
+[Release and checksums](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.7) · [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE). Source archive, wheel, three standalone skill ZIPs and a Claude plugin ZIP are provided; this release is not published to PyPI.
 
 For visual retime candidates, inspect the assembled source stage and provide observed frame ranges:
 
@@ -148,29 +148,29 @@ uv run --no-sync video-harness session retime SESSION RENDER_ID --request-file r
 uv run --no-sync video-harness session render SESSION --candidate-id CANDIDATE_ID --full
 ```
 
-Install the relevant optional extras and Rubber Band first; see [retime instructions](docs/RETIME.ja.md). The candidate invalidates old explicit cues/effects/guides and leaves the adopted edit unchanged. Added music is placed on the new timeline. `mix` / `video_only` FCP handoff preserves baked timing; editable retime remains unsupported. The development checkout also supports word-protected speech candidates with explicitly observed `nonspoken_intervals`; see the retime guide.
+Install the relevant optional extras and Rubber Band first; see [retime instructions](docs/RETIME.ja.md). The candidate invalidates old explicit cues/effects/guides and leaves the adopted edit unchanged. Added music is placed on the new timeline. `mix` / `video_only` FCP handoff preserves baked timing; editable retime remains unsupported. Alpha.7 also supports word-protected speech candidates with explicitly observed `nonspoken_intervals`; see the retime guide.
 
 Requested video effects are described in [VIDEO_EFFECTS.ja.md](docs/VIDEO_EFFECTS.ja.md): restrained/pop presets and explicit timeline-bound events, verified in the rendered media.
 
-Declared `composition_guides` guard supported title/zoom placement in fixed regions or framewise tracked boxes. Local OpenCV tracking and optional MediaPipe torso detection are available through `tracking track` and `tracking validate`. `session track-effect` proposes an unadopted tracking-driven zoom and tracked subject protection bound to the retained pre-effects picture; see [tracking scope and commands](docs/TRACKING.ja.md). Source-bound `retime prepare` / `retime render` now produce local ramp/hold MP4s with audio stretching and frame-remapped SRT; [scope and commands](docs/RETIME.ja.md). Visual sessions support unadopted retime candidates; finished-picture FCP handoff preserves the baked result. Editable FCP retime remains pending. Development speech retime uses mandatory transcript-word protection and observed nonspoken frames, retaining PCM before the final mix.
+Declared `composition_guides` guard supported title/zoom placement in fixed regions or framewise tracked boxes. Local OpenCV tracking and optional MediaPipe torso detection are available through `tracking track` and `tracking validate`. `session track-effect` proposes an unadopted tracking-driven zoom and tracked subject protection bound to the retained pre-effects picture; see [tracking scope and commands](docs/TRACKING.ja.md). Source-bound `retime prepare` / `retime render` now produce local ramp/hold MP4s with audio stretching and frame-remapped SRT; [scope and commands](docs/RETIME.ja.md). Visual sessions support unadopted retime candidates; finished-picture FCP handoff preserves the baked result. Editable FCP retime remains pending. Speech retime uses mandatory transcript-word protection and observed nonspoken frames, retaining PCM before the final mix.
 
 See the [TikTok API connection guide](docs/TIKTOK_API.ja.md) for desktop OAuth and read-only access to the authorized account profile and public videos. It does not post videos, download platform music, or retrieve trend rankings. Live connectivity requires separate OAuth and API verification.
 
-Post-alpha.6 development supports measured Japanese/English title wrapping, protected phrases and number/unit grouping, with explicit overflow rejection. [Controls and limits](docs/VIDEO_EFFECTS.ja.md). This feature is not included in the published alpha.6 assets.
+Alpha.7 supports measured Japanese/English title wrapping, protected phrases and number/unit grouping, with explicit overflow rejection. [Controls and limits](docs/VIDEO_EFFECTS.ja.md).
 
-Post-alpha.6 development retains a pre-production speech assembly and exposes transcript-bound protected word frames through `session retime-source`. Speech retime candidate rendering remains pending. [Scope / 操作と制限](docs/RETIME.ja.md)
+Alpha.7 retains a pre-production speech assembly and exposes transcript-bound protected word frames through `session retime-source`. Speech retime candidates render with observed nonspoken intervals and transcript word protection. [Scope / 操作と制限](docs/RETIME.ja.md)
 
 
-Development timing comparisons use `session compare-candidates SESSION NATURAL_RENDER RETIMED_RENDER --mode timing`: inspect independent full-length playback and explicit duration/retime changes for the same selected cuts. Default `effects` retains strict mapping equality and synchronized playback. Comparing reordered or different plans remains outside this mode.
+Timing comparisons use `session compare-candidates SESSION NATURAL_RENDER RETIMED_RENDER --mode timing`: inspect independent full-length playback and explicit duration/retime changes for the same selected cuts. Default `effects` retains strict mapping equality and synchronized playback. Comparing reordered or different plans remains outside this mode.
 
-Development retimed visual sessions retain `visual-retimed.wav` for the environment mix, alongside the speech session's retained PCM. Subsequent grading, overlays, effects and final MP4 muxing preserve fractional-frame audio endpoints with a 48 kHz movie timescale. Overlays and effects retain declared Rec.709 tags and copy their input audio. Synthetic decode/sample checks cover these paths; final AAC encoding, human listening and actual FCP playback remain separate checks. These changes are not in published alpha.6.
+Retimed visual sessions retain `visual-retimed.wav` for the environment mix, alongside the speech session's retained PCM. Subsequent grading, overlays, effects and final MP4 muxing preserve fractional-frame audio endpoints with a 48 kHz movie timescale. Overlays and effects retain declared Rec.709 tags and copy their input audio. Synthetic decode/sample checks cover these paths; final AAC encoding, human listening and actual FCP playback remain separate checks.
 
-For development comparisons of result-first versus chronological edits, use `session compare-candidates SESSION FIRST_RENDER SECOND_RENDER --mode structure`. This explicit mode accepts different sealed plans under the same brief, source pool, color, base audio, FPS and preview conditions. It shows each ordered source range and reason, plus added/removed ranges including repeated uses, with independent full-length playback. Include a natural version without retiming. Retimed candidates retain their original cut evidence and disclose speed/hold operations separately. Selection exports remain proposals. The default `effects` and `timing` modes keep their existing stricter boundaries. See [comparison instructions](docs/RETIME.ja.md).
+For comparisons of result-first versus chronological edits, use `session compare-candidates SESSION FIRST_RENDER SECOND_RENDER --mode structure`. This explicit mode accepts different sealed plans under the same brief, source pool, color, base audio, FPS and preview conditions. It shows each ordered source range and reason, plus added/removed ranges including repeated uses, with independent full-length playback. Include a natural version without retiming. Retimed candidates retain their original cut evidence and disclose speed/hold operations separately. Selection exports remain proposals. The default `effects` and `timing` modes keep their existing stricter boundaries. See [comparison instructions](docs/RETIME.ja.md).
 
 Import the page's downloaded selection with `session select-comparison SESSION --data-file comparison-selection.json --actor codex --note REASON`. It creates an unadopted candidate with the selected render's exact plan and project, even when the current plan has changed. The video SHA, current brief, source and selection time must match. Render that candidate, then explicitly adopt it and review the exact full output. Selecting an older render this way can restore its editing inputs; it never restores a human approval or publishes a video.
 
-Development source-bound J/L cuts use `session audio-cuts` to propose actual source pre/post audio handles while preserving picture frames. Transcript-backed speech handles rebuild captions; untranscribed visual handles require an explicit nonspoken declaration and listening review. Retime combinations and editable FCP handoff remain unsupported. [操作・レビュー条件](docs/AUDIO_CUTS.ja.md). This capability is absent from published alpha.6.
+Source-bound J/L cuts use `session audio-cuts` to propose actual source pre/post audio handles while preserving picture frames. Transcript-backed speech handles rebuild captions; untranscribed visual handles require an explicit nonspoken declaration and listening review. Retime combinations and editable FCP handoff remain unsupported. [操作・レビュー条件](docs/AUDIO_CUTS.ja.md).
 
-Development `motion_trail` applies a requested, bounded trail from actual past frames within one shot, with copied audio and unchanged timing. It is opt-in and absent from published alpha.6. [Controls and review limits](docs/VIDEO_EFFECTS.ja.md).
+`motion_trail` applies a requested, bounded trail from actual past frames within one shot, with copied audio and unchanged timing. It is opt-in. [Controls and review limits](docs/VIDEO_EFFECTS.ja.md).
 
-Development `tracked_background` creates per-frame local GrabCut masks from observed tracking, with manual binary-mask corrections, to suppress the background while retaining foreground. Lost/stale masks fail; exact-render contour review is required. [Controls and limits](docs/TRACKING.ja.md). This feature is absent from published alpha.6.
+Experimental `tracked_background` creates per-frame local GrabCut masks from observed tracking, with manual binary-mask corrections, to suppress the background while retaining foreground. Lost/stale masks fail; exact-render contour review is required. [Controls and limits](docs/TRACKING.ja.md). An eight-frame real-footage trial retained wall/ceiling as foreground; the agent rejected the visual result, and no human review is recorded. Review full contours and correct masks manually before use. This is not universal person matting.
