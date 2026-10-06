@@ -1,6 +1,15 @@
 # Changelog
 
-## v0.1.0-alpha.4 — planned
+## v0.1.0-alpha.5 — 2026-10-06
+
+- Documented per-video storage, source preservation, JSON briefs, durable sessions, revision prompts and FCP library/event/project organization in both READMEs.
+- Added source-linked 2026 Final Cut Pro production guidance, optional extension research and a prioritized harness implementation backlog.
+- Included a sanitized record of settings applied on one Mac, with unverified viewer state and quality checks kept explicit; installing the harness does not configure FCP automatically.
+- Updated software, skill/plugin and installation versions. Existing alpha.4 synthetic demo assets remain linked and unchanged.
+- Explicitly excluded local work, media, session, cache and build directories from source distributions.
+- Documentation release: no new multi-source, HDR/Apple Log 2, tracking or FCP finishing-fidelity implementation.
+
+## v0.1.0-alpha.4 — 2026-10-06
 
 - Repair overview joins with one frame/sample-aligned encode, complete comparison sentences and visible pause captions. Preserve complete original PCM speech extents when ASR onsets are late.
 - Added the standalone `/youtube` skill for regular YouTube videos, with source-bound pacing, scene-appropriate grading and full-render review.

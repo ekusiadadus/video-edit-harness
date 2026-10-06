@@ -25,7 +25,7 @@ Add your brief, for example: “Keep the explanation coherent, shorten unnecessa
 Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), FFmpeg and ffprobe. macOS or Linux; finishing in Final Cut Pro requires macOS. Install a Japanese/CJK font when burning Japanese captions on Linux.
 
 ```sh
-git clone --branch v0.1.0-alpha.4 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.5 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 export VIDEO_EDIT_HARNESS_ROOT="$PWD"
@@ -42,6 +42,55 @@ claude plugin install video-editing@video-edit-harness
 ```
 
 For the exact `/youtube` and `/tiktok` spelling, use standalone skills instead. [Installation, verified ZIPs and version diagnosis](docs/SKILL_INSTALL.md). The GitHub release is a community distribution, not an official curated listing.
+
+## Add a new video: storage, sessions and Final Cut Pro
+
+Use a separate folder and harness session for each independent edit. A FCP **project** is a timeline; harness `project.json` describes one source and processing settings; a **session** holds plans, renders and reviews. [Detailed Japanese guide and prompts](README.ja.md).
+
+Suggested layout on macOS (a convention, not an automatically generated structure):
+
+```text
+~/Movies/VideoProjects/2026-10-06-desk-tips/
+├── source/IMG_1234.MOV         # unchanged camera original
+├── harness/brief.json         # structured audience and story goals
+├── harness/project.json      # copy of projects/talk.template.json, then configure
+├── harness/session/          # this edit's durable session
+├── fcp/desk-tips.fcpbundle    # library created in FCP
+└── exports/                  # FCP master and distribution files
+```
+
+A reliably connected external SSD is another suitable location. Use the actual **absolute source path**, including `/Volumes/...` for external storage. Copy and check the originals before starting; retain them unchanged. Avoid temporary/Downloads locations for long-lived references, and do not manipulate the contents of `.fcpbundle` files. Moving or replacing a source after session creation affects media links and hash verification.
+
+Set the template's `input_color` from the actual source; its `apple_log` default is not a detection result. Supported values are `apple_log` and `rec709`; do not force HLG/PQ/Apple Log 2 into either. A library name containing “Log” does not establish input color. Never apply Log conversion again to baked Rec.709 footage. You may store several clips in `source/`, but the current harness processes **one source per configuration/session**, not automatic folder-wide or B-roll assembly. Request separate processing and FCP assembly for multiple sources.
+
+For a small local trial, checkout folders `media/<job>/`, `projects/<job>.json`, `sessions/<job>/` and `output/` are also available. Git ignores them; that does not back them up.
+
+Start Codex in the harness checkout and ask (replace the example path):
+
+```text
+$youtube /Users/your-name/Movies/VideoProjects/2026-10-06-desk-tips/source/IMG_1234.MOV
+Make a desk-tips video for first-time viewers. Keep both tips and the conclusion.
+Shorten unnecessary pauses while preserving sentence endings, breaths and meaning.
+Aim for 3–5 minutes, prioritizing a coherent explanation. Check the source aspect
+ratio, fps and input color first; propose framing before changing aspect ratio.
+Use natural whites and skin and English captions; spell the product name HHKB.
+Save project.json, a structured brief.json and session/ under this job's harness/ folder.
+Do not upload or post. If no sealed transcript exists, first make local color,
+audio and framing previews. Let me review the plan and preview before the full
+render, then give me the path to the FCP delivery package.
+```
+
+Use `$tiktok` for a vertical short or `$video-editing` for color comparisons. If cloud transcription is desired, specify the **source and permitted providers**, e.g. “Allow this file to be sent to OpenAI; deny Azure.” Store that policy against the source hash. [Transcription](docs/TRANSCRIPTION.md).
+
+To revise, identify the existing `harness/session/`, actual render ID and whether your timestamps refer to the source or edited video: “Resume this session; preserve the previous version; keep the pause at edited 00:12–00:16 and correct HHK to HHKB. Make a revised preview. Do not upload or post.” Use a new folder/configuration/session for an independent edit with a different source. `session start` requires a directory that does not yet exist; use the existing directory to resume. Session previews, reviews and deliveries stay beneath that directory. `--brief-file` reads JSON, not Markdown; adapt [examples/workflow-brief.json](examples/workflow-brief.json), using actual transcript word IDs rather than example IDs. [Session commands](docs/WORKFLOW.ja.md).
+
+In FCP, use a library per independent job (or a shared library for a related series), an event per shoot/episode, and a project per deliverable/version, such as `desk-tips_youtube_r01` and `desk-tips_shorts_r01`. These naming rules are suggestions. [Apple: libraries](https://support.apple.com/guide/final-cut-pro/verfdd5c590e/mac).
+
+- **Manual FCP editing:** create a library in `fcp/` if needed, select an event, then choose File → New → Project (Command-N). Set resolution, fps and color for the actual footage and delivery; do not reuse one vertical SDR format for every source. [Apple: new project](https://support.apple.com/guide/final-cut-pro/verdb79783e/mac).
+- **Harness handoff:** package the reviewed full render with `uv run video-harness session package SESSION RENDER_ID --target fcp --actor codex`, replacing the placeholders with actual values. Import `timeline.fcpxml` from the reported `session/deliveries/<ID>/` folder using File → Import → XML. XML creates projects and other objects according to its contents, so you do not need a blank timeline first. Confirm the destination library and imported event/project. Harness `project.json` is not a FCP import file. [Apple: XML transfer](https://support.apple.com/guide/final-cut-pro/verdbd66ae/mac).
+- Check media links, timing, framing, grade, captions and audio against the reference render and delivery instructions. XML does not reproduce all finishing. Compare new XML imports in separate named projects to preserve existing FCP work; export the reviewed master and distribution files to `exports/`.
+
+With “Copy to library storage,” FCP stores another media copy: budget for it and configure its destination in Library Properties. With “Leave files in place,” keep the external source paths stable. Changing storage locations does not move existing source files. Do not place files inside bundles manually. [Apple: storage locations](https://support.apple.com/guide/final-cut-pro/ver7db6ffe77/mac). Back up originals, harness history, FCP libraries and masters to another device; FCP automatic library backups contain the database, **not media**. [Apple: library backup](https://support.apple.com/guide/final-cut-pro/ver85d95b8a9/mac).
 
 ## Try without an API key
 
@@ -83,4 +132,4 @@ make test
 uv run video-harness verify /path/to/final.mp4 --output output/final-check
 ```
 
-[Release and checksums](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.4) · [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE). Source archive, wheel, three standalone skill ZIPs and a Claude plugin ZIP are provided; this release is not published to PyPI.
+[Release and checksums](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.5) · [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE). Source archive, wheel, three standalone skill ZIPs and a Claude plugin ZIP are provided; this release is not published to PyPI.

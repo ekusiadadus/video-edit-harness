@@ -25,7 +25,7 @@
 Python 3.11以上、[uv](https://docs.astral.sh/uv/)、FFmpeg、ffprobeが必要です。macOS・Linuxに対応し、Final Cut Proでの仕上げにはmacOSが必要です。Linuxで日本語字幕を焼き込む場合は日本語/CJKフォントを用意してください。
 
 ```sh
-git clone --branch v0.1.0-alpha.4 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.5 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 export VIDEO_EDIT_HARNESS_ROOT="$PWD"
@@ -42,6 +42,106 @@ claude plugin install video-editing@video-edit-harness
 ```
 
 正確に `/youtube`・`/tiktok` と入力したい場合は単体スキルを使います。[導入方法・ZIPの検証・バージョン診断](docs/SKILL_INSTALL.ja.md)。GitHubリリースはコミュニティ配布版で、公式キュレーションへの掲載ではありません。
+
+## 新しい動画を増やす：素材・セッション・FCPの整理
+
+**作品ごとに保存フォルダとハーネスのセッションを分けます。** FCPの「プロジェクト」は編集タイムライン、ハーネスの `project.json` は素材と処理設定、セッションは計画・レンダー・レビューの履歴です。同じ名前でも別の役割を持ちます。
+
+### 素材はどこに置くか
+
+Macでは `~/Movies/VideoProjects/`、大きな素材は接続を維持できる外付けSSDに、日付と作品名でフォルダを作る運用を推奨します。次は保存場所の例で、自動生成される固定構造ではありません。
+
+```text
+~/Movies/VideoProjects/2026-10-06-desk-tips/
+├── source/                    # カメラ原本。編集・上書き・削除しない
+│   └── IMG_1234.MOV
+├── harness/
+│   ├── brief.json             # 視聴者・目的・残す内容を構造化
+│   ├── project.json           # talk.template.jsonから作る設定
+│   └── session/               # この作品のセッション保存先
+├── fcp/
+│   └── desk-tips.fcpbundle    # FCPで作るライブラリ
+└── exports/                   # FCPから書き出すmaster・配信版
+```
+
+- iPhoneなどから原本を `source/` にコピーし、ファイルが再生できることを確認してから依頼します。Downloadsや一時フォルダを長期の参照元にせず、`.fcpbundle` 内部を手で変更しません。素材移動は編集開始前に済ませます。
+- ハーネスの `source` には実ファイルの**絶対パス**を指定します。外付けSSDなら `/Volumes/SSD名/.../source/IMG_1234.MOV`。開始後の原本移動・差し替えはリンクとSHA照合に影響するので、黙って変更しません。
+- `project.json` は `projects/talk.template.json` をコピーして作ります。テンプレートの `input_color: apple_log` をそのまま使わず、実素材に合わせます。現在の対応値は `apple_log` と `rec709` です。HLG/PQ/Apple Log 2をこの二つへ無理に分類しません。ライブラリ名や拡張子だけでLogと判断せず、変換済みRec.709素材へLog変換を重ねません。
+- 複数クリップは同じ `source/` に保管できますが、現在のハーネスは**1設定・1セッションにつき単一素材**です。フォルダを渡すだけで全クリップを自動構成する機能はありません。複数素材は個別処理とFCPでの組み立てを指定します。
+- 小さく始めるなら、リポジトリ内の `media/<作品名>/`、`projects/<作品名>.json`、`sessions/<作品名>/`、`output/` も利用できます。これらはGit対象外ですが、バックアップされるという意味ではありません。
+
+### そのまま使える依頼例
+
+パスと作品の目的を自分のものに置き換え、ハーネスのcheckoutでCodexを開いて依頼します。素材フォルダへコードをコピーする必要はありません。
+
+```text
+$youtube /Users/your-name/Movies/VideoProjects/2026-10-06-desk-tips/source/IMG_1234.MOV
+机の片付け方を紹介する日本語動画です。視聴者は初めて見る人。
+二つのコツと結論を残し、語尾・呼吸・意味のある間を保って不要な間を短くしてください。
+用途は通常のYouTube動画。目標は3〜5分ですが、説明のつながりを優先してください。
+原本の縦横比とfpsを確認し、横動画への変更が必要なら画角案を先に提示してください。
+色は自然な肌と白を優先。入力色は未確認なので、確認してから設定してください。
+字幕は日本語。固有名詞は「HHKB」。
+設定は同じ作品フォルダのharness/project.json、
+セッションはharness/session/、依頼内容はharness/brief.jsonへ構造化して保存してください。
+クラウド送信・投稿は禁止。既存の封印済み文字起こしがなければ、
+まずローカルの色・音声・画角プレビューまで進めてください。
+編集計画とプレビューを確認してから全編を作り、FCP用の納品場所を示してください。
+```
+
+縦動画なら `$tiktok`、色だけの比較なら `$video-editing` に替えます。文字起こしのクラウド送信を希望する場合は「このファイルのOpenAIへの送信を許可。Azureへの送信は禁止」など、**素材と送信先**を明記します。既存の許可は素材SHAに結び付けて保持します。[文字起こしの詳細](docs/TRANSCRIPTION.md)。
+
+修正・再開では新しいセッションを作らず、次のように既存保存先を指定します。
+
+```text
+この作品のharness/session/を再開してください。新規セッションは作らないでください。
+確認対象はレンダーID <実際のID>。
+完成版の00:12〜00:16は間を残し、字幕「HHK」を「HHKB」に直してください。
+旧版を残して修正版のプレビューを作成してください。クラウド送信・投稿は禁止。
+```
+
+時刻が原素材か完成版かを明記します。別の原素材で新しい作品を作る場合は、作品フォルダ・設定・セッションも新しくします。`session start` の保存先はまだ存在しないフォルダを指定し、再開には既存フォルダを使います。プレビュー・レビュー・納品はそのセッション配下に保存されます。`--brief-file` はMarkdownではなくJSONです。最小の例は次のとおりで、目標尺が未定なら `target_duration_seconds` を省略できます。単語IDは実際の文字起こしから取得し、例示IDを流用しません。[詳細なbrief例](examples/workflow-brief.json)。
+
+```json
+{
+  "audience": "机の片付け方を初めて知る人",
+  "goals": [{"id": "goal-1", "text": "二つのコツと結論を分かりやすく伝える"}],
+  "target_duration_seconds": 240,
+  "must_keep_word_ids": []
+}
+```
+
+CLIを直接使う場合は、設定とbriefを用意してからハーネスのcheckoutで次を実行します。パスは例で、クラウド送信は実行しません。
+
+```sh
+uv run video-harness doctor
+uv run video-harness session start \
+  /Users/your-name/Movies/VideoProjects/2026-10-06-desk-tips/harness/project.json \
+  /Users/your-name/Movies/VideoProjects/2026-10-06-desk-tips/harness/session \
+  --brief-file /Users/your-name/Movies/VideoProjects/2026-10-06-desk-tips/harness/brief.json \
+  --actor codex
+uv run video-harness session status \
+  /Users/your-name/Movies/VideoProjects/2026-10-06-desk-tips/harness/session --deep
+```
+
+この例の実行者はCodexです。自分で操作する場合は `--actor human` に替えます。クラウド方針・文字起こし・計画・レビュー以降は[セッション操作](docs/WORKFLOW.ja.md)に従います。
+
+### Final Cut Proでの増やし方
+
+| FCP内の単位 | 役割 | 整理例（本READMEの運用提案） |
+|---|---|---|
+| ライブラリ | イベント・プロジェクト・素材参照をまとめる `.fcpbundle` | 独立した案件は別ライブラリ。継続シリーズは一つにまとめてもよい |
+| イベント | 撮影素材とプロジェクトを整理する単位 | `2026-10-06_desk-tips` のように撮影日・エピソードごと |
+| プロジェクト | 完成動画一本の編集タイムライン | `desk-tips_youtube_r01`、`desk-tips_shorts_r01` のように用途・版ごと |
+
+画面左の `iPhone Log 12 Looks` はライブラリ名で、その下にイベントがあります。素材のサムネイルを増やしても新しい編集タイムラインはできません。[Appleのライブラリ説明](https://support.apple.com/guide/final-cut-pro/verfdd5c590e/mac)。
+
+1. **FCPで手動編集する場合：** 必要なら「ファイル → 新規 → ライブラリ」を作り `fcp/` に保存します。イベントを作成・選択し、「ファイル → 新規 → プロジェクト」（⌘N）でタイムラインを作ります。解像度・fps・色空間は原素材と納品目的に合わせます。今の例の1080×1920・30p・Rec.709を全素材へ固定しません。[Appleの新規プロジェクト手順](https://support.apple.com/guide/final-cut-pro/verdb79783e/mac)。
+2. **ハーネスから受け渡す場合：** レビューした全編を `uv run video-harness session package SESSION RENDER_ID --target fcp --actor codex` で梱包します。`SESSION` と `RENDER_ID` は実際の保存先とIDに置き換えます。コマンド結果が示す `session/deliveries/<ID>/` 内の `timeline.fcpxml` を「ファイル → 読み込む → XML」から読み込みます。XML自体がプロジェクトなどを生成するため、空のタイムラインを先に作る必要はありません。生成されるイベント・プロジェクト名は設定の `name` に ` Edit Review` を付けたものなので、設定時に作品固有の名前を付けます。読み込み先ライブラリと生成されたイベント・プロジェクトを確認します。`project.json` をFCPへ読み込むわけではありません。[AppleのXML手順](https://support.apple.com/guide/final-cut-pro/verdbd66ae/mac)。
+3. 原素材のリンク、尺・カット位置・画角、色、字幕、音声を実際に確認します。FCPXMLは色・字幕・マスク・最終音声の完全再現ではありません。納品フォルダの案内と参照動画を使って仕上げます。既存のFCP手直しがある版に新XMLを重ねず、別名のプロジェクトで比較します。
+4. 確認後にマスターと配信版を `exports/` へ書き出します。[2026年の設定・品質管理](docs/FCP_BEST_PRACTICES_2026.ja.md)と[この環境での設定適用記録](docs/FCP_SETTINGS_APPLIED_2026.ja.md)も参照してください。
+
+**原本とバックアップ：** 「ライブラリストレージへコピー」を使う場合、FCPの読み込み時に原本とは別のコピーを保存するため容量を見積もります。ライブラリの保存先はインスペクタで設定し、原本を `.fcpbundle` 内へ手で置きません。「ファイルをそのままにする」なら外部の原本パスを維持します。保存先変更だけで既存素材が移るわけではありません。[Appleの保存場所設定](https://support.apple.com/guide/final-cut-pro/ver7db6ffe77/mac)。原本・ハーネスの履歴・FCPライブラリ・マスターを別の媒体にもバックアップします。FCPの自動ライブラリバックアップはデータベースのみで、素材は含みません。[Appleのバックアップ説明](https://support.apple.com/guide/final-cut-pro/ver85d95b8a9/mac)。
 
 ## APIキーなしで試す
 
@@ -85,4 +185,4 @@ make test
 uv run video-harness verify /path/to/final.mp4 --output output/final-check
 ```
 
-[リリースとチェックサム](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.4) · [貢献方法](CONTRIBUTING.md) · [MITライセンス](LICENSE)。ソース、wheel、3つの単体スキルZIP、ClaudeプラグインZIPを配布します。PyPIへの公開は行っていません。
+[リリースとチェックサム](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.5) · [貢献方法](CONTRIBUTING.md) · [MITライセンス](LICENSE)。ソース、wheel、3つの単体スキルZIP、ClaudeプラグインZIPを配布します。PyPIへの公開は行っていません。
