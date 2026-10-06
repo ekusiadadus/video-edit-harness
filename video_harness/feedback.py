@@ -28,6 +28,9 @@ def map_output(mapping, start, end=None):
         raise ValueError('Feedback time is outside this render')
     if mapping.get('retime') and mapping.get('edit_basis') != 'visual':
         return _map_speech_retime(mapping, start, end)
+    if 'transitions' in mapping:
+        from .transition_feedback import map_transition_output
+        return map_transition_output(mapping, start, end)
     if mapping.get('edit_basis') == 'visual':
         return _map_visual(mapping, start, end)
     rows, boundaries, cursor = [], [], 0.0
