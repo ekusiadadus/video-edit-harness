@@ -1,6 +1,7 @@
 """Source-bound, manually editable relative depth; never metric distance."""
 from pathlib import Path
 import math
+import shutil
 
 import numpy as np
 
@@ -79,8 +80,9 @@ def correct_depth(manifest, corrections, output, actor, reason):
     parent_path = Path(manifest).resolve(strict=True)
     parent_ref = fingerprint(parent_path)
     parent = validate_depth(parent_path)
-    if parent['version'] not in (1, 2, 3):
+    if parent['version'] not in (1, 2, 3, 4):
         raise ValueError('Depth correction parent version is unsupported')
+    _ensure_lineage_room(parent_path)
     if fingerprint(parent_path) != parent_ref:
         raise ValueError('Depth parent manifest changed during validation')
     first, end = parent['start_frame'], parent['end_frame_exclusive']
@@ -126,6 +128,95 @@ def correct_depth(manifest, corrections, output, actor, reason):
     write(result, document)
     validate_depth(result)
     return result
+
+
+def _ensure_lineage_room(parent_path):
+    """Reject a 33rd artifact before creating an output directory."""
+    seen = set()
+    path = Path(parent_path).resolve()
+    for depth in range(1, 33):
+        if path in seen:
+            raise ValueError('Depth lineage contains a cycle')
+        seen.add(path)
+        doc = read(path)
+        if doc.get('version') not in (3, 4):
+            if depth >= 32:
+                raise ValueError('Depth lineage exceeds 32 revisions')
+            return
+        ref = _reference(doc['parent'])
+        if fingerprint(ref['path']) != ref:
+            raise ValueError('Depth parent manifest binding changed')
+        path = Path(ref['path']).resolve()
+    raise ValueError('Depth lineage exceeds 32 revisions')
+
+
+def _inherited_cut_frames(parent):
+    """Carry declared discontinuities through v3 corrections and later v4 passes."""
+    cuts = set()
+    current = parent
+    for _ in range(32):
+        if current['version'] == 4:
+            cuts.update(current['temporal']['config']['cut_frames'])
+        if current['version'] not in (3, 4):
+            return sorted(cuts)
+        current = read(current['parent']['path'])
+    raise ValueError('Depth lineage exceeds 32 revisions')
+
+
+def stabilize_depth(manifest, output, actor, reason, *, strength=.5, fb_tolerance=1.0,
+                    photometric_tolerance=.08, min_coverage=.5, cut_frames=()):
+    """Derive a review-required v4 field artifact from actual source-frame motion."""
+    from .depth_temporal import ALGORITHM, BACKEND, replay_temporal, temporal_config
+    from .tracking import _cv2
+    if actor not in ('human', 'codex', 'claude_code', 'automation'):
+        raise ValueError('Record a real depth actor')
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError('Depth stabilization requires an observation reason')
+    parent_path = Path(manifest).resolve(strict=True)
+    parent_ref = fingerprint(parent_path)
+    parent = validate_depth(parent_path)
+    _ensure_lineage_room(parent_path)
+    config = temporal_config(strength, fb_tolerance, photometric_tolerance, min_coverage,
+                             cut_frames, parent['start_frame'], parent['end_frame_exclusive'])
+    config['cut_frames'] = sorted(set(config['cut_frames']) | set(_inherited_cut_frames(parent)))
+    target = Path(output).resolve()
+    if target.exists():
+        raise FileExistsError(target)
+    target.mkdir(parents=True, exist_ok=False)
+    try:
+        rows, observations = [], []
+        replay = replay_temporal(parent, config, log=target/'decode.log')
+        try:
+            for old in parent['rows']:
+                values, observation = next(replay)
+                destination = target / f"{old['frame']:09d}.npy"
+                with destination.open('xb') as stream:
+                    np.save(stream, values, allow_pickle=False)
+                rows.append({'frame': old['frame'], 'field': fingerprint(destination), 'input': old['field'],
+                             'origin': 'temporal_stabilized' if observation['reset_reason'] is None else 'temporal_reset',
+                             'minimum': float(values.min()), 'maximum': float(values.max())})
+                observations.append(observation)
+            if next(replay, None) is not None:
+                raise ValueError('Depth temporal replay produced extra frames')
+        finally:
+            replay.close()
+        if fingerprint(parent_path) != parent_ref or fingerprint(parent['source']['path']) != parent['source']:
+            raise ValueError('Depth parent or source changed during stabilization')
+        document = {key: parent[key] for key in ('source', 'fps', 'width', 'height',
+                    'source_frame_count', 'start_frame', 'end_frame_exclusive',
+                    'representation', 'normalization', 'metric_distance')}
+        document.update(version=4, algorithm=ALGORITHM, actor=actor, reason=reason.strip(),
+                        rows=rows, review_required=True, adopted=False, parent=parent_ref,
+                        temporal={'version': 1, 'algorithm': ALGORITHM, 'backend': BACKEND,
+                                  'opencv_version': _cv2().__version__, 'config': config,
+                                  'observations': observations})
+        result = target/'depth.json'
+        write(result, document)
+        validate_depth(result)
+        return result
+    except BaseException:
+        shutil.rmtree(target)
+        raise
 
 
 def _prepare_depth(source, fields, output, actor, reason, inference=None):
@@ -206,14 +297,17 @@ def validate_depth(manifest, source=None, *, _parents=()):
                 'metric_distance', 'adopted'}
     inferred = isinstance(doc, dict) and type(doc.get('version')) is int and doc.get('version') == 2
     corrected = isinstance(doc, dict) and type(doc.get('version')) is int and doc.get('version') == 3
+    temporal = isinstance(doc, dict) and type(doc.get('version')) is int and doc.get('version') == 4
     if inferred:
         required.add('inference')
     if corrected:
         required.update({'parent', 'corrected_frames'})
+    if temporal:
+        required.update({'parent', 'temporal'})
     if (not isinstance(doc, dict) or set(doc) != required or type(doc['version']) is not int or
-            doc['version'] != (3 if corrected else 2 if inferred else 1) or doc['representation'] != 'relative_near_high_float32_0_1' or
-            (not corrected and doc['normalization'] != ('interval_shared_minmax' if inferred else 'explicit_shared_relative_scale')) or
-            doc['algorithm'] != ('manual-depth-correction-v1' if corrected else 'depth-anything-v2-small-hf-v1' if inferred else 'manual-relative-depth-v1') or doc['review_required'] is not True or
+            doc['version'] != (4 if temporal else 3 if corrected else 2 if inferred else 1) or doc['representation'] != 'relative_near_high_float32_0_1' or
+            (not corrected and not temporal and doc['normalization'] != ('interval_shared_minmax' if inferred else 'explicit_shared_relative_scale')) or
+            doc['algorithm'] != ('farneback-fb-photo-v1' if temporal else 'manual-depth-correction-v1' if corrected else 'depth-anything-v2-small-hf-v1' if inferred else 'manual-relative-depth-v1') or doc['review_required'] is not True or
             doc['metric_distance'] is not False or doc['adopted'] is not False):
         raise ValueError('Invalid relative depth manifest contract')
     if doc['actor'] not in ('human', 'codex', 'claude_code', 'automation') or not isinstance(doc['reason'], str) or not doc['reason'].strip():
@@ -234,7 +328,8 @@ def validate_depth(manifest, source=None, *, _parents=()):
     for frame, row in zip(range(first, end), doc['rows']):
         if (not isinstance(row, dict) or set(row) != {'frame','field','input','origin','minimum','maximum'} or
                 type(row['frame']) is not int or row['frame'] != frame or
-                (not corrected and row['origin'] != ('model_relative' if inferred else 'manual_relative'))):
+                (not corrected and not temporal and row['origin'] != ('model_relative' if inferred else 'manual_relative')) or
+                (temporal and row['origin'] not in ('temporal_stabilized', 'temporal_reset'))):
             raise ValueError('Invalid or missing depth frame provenance')
         for key in ('field', 'input'):
             ref = _reference(row[key])
@@ -252,6 +347,8 @@ def validate_depth(manifest, source=None, *, _parents=()):
         _validate_inference(doc)
     if corrected:
         _validate_correction(doc, manifest, source, lineage)
+    if temporal:
+        _validate_temporal(doc, manifest, source, lineage)
     return doc
 
 
@@ -263,11 +360,12 @@ def _validate_correction(doc, manifest, source, lineage):
         raise ValueError('Depth parent manifest binding changed')
     parent_doc = read(parent_ref['path'])
     if (not isinstance(parent_doc, dict) or type(parent_doc.get('version')) is not int
-            or parent_doc['version'] not in (1, 2, 3)):
-        raise ValueError('Depth correction parent must be v1, v2 or v3')
+            or parent_doc['version'] not in (1, 2, 3, 4)):
+        raise ValueError('Depth correction parent must be v1, v2, v3 or v4')
     parent = validate_depth(parent_ref['path'], source, _parents=lineage)
     if fingerprint(parent_ref['path']) != parent_ref:
         raise ValueError('Depth parent manifest changed during validation')
+
     keys = ('source', 'fps', 'width', 'height', 'source_frame_count', 'start_frame',
             'end_frame_exclusive', 'representation', 'normalization', 'metric_distance')
     if any(doc[key] != parent[key] for key in keys):
@@ -295,6 +393,71 @@ def _validate_correction(doc, manifest, source, lineage):
             raise ValueError('Depth correction row changed during validation')
     if fingerprint(parent_ref['path']) != parent_ref:
         raise ValueError('Depth parent manifest changed during validation')
+
+
+
+
+def _validate_temporal(doc, manifest, source, lineage):
+    """Replay actual optical flow; self-reported coverage cannot validate fields."""
+    from .depth_temporal import ALGORITHM, BACKEND, replay_temporal, temporal_config
+    from .tracking import _cv2
+    parent_ref = _reference(doc['parent'])
+    if Path(parent_ref['path']).resolve() == Path(manifest).resolve() or fingerprint(parent_ref['path']) != parent_ref:
+        raise ValueError('Depth temporal parent binding changed')
+    parent = validate_depth(parent_ref['path'], source, _parents=lineage)
+    if fingerprint(parent_ref['path']) != parent_ref:
+        raise ValueError('Depth temporal parent changed during validation')
+    keys = ('source', 'fps', 'width', 'height', 'source_frame_count', 'start_frame',
+            'end_frame_exclusive', 'representation', 'normalization', 'metric_distance')
+    if any(doc[key] != parent[key] for key in keys):
+        raise ValueError('Depth temporal source, interval, canvas or scale differs from parent')
+    temporal = doc['temporal']
+    if (not isinstance(temporal, dict) or set(temporal) != {'version', 'algorithm', 'backend',
+            'opencv_version', 'config', 'observations'} or type(temporal['version']) is not int
+            or temporal['version'] != 1 or temporal['algorithm'] != ALGORITHM
+            or temporal['backend'] != BACKEND or temporal['opencv_version'] != _cv2().__version__
+            or not isinstance(temporal['config'], dict) or
+            set(temporal['config']) != {'strength','fb_tolerance','photometric_tolerance',
+                                       'min_coverage','cut_frames'} or
+            not isinstance(temporal['observations'], list) or
+            len(temporal['observations']) != len(doc['rows'])):
+        raise ValueError('Invalid depth temporal provenance/backend')
+    config = temporal_config(**temporal['config'], first=doc['start_frame'],
+                             end=doc['end_frame_exclusive'])
+    if config != temporal['config']:
+        raise ValueError('Depth temporal config is not canonical')
+    if not set(_inherited_cut_frames(parent)) <= set(config['cut_frames']):
+        raise ValueError('Depth temporal ancestor cut was removed')
+    replay = replay_temporal(parent, config)
+    try:
+        for row, original, recorded in zip(doc['rows'], parent['rows'], temporal['observations']):
+            derived, observation = next(replay)
+            if (row['input'] != original['field'] or
+                    row['origin'] != ('temporal_stabilized' if observation['reset_reason'] is None else 'temporal_reset')
+                    or recorded != observation):
+                raise ValueError('Depth temporal input or observed flow evidence changed')
+            saved = _field(row['field']['path'], doc['width'], doc['height'])
+            if not np.array_equal(saved, derived):
+                raise ValueError('Depth temporal field differs from recomputed flow')
+            if fingerprint(row['field']['path']) != row['field']:
+                raise ValueError('Depth temporal field changed during validation')
+        if next(replay, None) is not None:
+            raise ValueError('Depth temporal replay produced extra frames')
+    finally:
+        replay.close()
+    if fingerprint(parent_ref['path']) != parent_ref:
+        raise ValueError('Depth temporal parent changed during replay')
+    if fingerprint(parent['source']['path']) != parent['source']:
+        raise ValueError('Depth temporal decoded source changed during replay')
+    if source is not None:
+        actual_source = fingerprint(source)
+        if (actual_source['sha256'], actual_source['bytes']) != (
+                parent['source']['sha256'], parent['source']['bytes']):
+            raise ValueError('Depth temporal source override changed during replay')
+    for original, row in zip(parent['rows'], doc['rows']):
+        for ref in (original['field'], original['input'], row['field'], row['input']):
+            if fingerprint(ref['path']) != ref:
+                raise ValueError('Depth temporal source or field changed during replay')
 
 
 def raw_field(path, width, height):

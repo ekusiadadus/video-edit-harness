@@ -35,6 +35,14 @@ def main(argv=None):
     correct = commands.add_parser('correct', help='Retain original depth and revise explicitly selected frame fields')
     correct.add_argument('manifest', type=Path)
     correct.add_argument('request', type=Path)
+    stabilize = commands.add_parser('stabilize', help='Prepare opt-in motion-compensated depth with cut and confidence resets')
+    stabilize.add_argument('manifest', type=Path)
+    stabilize.add_argument('--strength', type=float, default=.5)
+    stabilize.add_argument('--fb-tolerance', type=float, default=1.)
+    stabilize.add_argument('--photometric-tolerance', type=float, default=.08)
+    stabilize.add_argument('--min-coverage', type=float, default=.5)
+    stabilize.add_argument('--cut-frame', type=int, action='append', default=[],
+                           help='Source frame starting a new shot; repeat for every known cut')
     validate = commands.add_parser('validate', help='Recheck retained source and depth bindings')
     validate.add_argument('manifest', type=Path)
     inspect = commands.add_parser('inspect-model', help='Verify a local pinned Small model without loading weights')
@@ -54,7 +62,7 @@ def main(argv=None):
     render.add_argument('--input-color', choices=['rec709'], required=True)
     for name, default in [('threshold', .5), ('softness', .1), ('strength', 1.)]:
         render.add_argument('--'+name, type=float, default=default)
-    for command in (prepare, render, infer, correct):
+    for command in (prepare, render, infer, correct, stabilize):
         command.add_argument('--output', type=Path, required=True, help='New evidence directory')
         command.add_argument('--actor', choices=['human','codex','claude_code','automation'], required=True)
         command.add_argument('--note', required=True)
@@ -74,7 +82,7 @@ def main(argv=None):
                               'review_required': True, 'adopted': False}, indent=2))
             return
         parent_binding = None
-        if args.command == 'correct':
+        if args.command in ('correct', 'stabilize'):
             parent_binding = fingerprint(args.manifest)
             original = validate_depth(args.manifest)
             cfg = {'source':original['source']['path']}
@@ -93,6 +101,17 @@ def main(argv=None):
                 if fingerprint(args.manifest) != parent_binding:
                     raise ValueError('Original depth changed during CLI correction')
                 result = {'manifest':str(manifest), 'parent':parent_binding, 'review_required':True, 'adopted':False}
+            elif args.command == 'stabilize':
+                from .depth_temporal import stabilize_depth
+                manifest = stabilize_depth(args.manifest, args.output/'fields', args.actor, args.note,
+                    strength=args.strength, fb_tolerance=args.fb_tolerance,
+                    photometric_tolerance=args.photometric_tolerance, min_coverage=args.min_coverage,
+                    cut_frames=args.cut_frame)
+                if fingerprint(args.manifest) != parent_binding:
+                    raise ValueError('Original depth changed during CLI stabilization')
+                result = {'manifest':str(manifest), 'parent':parent_binding,
+                          'review_required':True, 'adopted':False,
+                          'temporal_consistency_verified':False, 'metric_distance':False}
             elif args.command == 'infer':
                 from .depth_inference import infer_depth
                 manifest = infer_depth(args.source, args.model, args.first_frame, args.end_frame_exclusive,

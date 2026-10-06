@@ -44,6 +44,10 @@ def _copy_depth_provenance(render, folder, files):
                           'input_sha256': row['input']['sha256'], 'origin': row['origin'],
                           'minimum': row['minimum'], 'maximum': row['maximum']}
                          for row in doc['rows']]}
+        if doc.get('temporal'):
+            # The temporal record contains fixed runtime/configuration and
+            # observed coverage/reset reasons, not workstation paths.
+            item['temporal'] = doc['temporal']
         if doc.get('inference'):
             model = doc['inference']['model']
             item['model'] = {key: model[key] for key in ('model_id', 'revision', 'license',
