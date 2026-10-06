@@ -8,9 +8,11 @@ cannot map back to a timeline-bound cue plan. It never claims GUI playback.
 from __future__ import annotations
 
 from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
 import hashlib
+import math
 import shutil
 import subprocess
 import tempfile
@@ -30,6 +32,7 @@ STRUCTURE = {'fcpxml', 'import-options', 'option', 'resources', 'format', 'asset
              'bookmark', 'smart-collection', 'match-media', 'match-clip',
              'match-ratings', 'match-analysis-type', 'adjust-colorConform',
              'adjust-conform', 'adjust-transform', 'adjust-blend'}
+STRUCTURE.update({'keyframeAnimation', 'keyframe'})
 
 
 def _xml_path(path):
@@ -82,6 +85,19 @@ def _safe_xml(path):
                 raise ValueError(f'FCPXML {version} DTD invalid: {checked.stderr[-600:]}')
     parent = {child: node for node in root.iter() for child in node}
     project_spine = root.find('./library/event/project/sequence/spine')
+    for animation in root.iter('keyframeAnimation'):
+        param = parent.get(animation)
+        volume = parent.get(param)
+        connected = parent.get(volume)
+        primary = parent.get(connected)
+        if (param is None or param.tag != 'param' or volume is None or volume.tag != 'adjust-volume'
+                or connected is None or connected.tag != 'asset-clip'
+                or primary is None or primary.tag != 'asset-clip'
+                or parent.get(primary) is not project_spine):
+            raise ValueError('audio animation outside connected clip volume')
+    for frame in root.iter('keyframe'):
+        if parent.get(frame) is None or parent[frame].tag != 'keyframeAnimation':
+            raise ValueError('orphan audio keyframe')
     for node in root.iter():
         if node.tag in {'adjust-conform', 'adjust-transform', 'adjust-blend'}:
             owner = parent.get(node)
@@ -142,13 +158,16 @@ def _conform(clip, source_rate, output_rate):
             'srcFrameRate': label}
 
 
-def _volume(clip):
+def _volume(clip, src_enable=None):
     nodes = clip.findall('adjust-volume')
     if len(nodes) > 1:
         raise ValueError('multiple volume adjustments are unsupported')
     if not nodes:
-        return {'gain_db': 0.0, 'fade_in': Fraction(0), 'fade_out': Fraction(0)}
+        return {'gain_db': 0.0, 'fade_in': Fraction(0), 'fade_out': Fraction(0),
+                'automation': None, 'volume_present': False}
     node = nodes[0]
+    if set(node.attrib) - {'amount'}:
+        raise ValueError('unknown volume adjustment attribute')
     amount = node.get('amount', '0dB')
     if not amount.endswith('dB'):
         raise ValueError('unknown volume amount unit')
@@ -156,20 +175,55 @@ def _volume(clip):
         gain = float(amount[:-2])
     except ValueError as exc:
         raise ValueError('invalid volume amount') from exc
-    if not -120 <= gain <= 24:
+    if not math.isfinite(gain) or not -120 <= gain <= 24:
         raise ValueError('volume gain outside supported range')
     children = list(node)
     if len(children) > 1 or any(item.tag != 'param' or item.get('name') != 'amount' for item in children):
         raise ValueError('audio automation beyond edge fades is unsupported')
     fades = {'fadeIn': Fraction(0), 'fadeOut': Fraction(0)}
+    automation = None
     if children:
+        animations = children[0].findall('keyframeAnimation')
+        if animations:
+            if (src_enable != 'audio' or node.attrib != {'amount': '0dB'}
+                    or children[0].attrib != {'name': 'amount'}
+                    or len(children[0]) != 1 or len(animations) != 1
+                    or children[0][0] is not animations[0] or animations[0].attrib):
+                raise ValueError('unsupported audio keyframe placement')
+            start = _read_time(clip.get('start', '0s'))
+            end = start + _read_time(clip.get('duration'))
+            points = []
+            for frame in animations[0]:
+                if (frame.tag != 'keyframe' or len(frame) or
+                        set(frame.attrib) != {'time', 'value', 'interp', 'curve'} or
+                        frame.get('interp') != 'linear' or frame.get('curve') != 'linear'):
+                    raise ValueError('unsupported audio keyframe attributes')
+                instant = _read_time(frame.get('time'))
+                value = frame.get('value', '')
+                if not value.endswith('dB'):
+                    raise ValueError('unsupported audio keyframe unit')
+                try:
+                    decibels = Decimal(value[:-2])
+                except InvalidOperation as exc:
+                    raise ValueError('invalid audio keyframe gain') from exc
+                if (not decibels.is_finite() or not Decimal(-96) <= decibels <= Decimal(24)
+                        or not start <= instant < end
+                        or points and instant <= points[-1][0]):
+                    raise ValueError('invalid audio keyframe time or gain')
+                points.append((instant, decibels))
+            if not points or len(points) > 20000 or points[0][0] != start:
+                raise ValueError('invalid audio keyframe coverage')
+            automation = tuple(points)
+            return {'gain_db': gain, 'fade_in': Fraction(0), 'fade_out': Fraction(0),
+                    'automation': automation, 'volume_present': True}
         if any(item.tag not in fades or set(item.attrib) - {'duration', 'type'} for item in children[0]):
             raise ValueError('unknown volume automation')
         for item in children[0]:
             if fades[item.tag] != 0 or item.get('type', 'linear') not in {'linear', 'easeIn', 'easeOut', 'easeInOut'}:
                 raise ValueError('duplicate or unknown volume fade')
             fades[item.tag] = _read_time(item.get('duration'))
-    return {'gain_db': gain, 'fade_in': fades['fadeIn'], 'fade_out': fades['fadeOut']}
+    return {'gain_db': gain, 'fade_in': fades['fadeIn'], 'fade_out': fades['fadeOut'],
+            'automation': automation, 'volume_present': True}
 
 
 def _snapshot(path):
@@ -270,7 +324,7 @@ def _snapshot(path):
             placement = parse_static_placement(child)
             if src_enable == 'audio' and placement is not None:
                 raise ValueError('audio layer cannot carry visual placement')
-            volume = _volume(child)
+            volume = _volume(child, src_enable)
             connected.append({'sha256': reference['sha256'], 'name': child.get('name'),
                               'role': child.get('audioRole') if src_enable == 'audio' else child.get('videoRole'),
                               'src_enable': src_enable, 'lane': child.get('lane'),
@@ -298,6 +352,21 @@ def _signature(row):
     return (row['sha256'], row['src_enable'], row['role'], row['lane'])
 
 
+def _retained_dialogue(reference, returned):
+    """Keep measured dialogue separate from production cues and compare exactly."""
+    original = [row for row in reference['connected'] if row['role'] == 'dialogue']
+    imported = [row for row in returned['connected'] if row['role'] == 'dialogue']
+    if len(original) != len(imported) or len(original) > 1:
+        raise ValueError('retained dialogue layer missing, duplicated or added')
+    if original:
+        before = {key: value for key, value in original[0].items() if key != 'name'}
+        after = {key: value for key, value in imported[0].items() if key != 'name'}
+        if before != after or original[0]['src_enable'] != 'audio':
+            raise ValueError('retained dialogue source, range, role or guard changed')
+    return ([row for row in reference['connected'] if row['role'] != 'dialogue'],
+            [row for row in returned['connected'] if row['role'] != 'dialogue'], bool(original))
+
+
 def _match_editable(reference, returned, production):
     if not production.get('mapping_sha256'):
         raise ValueError('production mapping hash missing; cannot bind imported cues')
@@ -305,8 +374,15 @@ def _match_editable(reference, returned, production):
     for record in assets.values():
         _check_asset(record['asset_id'], assets)
     cues = production.get('cues', [])
+    reference_cues, returned_cues, has_dialogue = _retained_dialogue(reference, returned)
+    measured = any(row['automation'] is not None for row in reference_cues)
+    if measured and not has_dialogue:
+        raise ValueError('measured cue automation lacks retained dialogue')
+    if has_dialogue and (not measured or any(
+            row['automation'] is None for row in reference_cues if row['role'] in {'music', 'effects'})):
+        raise ValueError('retained dialogue lacks complete cue automation')
     expected_by_id = {}
-    for row in reference['connected']:
+    for row in reference_cues:
         name = row.get('name')
         if name not in {cue['id'] for cue in cues}:
             raise ValueError('reference XML cue names do not bind to production')
@@ -326,16 +402,17 @@ def _match_editable(reference, returned, production):
         if cue.get('asset_id') and signature[0] != assets[cue['asset_id']]['sha256']:
             raise ValueError('reference cue media differs from registered asset')
     returned_by_id = {cue['id']: [] for cue in cues}
-    for row in returned['connected']:
+    for row in returned_cues:
         cue_id = signatures.get(_signature(row))
         if cue_id is None:
             raise ValueError('new, missing or role-changed layer cannot be mapped')
         returned_by_id[cue_id].append(row)
     reference_order = [cue_id for cue_id in sorted(expected_by_id,
-        key=lambda identifier: min(row['output_start'] for row in expected_by_id[identifier]))]
+        key=lambda identifier: (min(row['output_start'] for row in expected_by_id[identifier]),
+                                identifier))]
     returned_order = [cue_id for cue_id in sorted(returned_by_id,
-        key=lambda identifier: min((row['output_start'] for row in returned_by_id[identifier]),
-                                   default=Fraction(10**12)))]
+        key=lambda identifier: (min((row['output_start'] for row in returned_by_id[identifier]),
+                                    default=Fraction(10**12)), identifier))]
     if reference_order != returned_order:
         raise ValueError('connected cue order changed; import unsupported')
     revised = []
@@ -353,6 +430,17 @@ def _match_editable(reference, returned, production):
             raise ValueError(f'cue {cue_id} visual placement or source size changed; import unsupported')
         if any(row['source_start'] != baseline['source_start'] for row, baseline in zip(after, before)):
             raise ValueError(f'cue {cue_id} source in-point changed')
+        if cue['role'] in {'music', 'sfx'} and measured:
+            if any(baseline['automation'] is None for baseline in before):
+                raise ValueError(f'cue {cue_id} has incomplete reference gain automation')
+            audio_fields = ('output_start', 'source_start', 'duration', 'gain_db',
+                            'fade_in', 'fade_out', 'automation', 'volume_present')
+            if any(any(row[field] != baseline[field] for field in audio_fields)
+                   for row, baseline in zip(after, before)):
+                raise ValueError(f'cue {cue_id} measured audio automation or range changed')
+        elif any(row['automation'] is not None or baseline['automation'] is not None
+                 for row, baseline in zip(after, before)):
+            raise ValueError(f'cue {cue_id} has unsupported audio automation')
         if len(after) > 1 and not cue.get('loop'):
             raise ValueError(f'cue {cue_id} was split without a loop contract')
         if len(after) > 1:
@@ -368,14 +456,18 @@ def _match_editable(reference, returned, production):
         if any(row['fade_in'] or row['fade_out'] for row in after[1:-1]):
             raise ValueError(f'cue {cue_id} has unsupported mid-loop fade')
         updated = deepcopy(cue)
-        updated['output_start'] = float(after[0]['output_start'])
-        updated['output_end'] = float(after[-1]['output_start'] + after[-1]['duration'])
+        # Generated measured audio uses sample-rounded XML ranges. Equal XML
+        # readback proves the audio stayed put; keep the original cue intent.
+        if not (measured and cue['role'] in {'music', 'sfx'}):
+            updated['output_start'] = float(after[0]['output_start'])
+            updated['output_end'] = float(after[-1]['output_start'] + after[-1]['duration'])
         if cue['role'] in {'music', 'sfx'}:
-            updated['gain_db'] = after[0]['gain_db']
-            updated['fade_in'] = float(after[0]['fade_in'])
-            updated['fade_out'] = float(after[-1]['fade_out'])
-            if len(after) == 1 and not cue.get('loop'):
-                updated['source_end'] = float(after[0]['source_start'] + after[0]['duration'])
+            if not measured:
+                updated['gain_db'] = after[0]['gain_db']
+                updated['fade_in'] = float(after[0]['fade_in'])
+                updated['fade_out'] = float(after[-1]['fade_out'])
+                if len(after) == 1 and not cue.get('loop'):
+                    updated['source_end'] = float(after[0]['source_start'] + after[0]['duration'])
         elif cue['role'] == 'video':
             if after[0]['duration'] != before[0]['duration']:
                 updated['source_end'] = float(after[0]['source_start'] + after[0]['duration'])
@@ -431,6 +523,8 @@ def import_production_xml(reference_xml, returned_xml, production, actor, note):
             old, new = reference['connected'][0], returned['connected'][0]
             if _signature(old) != _signature(new) or old['source_start'] != new['source_start']:
                 raise ValueError('mixed PCM resource or role changed')
+            if old['automation'] is not None or new['automation'] is not None:
+                raise ValueError('mixed PCM keyframe automation is unsupported')
             if reference['markers'] != returned['markers']:
                 raise ValueError('mix marker structure changed')
             fields = ('output_start', 'duration', 'gain_db', 'fade_in', 'fade_out')
@@ -440,8 +534,10 @@ def import_production_xml(reference_xml, returned_xml, production, actor, note):
                           scope='finished mix comparison only; no original word or cue mapping')
             return report
         cue_plan, changes = _match_editable(reference, returned, production)
+        measured = any(row['automation'] is not None for row in reference['connected'])
         report.update(status='review_required', cue_plan=cue_plan, changes=changes,
-                      scope='unchanged primary cuts; connected cue gain/fades/timing and beat markers')
+                      scope=('unchanged primary cuts and measured audio; supported visual cues and beat markers'
+                             if measured else 'unchanged primary cuts; connected cue gain/fades/timing and beat markers'))
         return report
     except (ValueError, KeyError, TypeError, ET.ParseError) as exc:
         report['reasons'].append(str(exc))

@@ -271,11 +271,14 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix', *
         raise ValueError('base FCPXML format resource is unsupported')
     assets = _asset_map(production.get('assets', []))
     gain_manifest, gain_curves = None, None
+    normalization = None
+    common_gain = None
     automation_evidence = []
     if gain_inputs is not None:
         from .audio_envelopes import load_audio_envelopes
         if (not isinstance(gain_inputs, dict) or
-                set(gain_inputs) != {'folder', 'speech', 'mixed'} or
+                set(gain_inputs) - {'folder', 'speech', 'mixed', 'normalized'} or
+                not {'folder', 'speech', 'mixed'} <= set(gain_inputs) or
                 gain_inputs['speech'] is None or gain_inputs['mixed'] is None):
             raise ValueError('measured audio automation needs bound mixer inputs')
         gain_manifest, gain_curves = load_audio_envelopes(
@@ -284,6 +287,12 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix', *
             expected_mixed_wav=gain_inputs['mixed'])
         if abs(Fraction(gain_manifest['samples'], MIX_RATE) - total) > Fraction(1, MIX_RATE):
             raise ValueError('audio automation duration differs from sequence')
+        common_gain = gain_manifest['global_peak_guard_gain']
+        if gain_inputs.get('normalized') is not None:
+            from .audio_normalization import prove_scalar_normalization
+            normalization = prove_scalar_normalization(gain_inputs['mixed'], gain_inputs['normalized'])
+            if normalization['status'] == 'verified_scalar':
+                common_gain *= normalization['scalar_gain']
     for cue in cues:
         if cue.get('asset_id'):
             _check_asset(cue['asset_id'], assets)
@@ -325,11 +334,16 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix', *
                 offset=_fcp_time(_anchor_local_time(spine[0], Fraction(0))),
                 start='0s', duration=_fcp_time(min(total, speech_duration)),
                 srcEnable='audio', audioRole='dialogue')
-            guard_db = 20 * math.log10(gain_manifest['global_peak_guard_gain'])
+            if not common_gain or not -96 <= 20 * math.log10(common_gain) <= 24:
+                raise ValueError('measured dialogue common gain is outside supported range')
+            guard_db = 20 * math.log10(common_gain)
             ET.SubElement(dialogue, 'adjust-volume', amount=f'{guard_db:.9f}dB')
             resource_evidence.append({'id': 'production_dialogue', 'path': str(speech.resolve()),
                 'sha256': hashlib.sha256(speech.read_bytes()).hexdigest()})
-            manual.append('Measured audio automation is pre-normalization; final loudness processing and FCP source-clock/interpolation playback calibration remain unverified. Do not treat this XML as the reviewed final mix.')
+            if normalization is not None and normalization['status'] == 'verified_scalar':
+                manual.append('A common normalization gain matches the retained pre-AAC PCM within the measured error; stem summing, source-clock/interpolation and FCP playback remain unverified. Do not infer final AAC or GUI fidelity.')
+            else:
+                manual.append('Measured audio automation is pre-normalization; final loudness processing and FCP source-clock/interpolation playback calibration remain unverified. Do not treat this XML as the reviewed final mix.')
         for cue in cues:
             role = cue['role']
             identifier = 'prod_' + _safe_name(cue['id'])
@@ -391,7 +405,7 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix', *
                         last = first + round(part_length * MIX_RATE)
                         compiled = compile_gain_keyframes(gain_curves[cue['id']][first:last],
                             source_start=_seconds(cue['source_start'], 'source_start'),
-                            scalar_gain=gain_manifest['global_peak_guard_gain'])
+                            scalar_gain=common_gain)
                         if sum(part['keyframes'] for part in automation_evidence) + len(compiled['keyframes']) > 200000:
                             raise ValueError('measured audio exceeds total keyframe budget')
                         amount.set('amount', '0dB')
@@ -461,6 +475,10 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix', *
             expected_mixed_wav=gain_inputs['mixed'])
         if checked_manifest['manifest_sha256'] != gain_manifest['manifest_sha256']:
             raise ValueError('audio automation inputs changed during export')
+        if normalization is not None:
+            checked_normalization = prove_scalar_normalization(gain_inputs['mixed'], gain_inputs['normalized'])
+            if checked_normalization != normalization:
+                raise ValueError('audio normalization inputs changed during export')
     output.parent.mkdir(parents=True, exist_ok=True)
     xml = ET.tostring(root, encoding='utf-8', xml_declaration=True)
     xml = xml.replace(b'?>\n', b'?>\n<!DOCTYPE fcpxml>\n', 1)
@@ -484,11 +502,12 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix', *
               'resources': resource_evidence, 'manual_remaining': manual,
               'dtd': dtd_result, 'gui_import': 'unverified'}
     if gain_manifest is not None:
-        result['audio_automation'] = {'scope': 'pre_normalization',
+        result['audio_automation'] = {'scope': ('scalar_normalized' if normalization is not None and normalization['status'] == 'verified_scalar' else 'pre_normalization'),
             'status': 'pending_fcp_gui_calibration',
             'manifest_sha256': gain_manifest['manifest_sha256'],
             'global_peak_guard_gain': gain_manifest['global_peak_guard_gain'],
-            'parts': automation_evidence, 'return_import': 'unsupported'}
+            'common_gain': common_gain, 'normalization': normalization,
+            'parts': automation_evidence, 'return_import': 'unchanged_audio_and_supported_visual_cues'}
     if mode == 'editable' and any(cue['role'] in {'image', 'video', 'title'} for cue in cues):
         result['placement_status'] = 'pending_fcp_gui_calibration'
         result['geometry_source'] = 'shared_preview_pixel_model'
@@ -613,7 +632,7 @@ def inspect_production_xml(path, expected=None):
         if expected.get('audio_automation') is not None:
             parts = expected['audio_automation']['parts']
             dialogue = [item for item in connected if item['ref'] == 'production_dialogue']
-            guard_db = 20 * math.log10(expected['audio_automation']['global_peak_guard_gain'])
+            guard_db = 20 * math.log10(expected['audio_automation']['common_gain'])
             if (any(item['srcEnable'] != 'video' for item in primary) or len(dialogue) != 1 or
                     dialogue[0]['audioRole'] != 'dialogue' or dialogue[0]['gain'] != f'{guard_db:.9f}dB' or
                     dialogue[0]['audio_keyframes'] is not None):

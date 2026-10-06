@@ -27,6 +27,11 @@ class AudioGainPipelineTests(unittest.TestCase):
         self.assertEqual(evidence['manifest_sha256'], manifest['manifest_sha256'])
         self.assertEqual(evidence['speech'], fingerprint(speech))
         self.assertEqual(evidence['mixed_input'], fingerprint(mixed))
+        self.assertEqual(evidence['normalized_input'], fingerprint(folder / 'audio-normalized-input.wav'))
+        normalization = read(folder / 'audio-normalization-evidence.json')
+        self.assertIn(normalization['status'], {'verified_scalar', 'non_scalar'})
+        self.assertEqual(normalization['input']['sha256'], fingerprint(mixed)['sha256'])
+        self.assertEqual(normalization['output']['sha256'], evidence['normalized_input']['sha256'])
         self.assertEqual(set(curves), {row['cue']['id'] for row in manifest['cues']})
         return manifest
 
@@ -87,3 +92,5 @@ class AudioGainPipelineTests(unittest.TestCase):
             item = session._register_render(state, operation)
             self.assertEqual(item['files']['audio_gain_evidence'],
                              fingerprint(folder / 'audio-gain-evidence.json'))
+            self.assertEqual(item['files']['audio_normalization_evidence'],
+                             fingerprint(folder / 'audio-normalization-evidence.json'))

@@ -350,17 +350,27 @@ def render_visual_edit(cfg, plan, out, preview=True):
                 out / 'audio-envelopes', expected_cues=audio_cues,
                 expected_assets=production['assets'], expected_speech=speech,
                 expected_mixed_wav=audio_source)
-            write(out / 'audio-gain-evidence.json', {
+            gain_evidence = {
                 'version': 1, 'scope': 'pre_normalization', 'actor': 'automation',
                 'decision_reason': 'Bind measured cue gains to the direct mix inputs',
                 'manifest': fingerprint(out / 'audio-envelopes' / 'manifest.json'),
                 'manifest_sha256': manifest['manifest_sha256'],
                 'speech': fingerprint(speech), 'mixed_input': fingerprint(audio_source),
-            })
+            }
         audio_cfg = deepcopy(effective)
         if not _nonzero_pcm(audio_source):
             audio_cfg['audio']['normalize'] = False
         audio_filter = loudness_filter(audio_cfg, str(audio_source), 0, base['duration'], out)
+        if audio_cues:
+            from .audio_normalization import prove_scalar_normalization
+            normalized = out / 'audio-normalized-input.wav'
+            run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-i', str(audio_source),
+                 '-af', audio_filter, '-t', str(base['duration']), '-ar', '48000', '-ac', '2',
+                 '-c:a', 'pcm_f32le', str(normalized)], out / 'normalize-pcm.log')
+            write(out / 'audio-normalization-evidence.json', prove_scalar_normalization(audio_source, normalized))
+            gain_evidence['normalized_input'] = fingerprint(normalized)
+            write(out / 'audio-gain-evidence.json', gain_evidence)
+            audio_source, audio_filter = normalized, 'anull'
         run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-i', str(visual_input), '-i', str(audio_source),
              '-map', '0:v:0', '-map', '1:a:0', '-vf',
              _composed_output_filter(preview) if pipeline_version==2 else _video_filter(effective, lut, preview),

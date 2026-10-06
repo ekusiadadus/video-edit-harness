@@ -270,6 +270,13 @@ def prepare_fcp_handoff(cfg, production, out):
             raise ValueError('measured audio evidence refers to another render')
         gain_inputs = {'folder': manifest.parent, 'speech': gain_evidence['speech']['path'],
                        'mixed': gain_evidence['mixed_input']['path']}
+        if 'normalized_input' in gain_evidence:
+            ref = gain_evidence['normalized_input']
+            if not isinstance(ref, dict) or not ref.get('path') or fingerprint(ref['path']) != ref:
+                raise ValueError('measured normalized audio evidence changed')
+            if Path(ref['path']).resolve() != (out / 'audio-normalized-input.wav').resolve():
+                raise ValueError('normalized audio evidence refers to another render')
+            gain_inputs['normalized'] = ref['path']
     evidence = export_production_xml(base, production, pcm, output, mode, gain_inputs=gain_inputs)
     if mode == 'mix':
         evidence['picture'] = 'Finished graded MP4, including overlays; do not apply look.cube again.'

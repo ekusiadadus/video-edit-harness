@@ -300,6 +300,12 @@ def render_edit(cfg, plan, out, preview=True):
                                           gain_output=artifact.parent / 'audio-envelopes')
                 write(artifact.parent / 'production-mix.json', mix_evidence)
             af = loudness_filter(effective, str(mix_input), 0, total, artifact.parent)
+            if audio_cues:
+                normalized = artifact.parent / 'normalized.wav'
+                run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-i', str(mix_input),
+                     '-af', af, '-t', str(total), '-ar', '48000', '-ac', '2',
+                     '-c:a', 'pcm_f32le', str(normalized)], artifact.parent / 'normalize-pcm.log')
+                mix_input, af = normalized, 'anull'
             run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-i', str(mix_input), '-af', af,
                  '-c:a', 'aac', '-b:a', '384k', '-ar', '48000',
                  *(['-movie_timescale','48000'] if retimed is not None or has_audio_cuts else []), str(artifact)], log)
@@ -316,16 +322,17 @@ def render_edit(cfg, plan, out, preview=True):
             mix_settings['audio_cuts'] = {'setting':cfg['audio_cuts'], 'pcm_sha256':fingerprint(assembled)['sha256']}
         if audio_cues:
             mix_settings['production'] = mix_key(production)
-            mix_settings['audio_gain_schema'] = 1
+            mix_settings['audio_gain_schema'] = 2
         mix_event = cache.get('mix', mix_settings, '.m4a', mixed, build_mix,
             out / 'mix.log', **({'auxiliary_paths': ['assembled.wav', 'production-mix.wav',
-                                                    'audio-envelopes']} if audio_cues else {}))
+                                                    'audio-envelopes', 'normalized.wav']} if audio_cues else {}))
         if audio_cues:
             from .audio_envelopes import load_audio_envelopes
             cache.copy_auxiliary(mix_event, {
                 'assembled.wav': out / 'audio-mixer-speech.wav',
                 'production-mix.wav': out / 'audio-mixer-input.wav',
                 'audio-envelopes': out / 'audio-envelopes',
+                'normalized.wav': out / 'audio-normalized-input.wav',
             })
             manifest, _ = load_audio_envelopes(
                 out / 'audio-envelopes', expected_cues=audio_cues,
@@ -339,8 +346,12 @@ def render_edit(cfg, plan, out, preview=True):
                 'manifest_sha256': manifest['manifest_sha256'],
                 'speech': fingerprint(out / 'audio-mixer-speech.wav'),
                 'mixed_input': fingerprint(out / 'audio-mixer-input.wav'),
+                'normalized_input': fingerprint(out / 'audio-normalized-input.wav'),
                 'cache_event': mix_event,
             })
+            from .audio_normalization import prove_scalar_normalization
+            write(out / 'audio-normalization-evidence.json', prove_scalar_normalization(
+                out / 'audio-mixer-input.wav', out / 'audio-normalized-input.wav'))
         final = out / 'video.mp4'
         picture_input = ['-i', str(retimed)] if retimed is not None else ['-f', 'concat', '-safe', '0', '-i', str(out/'video.ffconcat')]
         picture_codec = (['-vf', 'scale=-2:720',

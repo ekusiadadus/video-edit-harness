@@ -2,6 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+import numpy as np
 from unittest.mock import patch
 
 from tests import test_production_fcp as fixtures
@@ -139,3 +140,38 @@ class FCPAudioAutomationTests(unittest.TestCase):
         self.assertEqual(read(revised['path'])['fcp_audio_automation'], 'measured')
         with self.assertRaisesRegex(ValueError, 'explicit editable'):
             fixture.session.update_project({'fcp_handoff': 'mix'}, 'codex', 'Invalid combination')
+
+    def test_scalar_normalization_is_applied_but_dynamic_change_is_disclosed(self):
+        from tests.test_audio_normalization import pcm16, float32_wav
+        from video_harness.audio_mix import _decode
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base, speech, assets = fixtures.ProductionFCPTests().fixtures(root)
+            t = np.arange(96000) / 48000
+            pcm16(speech, np.column_stack((.1 * np.sin(2 * np.pi * 220 * t),
+                                           .1 * np.cos(2 * np.pi * 330 * t))))
+            cues = validate_cues([{'id': 'music', 'asset_id': 'm', 'role': 'music',
+                'output_start': 0, 'output_end': 2, 'source_start': 0, 'source_end': 1,
+                'loop': True}], assets, 2)
+            mixed = root / 'preview.wav'
+            render_mix(speech, cues, assets, mixed, 2, gain_output=root / 'gains')
+            source = _decode(mixed)
+            normalized = root / 'normalized.wav'
+            float32_wav(normalized, source * 2)
+            inputs = {'folder': root / 'gains', 'speech': speech, 'mixed': mixed, 'normalized': normalized}
+            production = {'assets': assets, 'cues': cues}
+            scalar = export_production_xml(base, production, None, root / 'scalar.fcpxml',
+                mode='editable', gain_inputs=inputs)
+            self.assertEqual(scalar['audio_automation']['scope'], 'scalar_normalized')
+            self.assertAlmostEqual(scalar['audio_automation']['common_gain'], 2, places=6)
+            dialogue = next(row for row in inspect_production_xml(root / 'scalar.fcpxml')['connected']
+                            if row['audioRole'] == 'dialogue')
+            self.assertAlmostEqual(float(dialogue['gain'][:-2]), 20 * np.log10(2), places=6)
+            dynamic = source.copy()
+            dynamic[48000:] *= .5
+            float32_wav(normalized, dynamic)
+            fallback = export_production_xml(base, production, None, root / 'dynamic.fcpxml',
+                mode='editable', gain_inputs=inputs)
+            self.assertEqual(fallback['audio_automation']['scope'], 'pre_normalization')
+            self.assertEqual(fallback['audio_automation']['normalization']['status'], 'non_scalar')
+            self.assertEqual(fallback['audio_automation']['common_gain'], 1)
