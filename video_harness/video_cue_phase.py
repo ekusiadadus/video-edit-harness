@@ -25,6 +25,10 @@ def video_cue_content_sha256(cue, source_sha256):
                'source_end': str(Fraction(str(cue['source_end']))),
                'position': cue.get('position', 'center'),
                'opacity': str(Fraction(str(cue.get('opacity', 1))))}
+    if cue.get('loop', False):
+        content['loop'] = True
+    if any(Fraction(str(cue.get(key, 0))) for key in ('fade_in', 'fade_out')):
+        content.update({key: str(Fraction(str(cue.get(key, 0)))) for key in ('fade_in', 'fade_out')})
     return hashlib.sha256(json.dumps(content, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 

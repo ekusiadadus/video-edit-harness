@@ -65,8 +65,6 @@ def validate_video_phase(cue, fps):
         return None
     if cue.get("role") != "video" or fps is None:
         raise ValueError("Video cue phase_map requires video role and explicit FPS")
-    if cue.get("loop", False):
-        raise ValueError("Looped video phase migration is not supported yet")
     rate = _seconds(fps, "fps")
     if isinstance(phase, dict) and type(phase.get('version')) is int and phase['version'] == 2:
         if set(phase) != {'version', 'original_start_frame', 'original_frame_count', 'original_layer', 'original_cue_sha256', 'frames'}:
@@ -90,6 +88,8 @@ def validate_video_phase(cue, fps):
                 or any(a > b for a, b in zip(frames, frames[1:]))):
             raise ValueError('Invalid sealed video cue original frame map')
         return {**phase, 'original_layer': reference, 'frames': frames.copy()}
+    if cue.get('loop', False):
+        raise ValueError('Video loops require sealed version-2 layer evidence')
     legacy_keys = {"version", "original_start_frame", "original_frame_count", "original_time_base", "original_timestamps", "frames"}
     if rate <= 0 or not isinstance(phase, dict) or set(phase) not in (legacy_keys, legacy_keys | {'original_input_pts_shift'}):
         raise ValueError("Invalid video cue phase_map")
@@ -199,7 +199,7 @@ def validate_cues(cues, assets, duration, fps=None):
             value = _seconds(cue.get(name, 0), name)
             if name != "gain_db" and value < 0:
                 raise ValueError(f"negative {name}")
-        if _seconds(cue.get("fade_in", 0), "fade_in") + _seconds(cue.get("fade_out", 0), "fade_out") > (required_duration if audio_retime else stop - start):
+        if _seconds(cue.get("fade_in", 0), "fade_in") + _seconds(cue.get("fade_out", 0), "fade_out") > (required_duration if audio_retime or phase else stop - start):
             raise ValueError(f"fades exceed cue duration: {cue_id}")
         for name in ("loop", "duck"):
             if name in cue and not isinstance(cue[name], bool):

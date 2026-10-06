@@ -260,6 +260,10 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix', *
         raise ValueError('unsupported production FCP mode')
     if gain_inputs is not None and mode != 'editable':
         raise ValueError('measured audio automation requires editable mode')
+    if mode == 'editable' and any(cue.get('role') in {'video', 'image', 'title'} and
+            any(_seconds(cue.get(key, 0), key) > 0 for key in ('fade_in', 'fade_out'))
+            for cue in production.get('cues', [])):
+        raise ValueError('Visual cue fades require baked mix/video_only handoff; editable opacity animation is unsupported')
     if mode == 'editable' and any('audio_retime' in cue for cue in production.get('cues', [])):
         raise ValueError('Retimed SFX requires baked mix or video_only handoff; editable source-rate playback is unsupported')
     if mode == 'editable' and any('phase_map' in cue for cue in production.get('cues', [])):

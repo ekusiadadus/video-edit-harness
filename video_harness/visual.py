@@ -270,6 +270,7 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
         video_phase_layers = []
         video_cue_clocks = []
         video_cue_layers = []
+        video_loop_periods = []
         for index, cue in enumerate(cues):
             role = cue["role"]
             source = root / f"title-{index}.png" if role == "title" else Path(assets[cue["asset_id"]]["path"])
@@ -290,6 +291,16 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                         raise ValueError('rotated image geometry is unsupported')
                     source_width, source_height = picture.size
             placement = measure_placement(cue, width, height, source_width, source_height)
+            exact_clock = role == 'video' and ('phase_map' in cue or cue.get('loop', False))
+            fades = ''
+            if 'phase_map' not in cue:
+                fade_in = _seconds(cue.get('fade_in', 0), 'fade_in')
+                fade_out = _seconds(cue.get('fade_out', 0), 'fade_out')
+                if fade_in:
+                    fades += f",fade=t=in:st={float(_seconds(cue['output_start'], 'output_start')):.9f}:d={float(fade_in):.9f}:alpha=1"
+                if fade_out:
+                    fade_start = _seconds(cue['output_end'], 'output_end') - fade_out
+                    fades += f",fade=t=out:st={float(fade_start):.9f}:d={float(fade_out):.9f}:alpha=1"
             if role == 'video' and 'phase_map' in cue:
                 from .video_cue_phase import retime_video_cue_layer
                 registered_asset = assets[cue['asset_id']]
@@ -314,14 +325,27 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                 opacity = 1
                 overlay_x = overlay_y = 0
             elif role == "video":
-                overlay_input = ["-i", str(source)]
-                source_start = format(float(_seconds(cue['source_start'], 'source_start')), '.9f')
-                source_end = format(float(_seconds(cue['source_end'], 'source_end')), '.9f')
-                source_filter = (f"trim=start={source_start}:end={source_end},"
-                                 f"setpts=PTS-STARTPTS+{cue['output_start']}/TB,")
+                if cue.get('loop', False):
+                    from .video_loops import prepare_video_loop
+                    period = root / f'video-loop-period-{index}.mkv'
+                    observed = prepare_video_loop(source, cue, info['fps'], period,
+                        log_path=output.parent / f'{output.stem}-video-loop-period-{index}.log')
+                    _check_asset(cue['asset_id'], assets)
+                    video_loop_periods.append(observed)
+                    overlay_input = ['-stream_loop', '-1', '-i', str(period)]
+                    source_filter = (f"trim=end_frame={observed['output_end_frame_exclusive']-observed['output_first_frame']},"
+                        f"settb=expr={info['fps'].denominator}/{info['fps'].numerator},"
+                        f"setpts=N+{observed['output_first_frame']},")
+                else:
+                    overlay_input = ["-i", str(source)]
+                    source_start = format(float(_seconds(cue['source_start'], 'source_start')), '.9f')
+                    source_end = format(float(_seconds(cue['source_end'], 'source_end')), '.9f')
+                    source_filter = (f"trim=start={source_start}:end={source_end},"
+                                     f"setpts=PTS-STARTPTS+{cue['output_start']}/TB,")
             else:
                 overlay_input = ["-loop", "1", "-i", str(source)]
-                source_filter = ""
+                source_filter = (f"fps=fps={info['fps']}:start_time=0:round=near,"
+                    f"settb=expr={info['fps'].denominator}/{info['fps'].numerator},setpts=N,") if fades else ""
             if role != 'video' or 'phase_map' not in cue:
                 scale = f"scale={placement['rendered_size'][0]}:{placement['rendered_size'][1]}"
                 opacity = placement['opacity']
@@ -331,12 +355,12 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
             # consuming the secondary input, using its own frame counter.
             # A sealed layer already has exact start/count/EOF, so use those
             # timestamps rather than a second n-based timeline gate.
-            gate = ("repeatlast=0:" if 'phase_map' in cue else f"enable='{enable}':")
+            gate = ("repeatlast=0:" if exact_clock else f"enable='{enable}':")
             filter_graph = (f"[1:v]{source_filter}{scale},format=rgba,"
-                            f"colorchannelmixer=aa={opacity}[layer];"
+                            f"colorchannelmixer=aa={opacity}{fades}[layer];"
                             f"[0:v][layer]overlay=x={overlay_x}:y={overlay_y}:" + gate +
                             "eof_action=pass:shortest=0[v]")
-            if role == 'video' and 'phase_map' in cue:
+            if exact_clock:
                 # Frame selection refers to final CFR indices.
                 # Normalize the primary before framesync so the muxer cannot
                 # introduce a second, independent initial-frame duplication.
@@ -353,14 +377,16 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                 retained_layer = root / f"original-layer-{index}.mkv"
                 filter_graph = (
                     f"[1:v]{source_filter}{scale},format=rgba,"
-                    f"colorchannelmixer=aa={opacity},split[layer][saved_layer];"
-                    "[0:v]split[primary][saved_primary];"
-                    f"[primary][layer]overlay=x={overlay_x}:y={overlay_y}:"
-                    f"enable='{enable}':eof_action=pass:shortest=0[v];"
+                    f"colorchannelmixer=aa={opacity}{fades},split[layer][saved_layer];" +
+                    ((f"[0:v]fps=fps={info['fps']}:start_time=0:round=near,"
+                      f"settb=expr={info['fps'].denominator}/{info['fps'].numerator},setpts=N,") if exact_clock else "[0:v]") +
+                    "split[primary][saved_primary];" +
+                    f"[primary][layer]overlay=x={overlay_x}:y={overlay_y}:" +
+                    gate + "eof_action=pass:shortest=0[v];" +
                     "[saved_primary]format=rgba,"
                     "colorchannelmixer=rr=0:gg=0:bb=0:aa=0[transparent];"
-                    f"[transparent][saved_layer]overlay=x={overlay_x}:y={overlay_y}:"
-                    f"enable='{enable}':eof_action=pass:shortest=0:format=auto,"
+                    f"[transparent][saved_layer]overlay=x={overlay_x}:y={overlay_y}:" +
+                    gate + "eof_action=pass:shortest=0:format=auto," +
                     "format=bgra[saved]"
                 )
             if info['rec709_tags']:
@@ -371,7 +397,7 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                      *overlay_input, "-filter_complex", filter_graph, "-map", picture_label,
                      "-map", "0:a?", "-c:v", "libx264", "-preset", "ultrafast" if preview else "medium",
                      "-crf", "23" if preview else "18", "-pix_fmt", "yuv420p", "-c:a", "copy",
-                     *(["-fps_mode", "passthrough"] if 'phase_map' in cue else []),
+                     *(["-fps_mode", "passthrough"] if exact_clock else []),
                      "-t", str(duration), *timing_options, str(target)]
             if retained_layer is not None:
                 command += ["-map", "[saved]", "-an", "-c:v", "ffv1", "-level", "3",
@@ -403,5 +429,6 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
             "video_phase_layers": video_phase_layers,
             "video_cue_clocks": video_cue_clocks,
             "video_cue_layers": video_cue_layers,
+            "video_loop_periods": video_loop_periods,
             "safe_area": "overlays fit central 70 percent width and above lower 25 percent",
             "subject_clearance": "unverified; inspect every overlay against moving subjects and captions"}
