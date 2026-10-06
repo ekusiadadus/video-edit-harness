@@ -43,7 +43,8 @@ def _write_xml(path, plan, mapping, assets, name):
     root = ET.Element('fcpxml', version='1.10')
     resources = ET.SubElement(root, 'resources')
     ET.SubElement(resources, 'format', id='fmt', frameDuration=_time(1 / rate),
-                  width=str(video['width']), height=str(video['height']))
+                  width=str(video['width']), height=str(video['height']),
+                  colorSpace='1-1-1 (Rec. 709)')
     ids = {aid: f'asset{i}' for i, aid in enumerate(dict.fromkeys(row['asset_id'] for row in rows), 1)}
     for aid, xml_id in ids.items():
         asset = assets[aid]

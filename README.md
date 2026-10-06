@@ -133,7 +133,7 @@ Cloud transcription uses **OpenAI, then Azure OpenAI**, only for the source and 
 
 **Alpha:** flat speech timelines and registered multi-source visual EDL. Original video aspect is preserved; 9:16 derivatives use fit/padding by default and explicit center crop when reviewed. No automatic face identity or B-roll assembly. The user uploads the delivered MP4 to the platform personally. Manually seeded tracking requires review. Apple Log LUTs include conversion to Rec.709; disable a second FCP Camera LUT. HDR/HLG and Apple Log 2 require another supported transform.
 
-FCPXML exports cut timing and media links. LUTs, captions, spatial masks and the final FCP audio mix need separate application and review. XML/DTD validation, hashes, full decode and frame mapping prove technical properties; they do not prove natural speech, attractive grading, actual FCP import or platform playback. The synthetic demo and automated checks do not establish real-footage quality. [Release verification and remaining checks](docs/RELEASE_VALIDATION.md).
+FCPXML exports cut timing and media links. Flat timeline export uses a Rec.709 project working space and a separate source format, preserving camera/log interpretation; this does not bake a color conversion into the source. LUTs, captions, spatial masks and the final FCP audio mix need separate application and review. XML/DTD validation, hashes, full decode and frame mapping prove technical properties; they do not prove natural speech, attractive grading, actual FCP import or platform playback. The synthetic demo and automated checks do not establish real-footage quality. [Release verification and remaining checks](docs/RELEASE_VALIDATION.md).
 
 ```sh
 make test

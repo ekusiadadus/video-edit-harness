@@ -143,6 +143,10 @@ class VisualEditingTests(unittest.TestCase):
             xml = ET.parse(out / 'timeline.fcpxml').getroot()
             self.assertEqual(len(xml.findall('./resources/asset')), 2)
             self.assertEqual(len(xml.findall('./resources/format')), 3)
+            self.assertEqual(xml.find("./resources/format[@id='fmt']").get('colorSpace'),
+                             '1-1-1 (Rec. 709)')
+            for asset in xml.findall('./resources/asset'):
+                self.assertIsNone(xml.find(f"./resources/format[@id='{asset.get('format')}']").get('colorSpace'))
             self.assertEqual(len(xml.findall('./library/event/project/sequence/spine/asset-clip')), 2)
             self.assertEqual(len(xml.findall('./library/event/project/sequence/spine/asset-clip/conform-rate')), 1)
             dtd = Path('/Applications/Final Cut Pro Creator Studio.app/Contents/Frameworks/Interchange.framework/Versions/A/Resources/FCPXMLv1_10.dtd')

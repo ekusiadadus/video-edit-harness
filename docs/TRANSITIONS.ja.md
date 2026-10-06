@@ -37,4 +37,4 @@ uv run --no-sync video-harness session render SESSION --full --candidate-id CAND
 
 成功したdecodeは人の視聴レビューではありません。実素材で全編を見て、動作・顔・手・画面端・テンポ・音とのつながりを確認し、最終MP4の正確なSHAを指定したreviewに `transitions` のvisualチェックを追加してください。候補の採用と最終reviewは別です。MP4／FCPのmix・video_only納品には合成済み映像を使います。`original-cut-reference.fcpxml` は元のハードカットの参照で、編集可能なトランジションではありません。自然版へ戻す候補ではtransitionsも解除します。
 
-内部処理は `transition_mapping.compile_transitions`、`transitions.prepare_transitions`／`render_transition_setting`、`transition_feedback.attach_transitions` です。低レベルbackendの全編video/audio decode・fps・フレーム数・PCM一致と、候補→feedback→比較→review→MP4納品の検証は合成テスト素材で行いました。実素材の見た目／聴取、人の受入、FCP GUI・配信後再生の検証は別途必要です。完成したYouTube MP4の受入証拠にはなりません。YouTubeへのアップロードはユーザーが行います。
+内部処理は `transition_mapping.compile_transitions`、`transitions.prepare_transitions`／`render_transition_setting`、`transition_feedback.attach_transitions` です。低レベルbackendの全編video/audio decode・fps・フレーム数・PCM一致と、候補→feedback→比較→review→MP4納品の検証は合成テスト素材で行いました。実ダンス素材の6秒比較でもdecode・フレーム数・PCM一致を確認しましたが、今回のつなぎでは顔や手の二重像／画面端の分断が見え、自然な編集の案として採用していません。合成済みpushのFCP GUI読み込みと再生進行は確認済みです。人の全編視聴・聴取、最終MP4の受入と配信後再生は未確認です。詳細は `docs/RELEASE_VALIDATION.md` を参照してください。YouTubeへのアップロードはユーザーが行います。

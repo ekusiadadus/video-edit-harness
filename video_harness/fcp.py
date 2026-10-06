@@ -101,7 +101,8 @@ def export_timeline(source: Path, probe: dict, keep: list[tuple[float, float]],
     """Export frame-aligned source ranges as one contiguous FCPXML 1.10 project.
 
     The source's natural audio travels with each asset-clip. No transforms, gain,
-    effects, titles, or music are synthesized.
+    effects, titles, or music are synthesized. The project working space is
+    Rec.709; the separate source format does not relabel camera/log media.
     """
     source = Path(source)
     output = Path(output)
@@ -185,9 +186,11 @@ def export_timeline(source: Path, probe: dict, keep: list[tuple[float, float]],
     root = ET.Element("fcpxml", version="1.10")
     resources = ET.SubElement(root, "resources")
     ET.SubElement(resources, "format", id="fmt", frameDuration=_time(frame),
+                  width=str(width), height=str(height), colorSpace="1-1-1 (Rec. 709)")
+    ET.SubElement(resources, "format", id="source_fmt", frameDuration=_time(frame),
                   width=str(width), height=str(height))
     asset_attrs = {"id": "asset1", "name": source.stem, "start": "0s",
-                   "duration": _time(duration), "hasVideo": "1", "format": "fmt"}
+                   "duration": _time(duration), "hasVideo": "1", "format": "source_fmt"}
     if audio:
         channels = audio.get("channels")
         sample_rate = audio.get("sample_rate")

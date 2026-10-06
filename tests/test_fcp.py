@@ -37,6 +37,13 @@ class FCPTests(unittest.TestCase):
                          [("0s", "1001/30000s", "11011/7500s"),
                           ("11011/7500s", "91091/30000s", "29029/30000s")])
         self.assertEqual(root.find("./resources/asset").get("hasAudio"), "1")
+        sequence = root.find("./library/event/project/sequence")
+        project_format = root.find(f"./resources/format[@id='{sequence.get('format')}']")
+        asset_format = root.find(f"./resources/format[@id='{root.find('./resources/asset').get('format')}']")
+        self.assertEqual(project_format.get('colorSpace'), '1-1-1 (Rec. 709)')
+        self.assertIsNone(asset_format.get('colorSpace'))
+        self.assertEqual(project_format.get('frameDuration'), asset_format.get('frameDuration'))
+        self.assertNotEqual(sequence.get('format'), root.find('./resources/asset').get('format'))
         self.assertIn("%26", root.find("./resources/asset/media-rep").get("src"))
         if DTD.exists():
             dtd = self.directory / "FCPXMLv1_10.dtd"
