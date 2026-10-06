@@ -13,6 +13,11 @@ dependencies = ["numpy>=2,<3", "Pillow>=11,<13"]
 video-harness = "video_harness.cli:main"
 
 [project.optional-dependencies]
+depth = [
+    "torch>=2.6,<3",
+    "transformers>=4.50,<6",
+    "safetensors>=0.5,<1",
+]
 text-layout = [
     "budoux>=0.9.3,<1",
     "regex>=2026.9.29,<2027",
@@ -53,3 +58,11 @@ Issues = "https://github.com/ekusiadadus/video-edit-harness/issues"
 [tool.hatch.build.targets.sdist]
 exclude = ["/output/**", "/baselines/**", "/media/**", "/sessions/**", "/cache/**", "/dist/**", "/build/**", "/release-assets/**", "/.venv/**"]
 include = ["video_harness/*.py", "use_cases/*.json", "styles/*.json", "tones/*.json", "editing_patterns/*.json", "trend_profiles/*.json", "projects/*.template.json", "examples/*.json", "tests/*.py", "scripts/*.py", "docs/*.md", ".agents/skills/video-editing/**", ".agents/skills/tiktok/**", ".agents/skills/youtube/**", ".claude/skills/video-editing", ".claude/skills/tiktok", ".claude/skills/youtube", ".claude-plugin/*.json", "README.md", "README.ja.md", "docs/demo/**", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "AGENTS.md", "CLAUDE.md", "Makefile", "pyproject.toml", "uv.lock", ".env.example"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]

@@ -1,5 +1,6 @@
 """Source-bound, manually editable relative depth; never metric distance."""
 from pathlib import Path
+import math
 
 import numpy as np
 
@@ -57,6 +58,15 @@ def prepare_manual_depth(source, fields, output, actor, reason):
     The caller declares near-high relative values. No per-frame min/max
     normalization or inferred metric calibration is applied here.
     """
+    return _prepare_depth(source, fields, output, actor, reason)
+
+
+def prepare_inferred_depth(source, fields, output, actor, reason, inference):
+    """Retain normalized fields with raw model/normalization provenance."""
+    return _prepare_depth(source, fields, output, actor, reason, inference)
+
+
+def _prepare_depth(source, fields, output, actor, reason, inference=None):
     if actor not in ('human', 'codex', 'claude_code', 'automation'):
         raise ValueError('Record a real depth actor')
     if not isinstance(reason, str) or not reason.strip():
@@ -98,7 +108,7 @@ def prepare_manual_depth(source, fields, output, actor, reason):
         if fingerprint(path) != reference:
             raise ValueError('Depth input changed during copying')
         rows.append({'frame': frame, 'field': fingerprint(output_field),
-                     'input': reference, 'origin': 'manual_relative',
+                     'input': reference, 'origin': 'model_relative' if inference is not None else 'manual_relative',
                      'minimum': float(value.min()), 'maximum': float(value.max())})
     if fingerprint(source) != binding:
         raise ValueError('Depth source changed during preparation')
@@ -110,6 +120,9 @@ def prepare_manual_depth(source, fields, output, actor, reason):
                 'algorithm': 'manual-relative-depth-v1', 'actor': actor,
                 'reason': reason.strip(), 'rows': rows, 'review_required': True,
                 'metric_distance': False, 'adopted': False}
+    if inference is not None:
+        document.update(version=2, algorithm='depth-anything-v2-small-hf-v1',
+                        normalization='interval_shared_minmax', inference=inference)
     manifest = target/'depth.json'
     write(manifest, document)
     validate_depth(manifest, source)
@@ -123,10 +136,13 @@ def validate_depth(manifest, source=None):
                 'start_frame', 'end_frame_exclusive', 'representation', 'normalization',
                 'algorithm', 'actor', 'reason', 'rows', 'review_required',
                 'metric_distance', 'adopted'}
+    inferred = isinstance(doc, dict) and type(doc.get('version')) is int and doc.get('version') == 2
+    if inferred:
+        required.add('inference')
     if (not isinstance(doc, dict) or set(doc) != required or type(doc['version']) is not int or
-            doc['version'] != 1 or doc['representation'] != 'relative_near_high_float32_0_1' or
-            doc['normalization'] != 'explicit_shared_relative_scale' or
-            doc['algorithm'] != 'manual-relative-depth-v1' or doc['review_required'] is not True or
+            doc['version'] != (2 if inferred else 1) or doc['representation'] != 'relative_near_high_float32_0_1' or
+            doc['normalization'] != ('interval_shared_minmax' if inferred else 'explicit_shared_relative_scale') or
+            doc['algorithm'] != ('depth-anything-v2-small-hf-v1' if inferred else 'manual-relative-depth-v1') or doc['review_required'] is not True or
             doc['metric_distance'] is not False or doc['adopted'] is not False):
         raise ValueError('Invalid relative depth manifest contract')
     if doc['actor'] not in ('human', 'codex', 'claude_code', 'automation') or not isinstance(doc['reason'], str) or not doc['reason'].strip():
@@ -146,7 +162,7 @@ def validate_depth(manifest, source=None):
         raise ValueError('Depth rows do not cover the declared source interval')
     for frame, row in zip(range(first, end), doc['rows']):
         if (not isinstance(row, dict) or set(row) != {'frame','field','input','origin','minimum','maximum'} or
-                type(row['frame']) is not int or row['frame'] != frame or row['origin'] != 'manual_relative'):
+                type(row['frame']) is not int or row['frame'] != frame or row['origin'] != ('model_relative' if inferred else 'manual_relative')):
             raise ValueError('Invalid or missing depth frame provenance')
         for key in ('field', 'input'):
             ref = _reference(row[key])
@@ -160,4 +176,66 @@ def validate_depth(manifest, source=None):
             raise ValueError('Depth field changed during validation')
     if fingerprint(binding['path']) != binding:
         raise ValueError('Depth source changed during validation')
+    if inferred:
+        _validate_inference(doc)
     return doc
+
+
+def raw_field(path, width, height):
+    value = np.load(path, allow_pickle=False, mmap_mode='r')
+    if (not isinstance(value, np.ndarray) or value.dtype != np.float32
+            or value.shape != (height, width) or not np.isfinite(value).all()):
+        raise ValueError('Raw relative depth needs full-size finite float32 fields')
+    return value
+
+
+def _validate_inference(doc):
+    from .depth_model import validate_model_binding
+    evidence = doc['inference']
+    if (not isinstance(evidence, dict) or set(evidence) != {'model','raw_fields','minimum','maximum',
+            'near_high_assumption','temporal_consistency','execution'} or evidence['near_high_assumption'] is not True
+            or evidence['temporal_consistency'] is not False):
+        raise ValueError('Invalid local depth inference evidence')
+    validate_model_binding(evidence['model'])
+    model = evidence['model']
+    expected_execution = {'resize':'official_DPTImageProcessor_518', 'interpolation':'bicubic',
+                          'align_corners':False, 'raw_relative_depth':True, 'near_high_ordering':'unverified'}
+    runtime = model.get('runtime')
+    if (model.get('device') != 'cpu' or model.get('inference') != expected_execution
+            or not isinstance(runtime, dict) or set(runtime) != {'torch','transformers','safetensors'}
+            or any(not isinstance(version,str) or not version for version in runtime.values())):
+        raise ValueError('Depth inference execution provenance is incomplete')
+    execution_ref = _reference(evidence['execution'])
+    if fingerprint(execution_ref['path']) != execution_ref:
+        raise ValueError('Depth execution record changed')
+    execution = read(execution_ref['path'])
+    expected_record = {'version':1, 'model':model, **{key:doc[key] for key in
+                       ('source','width','height','fps','source_frame_count','start_frame',
+                        'end_frame_exclusive','actor','reason')}}
+    if (not isinstance(execution, dict) or type(execution.get('version')) is not int
+            or execution != expected_record or fingerprint(execution_ref['path']) != execution_ref):
+        raise ValueError('Depth inference execution record differs from manifest')
+    for key in ('minimum','maximum'):
+        if type(evidence[key]) not in (int,float) or not math.isfinite(evidence[key]):
+            raise ValueError('Invalid depth normalization bound')
+    lower, upper = evidence['minimum'], evidence['maximum']
+    if not lower < upper or not isinstance(evidence['raw_fields'], list) or len(evidence['raw_fields']) != len(doc['rows']):
+        raise ValueError('Depth inference requires a nonconstant shared interval range')
+    observed_min, observed_max = float('inf'), float('-inf')
+    for row, raw in zip(doc['rows'], evidence['raw_fields']):
+        if (not isinstance(raw, dict) or set(raw) != {'frame','field'} or type(raw['frame']) is not int
+                or raw['frame'] != row['frame']):
+            raise ValueError('Raw inference frame binding changed')
+        ref = _reference(raw['field'])
+        if fingerprint(ref['path']) != ref:
+            raise ValueError('Raw depth inference binding changed')
+        value = raw_field(ref['path'], doc['width'], doc['height'])
+        observed_min = min(observed_min, float(value.min()))
+        observed_max = max(observed_max, float(value.max()))
+        normalized = ((value.astype(np.float64)-lower)/(upper-lower)).astype(np.float32)
+        if not np.array_equal(normalized, _field(row['field']['path'], doc['width'], doc['height'])):
+            raise ValueError('Depth normalized values do not match raw inference')
+        if fingerprint(ref['path']) != ref:
+            raise ValueError('Raw depth changed during validation')
+    if (observed_min, observed_max) != (lower, upper):
+        raise ValueError('Depth shared normalization range changed')

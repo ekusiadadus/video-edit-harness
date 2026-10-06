@@ -17,6 +17,15 @@ def main(argv=None):
     prepare.add_argument('request', type=Path)
     validate = commands.add_parser('validate', help='Recheck retained source and depth bindings')
     validate.add_argument('manifest', type=Path)
+    inspect = commands.add_parser('inspect-model', help='Verify a local pinned Small model without loading weights')
+    inspect.add_argument('model', type=Path)
+    fetch = commands.add_parser('fetch-model', help='Explicitly download a trusted pinned official Small snapshot')
+    fetch.add_argument('--output', type=Path, required=True)
+    infer = commands.add_parser('infer', help='Infer relative depth locally; retain raw fields and shared interval normalization')
+    infer.add_argument('source', type=Path)
+    infer.add_argument('--model', type=Path, required=True)
+    infer.add_argument('--first-frame', type=int, required=True)
+    infer.add_argument('--end-frame-exclusive', type=int, required=True)
     render = commands.add_parser('render', help='Place a registered same-size RGBA image behind near picture content')
     render.add_argument('source', type=Path)
     render.add_argument('manifest', type=Path)
@@ -25,12 +34,20 @@ def main(argv=None):
     render.add_argument('--input-color', choices=['rec709'], required=True)
     for name, default in [('threshold', .5), ('softness', .1), ('strength', 1.)]:
         render.add_argument('--'+name, type=float, default=default)
-    for command in (prepare, render):
+    for command in (prepare, render, infer):
         command.add_argument('--output', type=Path, required=True, help='New evidence directory')
         command.add_argument('--actor', choices=['human','codex','claude_code','automation'], required=True)
         command.add_argument('--note', required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == 'fetch-model':
+            from .depth_model import fetch_model
+            print(json.dumps(fetch_model(args.output), ensure_ascii=False, indent=2))
+            return
+        if args.command == 'inspect-model':
+            from .depth_model import inspect_model
+            print(json.dumps(inspect_model(args.model), ensure_ascii=False, indent=2))
+            return
         if args.command == 'validate':
             doc = validate_depth(args.manifest)
             print(json.dumps({'source': doc['source'], 'frames': len(doc['rows']),
@@ -56,6 +73,12 @@ def main(argv=None):
                     fields[row['frame']] = path if path.is_absolute() else args.request.resolve().parent/path
                 manifest = prepare_manual_depth(args.source, fields, args.output/'fields', args.actor, args.note)
                 result = {'manifest':str(manifest), 'review_required':True, 'adopted':False}
+            elif args.command == 'infer':
+                from .depth_inference import infer_depth
+                manifest = infer_depth(args.source, args.model, args.first_frame, args.end_frame_exclusive,
+                                       args.output/'depth', args.actor, args.note)
+                result = {'manifest':str(manifest), 'review_required':True, 'adopted':False,
+                          'temporal_consistency':False, 'metric_distance':False}
             else:
                 from .depth_render import render_depth_layer
                 result = render_depth_layer(args.source, args.manifest, read(args.asset), read(args.policy),
