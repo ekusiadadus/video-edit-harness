@@ -2,6 +2,14 @@
 
 各項目は記録時点の状態です。直近の開発機能を先頭に掲載し、過去の未完了記録も検証履歴として残しています。公開alpha.7と開発版を区別してください。
 
+## 2026-10-07 開発版: 接続と実行能力の診断
+
+TikTokの`status`／`doctor`は、認可情報の保存、有効期限、取得先ごとのscopeを分けて診断する。期限切れ時はrefresh／再認可を案内し、破損した保存情報を秘密値なしの固定エラーで拒否する。`connected`は互換の保存済みフラグで、`readiness`と`remote_verification`を実接続の証拠と混同しない。診断だけではネットワークへ接続しない。
+
+現環境の実測ではAPI設定とKeychain認可は未登録。以前のブラウザーログインをAPI接続完了とは扱わない。FCPは起動を確認したが、GUI操作ツールがウィンドウを取得できず、実機のimport／再生較正は未確認。これらは計画全体に残る作業。
+
+`doctor`の古いvisual_only表示を、実装済みのvisual／speech両セッションの音声・映像retimeへ訂正。編集可能FCP retimeは未対応のまま表示する。3スキルの旧「動画loop／SFX変速は未対応」という記述も現実装と整合させた。関連10試験成功（0.548秒）、全体657試験成功（290.410秒）、3スキルの構造検証成功。生ログは`output/implementation-maya/api-doctor-focused.log`、`api-doctor-full-suite.log`、`api-skill-validation-uv.log`。初回のシステムPythonによるスキル検証はPyYAML欠落で失敗し、既存uv環境で再検証した。これらは実API接続・人の視聴・FCP GUI較正・新リリースの証拠ではない。
+
 ## 2026-10-07 開発版: 動画ループと視覚cue fade
 
 指定trimの実フレームを一度だけ出力FPSへ揃え、FFV1/BGRAの周期をstream_loopで繰り返す描画を接続。出力フレーム番号で時計を設定し、半開区間・端数FPS・透過を保持。周期の実フレーム数とSHAを記録。保存したversion2 RGBA層へloop設定と非ゼロfadeを束縛し、変速時はその実画素を選択する。旧timestamp-only loopは拒否する。

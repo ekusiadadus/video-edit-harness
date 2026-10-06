@@ -21,6 +21,8 @@ uv run video-harness tiktok-api refresh --network
 
 `auth-url` はローカルで暗号学的にランダムなstateと毎回新しいPKCE verifierを作り、verifierとstateをmacOS Keychainへ保管する。callbackのscheme/host/path、state、10分の期限を照合してからtoken交換する。TikTok DesktopのPKCE challengeはverifierのSHA-256を**16進文字列**で送る。token交換・refreshの応答からaccess/refresh tokenをKeychainへ保管し、CLI出力には含めない。`status` はネットワークを呼ばず、環境変数の設定有無、Keychain設定の有無、接続状態・scope・有効期限のみを返す。今回の模擬テストは隔離したKeychain値とローカルcallbackを確認したが、OAuth同意と実API応答は別途確認が必要。
 
+開発版の`status`／`doctor`は、保存の有無と実行可能性を分けます。既存の`connected`は「認可情報が保存済み」の互換フィールドです。現在の状態は`authorization_state`（未設定、認可待ち、有効、更新必要、認可期限切れ）、`access_token_valid`／`refresh_token_valid`、scope別の`readiness.profile`／`readiness.videos`、次の操作を示す`next_action`で確認してください。有効期限とscopeが揃っていても、失効・アプリ審査・サーバー側の利用可否はローカルでは証明できません。`remote_verification: not_performed`を返し、実際の`profile --network`／`videos --network`の成功と区別します。破損した保存情報は固定エラーで拒否し、秘密値を出力しません。この診断追加は公開alpha.7後の開発機能です。
+
 `profile` は認可された本人の `open_id`・表示名・アバターURLを取得する。`videos` は本人が公開した動画のメタデータを最大20件ずつ読み、cursorで続きを指定できる。`video.list` は**読み取り用scope**であり、投稿権限ではない。OAuthの `refresh` もメディアを送らない。これらのネットワーク呼び出しは明示的な `--network` が必要で、HTTPSの公式host、固定endpoint、redirect禁止、10秒timeout、1MiB応答上限を使う。トークンやserverの生エラーをCLIへ出さない。
 
 投稿を希望する場合でも、Content Posting APIの別製品・scope・審査・利用者操作・対象動画の権利確認が必要。このクライアントには投稿処理を含めない。TikTok側のCMLや「最新の流行」をDisplay APIの動画一覧から推定して、作品への利用権や編集効果として自動採用しない。

@@ -301,6 +301,19 @@ def connect(*, scopes=SCOPES, keychain=None, transport=None, on_url=None, timeou
     return exchange(received[0], keychain=keychain, transport=transport)
 
 
+def _validate_stored_tokens(data):
+    """Validate private storage before using it or reporting readiness."""
+    if (not isinstance(data, dict)
+            or any(not isinstance(data.get(key), str) or not data[key]
+                   for key in ('access_token', 'refresh_token'))
+            or any(type(data.get(key)) is not int or data[key] <= 0
+                   for key in ('access_expires_at', 'refresh_expires_at'))
+            or not isinstance(data.get('scopes'), list)
+            or any(not isinstance(scope, str) or not scope for scope in data['scopes'])
+            or len(set(data['scopes'])) != len(data['scopes'])):
+        raise TikTokAPIError('Stored TikTok authorization is invalid')
+
+
 def _tokens(keychain=None):
     key, secret, _ = _config(keychain)
     raw = _store(key, keychain).get('tokens')
@@ -308,8 +321,7 @@ def _tokens(keychain=None):
         raise TikTokAPIError('TikTok authorization is not connected')
     try:
         data = json.loads(raw)
-        if not data['access_token'] or not data['refresh_token']:
-            raise ValueError()
+        _validate_stored_tokens(data)
     except (ValueError, KeyError, TypeError):
         raise TikTokAPIError('Stored TikTok authorization is invalid') from None
     return key, secret, data
@@ -331,20 +343,40 @@ def refresh(*, keychain=None, transport=None):
 def status(*, keychain=None):
     configured = {name: bool(os.environ.get(name)) for name in
                   ('TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET', 'TIKTOK_REDIRECT_URI')}
-    result = {'configured': configured, 'connected': False, 'keychain_configured': False}
+    result = {'configured': configured, 'connected': False, 'keychain_configured': False,
+              'authorization_state': 'unconfigured', 'access_token_valid': False,
+              'refresh_token_valid': False,
+              'readiness': {'profile': False, 'videos': False},
+              'remote_verification': 'not_performed', 'next_action': 'configure'}
     raw_config = (keychain if keychain is not None else Keychain()).get('config')
     if raw_config:
         result['keychain_configured'] = True
     if not all(configured.values()) and not raw_config:
         return result
     key, _, _ = _config(keychain)
+    result.update(authorization_state='authorization_required', next_action='connect')
     raw = _store(key, keychain).get('tokens')
     if raw:
         try:
             data = json.loads(raw)
+            _validate_stored_tokens(data)
+            now = time.time()
+            access_valid = data['access_expires_at'] > now
+            refresh_valid = data['refresh_expires_at'] > now
             result.update(connected=True, scopes=data['scopes'],
                           access_expires_at=data['access_expires_at'],
-                          refresh_expires_at=data['refresh_expires_at'])
+                          refresh_expires_at=data['refresh_expires_at'],
+                          access_token_valid=access_valid, refresh_token_valid=refresh_valid,
+                          authorization_state=('access_valid' if access_valid else
+                                               'refresh_required' if refresh_valid else
+                                               'authorization_expired'),
+                          readiness={name: access_valid and scope in data['scopes']
+                                     for name, scope in (('profile', 'user.info.basic'),
+                                                         ('videos', 'video.list'))},
+                          next_action=('profile_or_videos' if access_valid and any(
+                              scope in data['scopes'] for scope in SCOPES) else
+                              'connect' if access_valid else
+                              'refresh' if refresh_valid else 'connect'))
         except (ValueError, KeyError, TypeError):
             raise TikTokAPIError('Stored TikTok authorization is invalid') from None
     return result

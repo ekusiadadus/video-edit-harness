@@ -14,6 +14,9 @@ class DoctorTests(unittest.TestCase):
         self.assertTrue(all(result['required_commands'].values()))
         self.assertTrue(all(result['session_actions'].values()))
         self.assertTrue(all(result['skill_paths_present'].values()))
+        self.assertEqual(result['retime_features']['session_connected'], 'visual_and_speech')
+        self.assertTrue(result['retime_features']['session_audio_video'])
+        self.assertFalse(result['retime_features']['editable_fcp_retime'])
         self.assertNotIn('private-value', str(result))
         self.assertNotIn('another-private-value', str(result))
 

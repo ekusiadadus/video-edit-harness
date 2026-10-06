@@ -83,6 +83,64 @@ class TikTokAPITests(unittest.TestCase):
         self.assertEqual(api.status(keychain=self.storage)['scopes'], list(api.SCOPES))
         self.assertEqual(json.loads(self.storage.get('tokens'))['access_token'], 'secret_access')
 
+    def test_status_expiry_scope_readiness_and_no_remote_request(self):
+        self.connected()
+        tokens = json.loads(self.storage.get('tokens'))
+        tokens.update(access_expires_at=200, refresh_expires_at=400)
+        self.storage.set('tokens', json.dumps(tokens))
+        with patch.object(api, '_request', side_effect=AssertionError('No network')), \
+                patch.object(api.time, 'time', return_value=199):
+            state = api.status(keychain=self.storage)
+        self.assertEqual(state['authorization_state'], 'access_valid')
+        self.assertEqual(state['readiness'], {'profile': True, 'videos': True})
+        self.assertEqual(state['remote_verification'], 'not_performed')
+        self.assertNotIn('secret_access', json.dumps(state))
+        self.assertNotIn('secret_refresh', json.dumps(state))
+        # At the exact expiry, access is unusable even with stored credentials.
+        with patch.object(api.time, 'time', return_value=200):
+            state = api.status(keychain=self.storage)
+        self.assertTrue(state['connected'])  # Legacy stored-authorization flag.
+        self.assertEqual(state['authorization_state'], 'refresh_required')
+        self.assertEqual(state['next_action'], 'refresh')
+        self.assertFalse(any(state['readiness'].values()))
+        with patch.object(api.time, 'time', return_value=400):
+            state = api.status(keychain=self.storage)
+        self.assertEqual(state['authorization_state'], 'authorization_expired')
+        self.assertEqual(state['next_action'], 'connect')
+        tokens['scopes'] = ['user.info.basic']
+        self.storage.set('tokens', json.dumps(tokens))
+        with patch.object(api.time, 'time', return_value=100):
+            self.assertEqual(api.status(keychain=self.storage)['readiness'],
+                             {'profile': True, 'videos': False})
+
+    def test_status_unconfigured_and_configured_without_authorization(self):
+        with patch.dict(os.environ, {}, clear=True):
+            state = api.status(keychain=self.storage)
+        self.assertEqual(state['authorization_state'], 'unconfigured')
+        self.assertEqual(state['next_action'], 'configure')
+        state = api.status(keychain=self.storage)
+        self.assertEqual(state['authorization_state'], 'authorization_required')
+        self.assertEqual(state['next_action'], 'connect')
+        self.assertFalse(state['connected'])
+
+    def test_invalid_stored_authorization_rejects_before_network(self):
+        self.connected()
+        original = json.loads(self.storage.get('tokens'))
+        for key, bad in [('access_expires_at', True), ('refresh_expires_at', '400'),
+                         ('scopes', 'video.list'), ('scopes', [None]),
+                         ('scopes', ['video.list', 'video.list']),
+                         ('access_token', []), ('refresh_token', 12)]:
+            with self.subTest(key=key, value=bad):
+                broken = {**original, key: bad}
+                self.storage.set('tokens', json.dumps(broken))
+                with patch.object(api, '_request', side_effect=AssertionError('No network')):
+                    with self.assertRaisesRegex(api.TikTokAPIError, 'Stored TikTok authorization is invalid'):
+                        api.status(keychain=self.storage)
+                    with self.assertRaisesRegex(api.TikTokAPIError, 'Stored TikTok authorization is invalid'):
+                        api.profile(keychain=self.storage)
+                    with self.assertRaisesRegex(api.TikTokAPIError, 'Stored TikTok authorization is invalid'):
+                        api.refresh(keychain=self.storage)
+
     def test_callback_state_origin_expiry_and_redirect_rejected_before_network(self):
         auth = api.auth_url(keychain=self.storage)
         state = parse_qs(urlparse(auth['authorize_url']).query)['state'][0]

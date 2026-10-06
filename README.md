@@ -40,6 +40,8 @@ export VIDEO_EDIT_HARNESS_ROOT="$PWD"
 uv run video-harness doctor
 ```
 
+In the development checkout after alpha.7, doctor reports audio/video retime support for visual and speech sessions separately from editable FCP support. TikTok diagnostics distinguish saved authorization from unexpired access and scope-specific readiness; they do not verify the remote account. Follow [the connection guide](docs/TIKTOK_API.ja.md) and keep credentials in Keychain or the environment.
+
 **Codex:** start a new session in the checkout; all three skills are already in `.agents/skills/`. For other projects, copy the desired skill folders to `~/.agents/skills/` and keep the harness path above available.
 
 **Claude Code:** install the community plugin, then start a new session:
