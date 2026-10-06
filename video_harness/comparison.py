@@ -70,6 +70,17 @@ function controlsFor(index){return Array.isArray(rows[index].effect_controls)?ro
 function snapshot(state){return {values:new Map(state.values),ranges:new Map(state.ranges),anchors:new Map(state.anchors),disabled:new Set(state.disabled)};}
 function remember(state){state.history.push(snapshot(state));}
 function frameTime(frame,fps){const [n,d='1']=String(fps).split('/');return String(BigInt(frame)*BigInt(d))+'/'+n;}
+function speedRange(event,range,factor){
+if(!Number.isInteger(range.first) || !Number.isInteger(range.end) || range.first<0 || range.end>event.frame_count || range.end-range.first<(event.minimum_frames ?? 3))
+throw new Error('先に範囲を動画内の整数フレームで指定してください');
+let length=Math.round((event.end_frame_exclusive-event.first_frame)*factor);
+if(length<(event.minimum_frames ?? 3))throw new Error('この効果時間は短すぎます。範囲を変更してください');
+// Match parity so both endpoints stay integral without moving the midpoint.
+if(length%2!==(range.end-range.first)%2)length+=1;
+const first=(range.first+range.end-length)/2,end=first+length;
+if(length<(event.minimum_frames ?? 3) || first<0 || end>event.frame_count)
+throw new Error('この効果時間は動画の範囲外、または短すぎます。範囲を変更してください');
+return {first,end};}
 function operationsFor(index){const state=staged[index];return controlsFor(index).flatMap(event=>{
 if(state.disabled.has(event.id))return [{action:'remove',id:event.id}];
 const changes={},strength=state.values.get(event.id),range=state.ranges.get(event.id),anchor=state.anchors.get(event.id);
@@ -111,6 +122,15 @@ numeric('終了フレーム（含まない） ',range.end,1,event.frame_count,'1
 if(event.anchor){for(const [key,label] of [['anchor_x','ズーム位置・横（左0／右1） '],['anchor_y','ズーム位置・縦（上0／下1） ']]){
 const anchor=state.anchors.get(event.id) ?? event.anchor;
 numeric(label,anchor[key],0,1,'any',v=>state.anchors.set(event.id,{...(state.anchors.get(event.id) ?? anchor),[key]:v}));}}
+if(event.adjustable_speed){const speed=document.createElement('span');speed.textContent='効果時間（動きの速さ） ';
+for(const [text,factor] of [['短く・速め',.5],['元の長さ',1],['長く・ゆっくり',1.5]]){
+const button=document.createElement('button');button.type='button';button.textContent=text;button.disabled=state.disabled.has(event.id);
+button.onclick=()=>{try{const range=state.ranges.get(event.id) ?? {first:event.first_frame,end:event.end_frame_exclusive};
+const next=speedRange(event,range,factor);if(next.first===range.first && next.end===range.end){message('効果時間は同じです。');return;}
+remember(state);state.ranges.set(event.id,next);renderEffects();
+message('効果時間を '+(next.end-next.first)+' フレームに変更。映像・音楽の再生速度は変えません。反映後の動画を確認してください。');
+}catch(error){message(error.message);}};speed.append(button);}
+item.append(speed);}
 const offLabel=document.createElement('label');offLabel.textContent='オフ ';
 const off=document.createElement('input');off.type='checkbox';off.checked=state.disabled.has(event.id);
 off.addEventListener('change',()=>{remember(state);if(off.checked)state.disabled.add(event.id);

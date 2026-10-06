@@ -43,6 +43,9 @@ class ComparisonAdjustmentTests(unittest.TestCase):
                 'music': 'off', 'sfx': 'off', 'beat_sync': 'off'}, 'video_effects': setting},
                 'codex', 'Original zoom interval')
             original = session.render(preview=False, candidate_id=base['id'])
+            from video_harness.video_effects import resolve_effects
+            controls = comparison_effect_controls(resolve_effects(setting, mapping), mapping)
+            self.assertTrue(controls[0]['adjustable_speed'])
             changes = {'strength': 1, 'output_start': '2/5', 'output_end': '4/5',
                        'parameters': {'anchor_x': .5, 'anchor_y': .5}}
             receipt = {'version': 3, 'kind': 'comparison_selection_proposal', 'render_id': original['id'],
@@ -236,7 +239,8 @@ class ComparisonControlsScriptTests(unittest.TestCase):
                  'sha256': 'b' * 64, 'effect_controls': [
                      {'id': 'pulse', 'kind': 'smooth_zoom', 'strength': .005, 'adjustable_strength': True,
                       'fps': '30000/1001', 'frame_count': 30, 'first_frame': 3, 'end_frame_exclusive': 9,
-                      'adjustable_range': True, 'anchor': {'anchor_x': .5, 'anchor_y': .5}},
+                      'adjustable_range': True, 'adjustable_speed': True, 'minimum_frames': 3,
+                      'anchor': {'anchor_x': .5, 'anchor_y': .5}},
                      {'id': 'mono', 'kind': 'monochrome', 'strength': 1, 'adjustable_strength': False}]}]
         script = re.search(r'<script>(.*?)</script>', comparison_page(rows), re.S).group(1)
         harness = r'''
@@ -257,6 +261,9 @@ const context={console,Map,Set,Number,JSON,Array,String,Promise,Blob,
  document:{querySelector(s){return ids[s]??=new Element();},querySelectorAll(s){return ({video:videos,article:articles,'[data-choice]':choices,'[data-audio]':audios})[s];},createElement(){return new Element();}},
  requestAnimationFrame(){},setTimeout(){},URL:{createObjectURL(blob){saved=blob;return 'blob:test';},revokeObjectURL(){}}};
 vm.runInNewContext(script,context);
+assert.throws(()=>context.speedRange({first_frame:0,end_frame_exclusive:3,frame_count:30,minimum_frames:3},{first:0,end:3},.5),/短すぎ/);
+for(const range of [{first:10,end:11},{first:-3,end:9},{first:9,end:3},{first:25,end:31},{first:3.5,end:9}]){
+assert.throws(()=>context.speedRange(rows[1].effect_controls[0],range,1),/先に範囲/);}
 const save=async()=>{ids['#save'].click();return JSON.parse(await saved.text());};
 const input=(element,value)=>{element.value=value;element.events.input();};
 (async()=>{
@@ -291,6 +298,23 @@ const input=(element,value)=>{element.value=value;element.events.input();};
  const lastSaved=saved;ids['#save'].click();assert.equal(saved,lastSaved);
  assert.match(ids['#status'].textContent,/範囲/);
  ids['#undo-effects'].click();assert.equal((await save()).version,1);
+ const speedButtons=()=>list.children[0].children.find(e=>e.textContent==='効果時間（動きの速さ） ').children;
+ speedButtons()[0].click();receipt=await save();assert.equal(receipt.version,3);
+ assert.deepEqual(receipt.effect_operations[0].changes,{output_start:'4004/30000',output_end:'8008/30000'});
+ assert.equal(list.children[0].children[2].children[0].value,'4');
+ assert.equal(list.children[0].children[3].children[0].value,'8');
+ speedButtons()[0].click(); // Repeating a preset must not shrink repeatedly.
+ assert.deepEqual(await save(),receipt);
+ speedButtons()[1].click();assert.equal((await save()).version,1);
+ ids['#undo-effects'].click();assert.deepEqual(await save(),receipt);
+ ids['#reset-effects'].click();assert.equal((await save()).version,1);
+ speedButtons()[2].click();receipt=await save();
+ assert.deepEqual(receipt.effect_operations[0].changes,{output_start:'1001/30000',output_end:'11011/30000'});
+ ids['#undo-effects'].click();assert.equal((await save()).version,1);
+ const edgeStart=list.children[0].children[2].children[0];edgeStart.value='27';edgeStart.events.change();
+ const edgeEnd=list.children[0].children[3].children[0];edgeEnd.value='30';edgeEnd.events.change();
+ const edgeReceipt=await save();speedButtons()[2].click();
+ assert.match(ids['#status'].textContent,/範囲外/);assert.deepEqual(await save(),edgeReceipt);
 })().catch(error=>{console.error(error);process.exitCode=1;});
 '''
         subprocess.run(['node', '-e', 'const rows=' + json.dumps(rows) + ';const script=' +

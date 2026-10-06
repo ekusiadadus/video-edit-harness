@@ -6,6 +6,8 @@ The development checkout adds `session motion-cuts` for reviewed cut-position pr
 
 The development checkout also exercises beat cuts, picture-speed ramps, zooms, trails and titles together on real dance footage. New visual retime candidates retain actual shot boundaries, allowing fresh trails across speed changes within one shot while rejecting trails across cuts. See [retime limits](docs/RETIME.ja.md) and [real-media evidence](docs/EDITING_PATTERNS_IMPLEMENTATION_STATUS.ja.md). TikTok browser login, API connection and native music/effect application are separate states; local effects are not presented as TikTok-native execution.
 
+Development comparison pages offer shorter/original/longer effect time for smooth zoom and saturation, preserving the midpoint without changing footage or BGM speed. Undo and matched interval previews remain available. See [controls and limits](docs/COMPARISON_ADJUSTMENTS.ja.md).
+
 English | [日本語](README.ja.md)
 
 Turn local spoken footage into coherent edits with **Codex or Claude Code**: shorter unnecessary pauses, scene-appropriate color, clear audio, matching captions and an editable Final Cut Pro timeline. You choose the story and review the result; the harness keeps source hashes, revisions and delivery evidence together.

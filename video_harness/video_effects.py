@@ -274,6 +274,7 @@ def comparison_effect_controls(plan, mapping=None):
                 minimum_frames=(3 if event['type'] in {'smooth_zoom', 'saturation_pulse'}
                                 else event['parameters']['history_frames'] if event['type'] == 'motion_trail' else 1),
                 adjustable_range=not event['type'].startswith('tracked_'))
+            row['adjustable_speed'] = event['type'] in {'smooth_zoom', 'saturation_pulse'}
             if event['type'] == 'smooth_zoom':
                 row['anchor'] = {key: event['parameters'][key] for key in ('anchor_x', 'anchor_y')}
     return controls
