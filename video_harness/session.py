@@ -845,7 +845,8 @@ class Session:
     def propose_tracking(self, render_id, box, first_frame, end_frame, actor, note,
                          *, algorithm='csrt', model_path=None, max_scale=1.12,
                          strength=.65, corrections=None, effect='tracked_zoom',
-                         title_parameters=None, title_version=1, background_parameters=None, mask_corrections=None):
+                         title_parameters=None, title_version=1, background_parameters=None, mask_corrections=None,
+                         mask_backend='grabcut', mask_threshold=.5):
         """Track observed picture and propose an unadopted zoom or readable label."""
         from fractions import Fraction
         from .tracking import track_video,validate_track
@@ -870,9 +871,18 @@ class Session:
         if effect=='tracked_background':
             from .effect_catalog import validate_background_controls
             background_parameters=validate_background_controls(background_parameters)
-            if algorithm=='pose' and (not isinstance(mask_corrections,dict) or set(mask_corrections)!=set(range(first_frame,end_frame))):
+            import math
+            if not isinstance(mask_backend,str) or mask_backend not in {'grabcut','pose'}:
+                raise ValueError('Choose grabcut or pose mask backend')
+            if isinstance(mask_threshold,bool) or not isinstance(mask_threshold,(int,float)) or not math.isfinite(mask_threshold) or not 0 < mask_threshold < 1:
+                raise ValueError('Mask threshold must be finite and strictly between 0 and 1')
+            if mask_backend=='pose' and (algorithm!='pose' or model_path is None or not Path(model_path).is_file()):
+                raise ValueError('Pose masks require pose tracking and an existing local model')
+            if mask_backend=='grabcut' and mask_threshold != .5:
+                raise ValueError('Mask threshold requires pose masks')
+            if algorithm=='pose' and mask_backend=='grabcut' and (not isinstance(mask_corrections,dict) or set(mask_corrections)!=set(range(first_frame,end_frame))):
                 raise ValueError('Torso pose boxes need a manual full-size mask for every background-effect frame')
-        elif background_parameters is not None or mask_corrections is not None:
+        elif background_parameters is not None or mask_corrections is not None or mask_backend!='grabcut' or mask_threshold!=.5:
             raise ValueError('Background parameters and masks require tracked_background')
         source=self.tracking_source(render_id)
         mapping=read(source['mapping']['path']);rate=Fraction(mapping['fps'])
@@ -901,7 +911,8 @@ class Session:
         if effect=='tracked_background':
             from .subject_mask import prepare_masks
             folder=self.root/'artifacts'/('mask-'+uuid.uuid4().hex[:12])
-            prepare_masks(source['source']['path'],track_path,folder,actor,note,corrections=mask_corrections)
+            prepare_masks(source['source']['path'],track_path,folder,actor,note,corrections=mask_corrections,
+                          backend=mask_backend,model_path=model_path if mask_backend=='pose' else None,threshold=mask_threshold)
             mask_manifest=folder/'manifest.json'
         event={'id':'track-'+uuid.uuid4().hex[:12],'type':effect,
                'output_start':str(Fraction(first_frame,1)/rate),'output_end':str(Fraction(end_frame,1)/rate),

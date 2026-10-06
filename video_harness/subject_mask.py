@@ -207,7 +207,7 @@ def prepare_masks(source, track_path, output_dir, actor, reason, corrections=Non
             else:
                 frames = decoded
             for frame, bgr in frames:
-                if backend == 'pose':
+                if backend == 'pose' and frame not in selected:
                     semantic = semantic_rows[frame-first]
                     if (not isinstance(semantic, dict) or type(semantic.get('frame')) is not int or
                             semantic['frame'] != frame-first or

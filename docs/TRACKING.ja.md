@@ -124,3 +124,15 @@ uv run video-harness session track-effect SESSION RENDER_ID --effect tracked_bac
 方式の根拠：[OpenCV公式GrabCut解説](https://docs.opencv.org/4.x/d8/d83/tutorial_py_grabcut.html)、[FFmpeg公式maskedmerge](https://ffmpeg.org/ffmpeg-filters.html#maskedmerge)。深度推定、AI人物マッティング、自然な髪の半透明の復元は別の未実装機能です。公開済みalpha.6には含まれません。
 
 実ダンスでの確認（2026-10-06、agentによる視覚検査）：広い全身寄りの枠を使った8フレームではCSRT追跡は有効でしたが、GrabCutが背景の壁と天井照明まで前景として保持しました。このマスクは未採用です。二値マスクの成立や追跡の成功を、その人物を正しく切り抜けた証拠にしないでください。半透明マッティングや対象の意味理解は備えていません。
+
+### 開発版：人物マスクを使う
+
+alpha.7以後の開発版では、`--mask-backend pose --algorithm pose --model /path/to/pose_landmarker_full.task` を明示すると、MediaPipeの人物マスクで背景を抑える候補を作ります。`--box` は最初のフレームで観察した胴体の小さな領域を指定してください。全身の輪郭は人物マスクから取得します。既定は従来のGrabCutで、新方式へ自動移行しません。
+
+```sh
+uv run --no-sync video-harness session track-effect SESSION RENDER_ID --effect tracked_background --algorithm pose --model /path/to/pose_landmarker_full.task --mask-backend pose --mask-threshold 0.5 --box 0.63 0.43 0.75 0.77 --first-frame 0 --end-frame 8 --background-parameters-file background.json --actor codex --note '人物の輪郭を確認する未採用候補'
+```
+
+この枠・区間はコマンド形式の例です。実素材の観察値へ置き換えてください。モデルを自動取得せず、ローカルファイルのSHA・サイズ、実行ライブラリの版、しきい値、素材・追跡・フレームとの対応を保存します。再開時も同じモデルが必要です。`--mask-threshold` は0より大きく1より小さい有限値で、人物マスク方式にだけ適用します。
+
+人物の取り違え、欠落したマスク、追跡と異なる胴体、追跡喪失は拒否します。手動PNGによる修正と、完成renderのSHAに結び付けた輪郭レビューが必要です。手先・髪・他の人物との重なりまで正しく切り抜ける保証はありません。短い実素材の試行では壁・天井の除外が改善しましたが、手先の欠けと別の人物の腕の混入が残っています。

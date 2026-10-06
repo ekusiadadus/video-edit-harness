@@ -109,6 +109,9 @@ def parser():
     a.add_argument('--effect',choices=['tracked_zoom','tracked_title','tracked_background'],default='tracked_zoom')
     a.add_argument('--background-parameters-file',type=Path,help='Background dim, saturation and feather JSON')
     a.add_argument('--mask-corrections-file',type=Path,help='Absolute output frame numbers to full-size binary PNG paths')
+    a.add_argument('--mask-backend',choices=['grabcut','pose'],default='grabcut',
+                   help='Optional pose masks require --algorithm pose and --model')
+    a.add_argument('--mask-threshold',type=float,default=.5,help='Pose-mask foreground probability threshold')
     a.add_argument('--title-parameters-file',type=Path,help='Label text, placement and readable style JSON')
     a.add_argument('--title-version',type=int,choices=[1,2],default=1,
                    help='1: explicit lines; 2: measured Japanese/English wrapping (text-layout extra)')
@@ -247,7 +250,8 @@ def dispatch(args):
             effect=args.effect,title_parameters=_object(args.title_parameters_file) if args.title_parameters_file else None,
             title_version=args.title_version,
             background_parameters=_object(args.background_parameters_file) if args.background_parameters_file else None,
-            mask_corrections=_read_mask_corrections(args.mask_corrections_file) if args.mask_corrections_file else None)
+            mask_corrections=_read_mask_corrections(args.mask_corrections_file) if args.mask_corrections_file else None,
+            mask_backend=args.mask_backend,mask_threshold=args.mask_threshold)
     if action == 'direction':
         return session.propose_direction(_object(args.request_file), args.actor, args.note,
                                          preference=args.preference,

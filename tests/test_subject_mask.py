@@ -135,9 +135,6 @@ class SubjectMaskArtifactTests(unittest.TestCase):
         validate_masks(manifest)
 
 
-if __name__ == '__main__':
-    unittest.main()
-
 
 class SemanticMaskArtifactTests(unittest.TestCase):
   def _fixture(self, root):
@@ -262,3 +259,17 @@ class SemanticMaskArtifactTests(unittest.TestCase):
           with self.assertRaisesRegex(ValueError, 'changed during generation|model changed'):
             prepare_masks(source,track_path,root/'masks','codex','Tamper probe',backend='pose')
         assert not (root/'masks').exists()
+
+  def test_manual_mask_can_replace_lost_semantic_frame_without_fallback(self):
+    with tempfile.TemporaryDirectory() as folder:
+      root=Path(folder)
+      mask=np.zeros((64,64),np.uint8);mask[20:40,20:40]=255
+      correction=root/'corrected.png';cv2.imwrite(str(correction),mask)
+      rows=[{'frame':0,'state':'lost','box':None,'mask':None,'quality':{'reason':'missing_mask'}},
+            {'frame':1,'state':'manual','box':[.15,.15,.85,.85],'mask':mask,'quality':{}}]
+      doc,_,_,_=self._run(root,rows=rows,manual=correction)
+      self.assertEqual([r['origin'] for r in doc['rows']],['manual','pose'])
+      self.assertTrue(np.array_equal(cv2.imread(doc['rows'][0]['mask_path'],0),mask))
+
+if __name__ == '__main__':
+    unittest.main()

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added opt-in, local-model-bound pose segmentation masks to background-effect session candidates, with sticky identity loss, track/torso matching, binary PNG corrections and exact-render contour review. Legacy GrabCut masks remain the default.
+- Real full-resolution trial retained audio PCM and excluded walls/ceiling, but hand/overlap defects remain; no artistic adoption or human acceptance is claimed.
+
 ## v0.1.0-alpha.7 — 2026-10-06
 
 - Added tracked readable labels, Japanese/English measured wrapping, title collision checks and visual pipeline 2 to grade footage before overlays.

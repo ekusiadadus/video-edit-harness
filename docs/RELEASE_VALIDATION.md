@@ -1,3 +1,10 @@
+# Post-alpha.7 semantic-mask development / 開発版の検証
+
+- Optional pose masks are connected to background-effect session candidates and CLI flags. Legacy GrabCut/schema-1 masks remain unchanged by default; semantic schema-2 masks seal source, track, model SHA/bytes, library version, threshold and exact frame interval. Manual binary corrections can replace a lost semantic frame while all remaining frames still require valid selection or explicit correction.
+- Local full suite: 424 tests passed (166.913 seconds). Final focused tests after the last preflight guard change: 13 tests passed. The candidate remains unadopted, preserves picture mapping, and requires an exact-render subject-mask review.
+- Actual 1920×1080 local dance trial: 8 full-resolution masks applied over a 245-frame/24 fps derivative; full decode and unchanged decoded audio PCM passed. Agent inspection saw improved wall/ceiling exclusion but incomplete hands/overlapping limbs. No human acceptance or final YouTube delivery is claimed. Evidence: `output/implementation-maya/semantic-mask-fullsize-20261006/technical-report.json`, `effects-evidence.json`, `contact-sheet.jpg` and `visual-assessment.json`.
+- This development feature is not included in the immutable alpha.7 release. Model files and real footage/music are not software release assets. Remaining motion transitions, semantic/depth quality, FCP/external finishing and final MP4 requirements stay open.
+
 # Alpha.7 verification / 検証範囲
 
 Alpha.7 was published as the owner-authorized software prerelease at commit `4a726406b2989ce9e2025e2edbce4d5e761af95b`. It includes tracked labels/text layout, pipeline 2, protected speech retime, source-bound J/L cuts, comparison selection, opt-in trails and experimental background masks. The full MAYA implementation plan and requested final YouTube MP4 remain incomplete. The user will upload the MP4 personally; no platform post is part of this release.
