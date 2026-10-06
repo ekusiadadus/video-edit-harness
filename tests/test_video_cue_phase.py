@@ -3,6 +3,7 @@
 from fractions import Fraction
 from pathlib import Path
 import hashlib
+import math
 import subprocess
 import tempfile
 import unittest
@@ -30,7 +31,7 @@ def pictures(path, width, height):
 
 
 class VideoCuePhaseTests(unittest.TestCase):
-    def _case(self, output_fps, source_fps, alpha=False, coarse_clock=False):
+    def _case(self, output_fps, source_fps, alpha=False, coarse_clock=False, varying_background=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             width, height = 160, 90
@@ -47,9 +48,19 @@ class VideoCuePhaseTests(unittest.TestCase):
                 '-framerate', str(source_fps), '-i', 'pipe:0', '-frames:v', str(count),
                 '-c:v', 'ffv1' if alpha else 'libx264', '-pix_fmt', 'bgra' if alpha else 'yuv420p',
                 str(source)], input=frames.tobytes(), check=True, capture_output=True)
-            run('-f', 'lavfi', '-i', f'color=c=0x202030:s={width}x{height}:r={output_fps}:d=1',
-                '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=1',
-                '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', base)
+            if varying_background:
+                background = np.empty((math.ceil(Fraction(output_fps)), height, width, 3), dtype=np.uint8)
+                for i in range(len(background)):
+                    background[i] = [(i*17+20)%220, (i*31+30)%220, (i*43+40)%220]
+                subprocess.run(['ffmpeg', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+                    '-s:v', f'{width}x{height}', '-r', str(output_fps), '-i', 'pipe:0',
+                    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=1',
+                    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-t', '1', str(base)],
+                    input=background.tobytes(), capture_output=True, check=True)
+            else:
+                run('-f', 'lavfi', '-i', f'color=c=0x202030:s={width}x{height}:r={output_fps}:d=1',
+                    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=1',
+                    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', base)
             if coarse_clock:
                 remux = root/'coarse-base.mkv'
                 run('-i', base, '-map', '0', '-c', 'copy', '-avoid_negative_ts', 'disabled', remux)
@@ -64,17 +75,18 @@ class VideoCuePhaseTests(unittest.TestCase):
                       'position': 'top', 'opacity': .6}
             old = {**common, 'output_start': str(Fraction(old_first, 1) / Fraction(output_fps)),
                    'output_end': str(Fraction(old_first + original_count, 1) / Fraction(output_fps))}
-            observed_clock = capture_overlay_clock(base, old, Fraction(output_fps))
-            mapped = {**common, 'output_start': str(Fraction(new_first, 1) / Fraction(output_fps)),
-                      'output_end': str(Fraction(new_first + len(selected), 1) / Fraction(output_fps)),
-                      'phase_map': {'version': 1, 'original_start_frame': old_first,
-                                    'original_frame_count': original_count,
-                                    'original_time_base': observed_clock['original_time_base'],
-                                    'original_timestamps': observed_clock['original_timestamps'],
-                                    'frames': selected}}
             records = [registered(source)]
             old_output, new_output = root / 'old.mp4', root / 'mapped.mp4'
-            render_overlays(base, [old], records, old_output, 1)
+            old_result = render_overlays(base, [old], records, old_output, 1)
+            mapped = {**common, 'output_start': str(Fraction(new_first, 1) / Fraction(output_fps)),
+                      'output_end': str(Fraction(new_first + len(selected), 1) / Fraction(output_fps)),
+                      'phase_map': {'version': 2, 'original_start_frame': old_first,
+                                    'original_frame_count': original_count,
+                                    'original_layer': old_result['video_cue_layers'][0]['layer'],
+                                    'original_cue_sha256': old_result['video_cue_clocks'][0]['original_cue_sha256'],
+                                    'frames': selected}}
+            with self.assertRaisesRegex(ValueError, 'baked placement changed'):
+                render_overlays(base, [{**mapped, 'opacity': .3}], records, root/'stale-placement.mp4', 1)
             result = render_overlays(base, [mapped], records, new_output, 1)
             def pcm(path):
                 return subprocess.check_output(['ffmpeg', '-v', 'error', '-nostdin', '-i', str(path),
@@ -84,9 +96,24 @@ class VideoCuePhaseTests(unittest.TestCase):
             retimed = pictures(new_output, width, height)
             # Compare the actual placement ROI, including lossy output encoding.
             roi = (slice(10, 40), slice(25, 135))
+            self.assertEqual(len(original), len(retimed))
+            saved_samples = None
+            if varying_background:
+                raw = subprocess.check_output(['ffmpeg', '-v', 'error', '-i',
+                    old_result['video_cue_layers'][0]['layer']['path'], '-fps_mode', 'passthrough',
+                    '-f', 'rawvideo', '-pix_fmt', 'rgba', 'pipe:1'])
+                saved_samples = np.frombuffer(raw, np.uint8).reshape(-1, height, width, 4)
+                self.assertFalse(np.array_equal(original[0,80,80], original[2,80,80]))
+                outside = np.abs(retimed[:,70:85].astype(float)-original[:,70:85].astype(float))
+                self.assertLess(float(np.mean(outside)), 4, 'uncovered primary output clock changed')
             for new_index, old_index in enumerate(selected):
-                difference = np.abs(retimed[new_first + new_index][roi].astype(np.int16) -
-                                    original[old_first + old_index][roi].astype(np.int16))
+                expected = original[old_first + old_index][roi].astype(float)
+                if varying_background:
+                    sample = saved_samples[old_index][roi].astype(float)
+                    opacity = sample[:,:,3:4]/255
+                    background = original[new_first + new_index,80,80].astype(float)
+                    expected = sample[:,:,:3]*opacity + background*(1-opacity)
+                difference = np.abs(retimed[new_first + new_index][roi].astype(float) - expected)
                 self.assertLess(float(np.mean(difference)), 8)
             provenance = result['video_phase_layers'][0]
             self.assertEqual(provenance['cue_id'], 'secondary-cue')
@@ -105,6 +132,12 @@ class VideoCuePhaseTests(unittest.TestCase):
     def test_observed_millisecond_base_clock_is_preserved(self):
         self._case('30000/1001', '24', coarse_clock=True)
 
+    def test_varying_primary_clock_with_coarse_aac_offset(self):
+        self._case('30000/1001', '24', coarse_clock=True, varying_background=True)
+
+    def test_varying_primary_clock_native_60(self):
+        self._case('60', '60', varying_background=True)
+
     def test_video_source_alpha_is_preserved(self):
         self._case('30', '30', alpha=True)
 
@@ -120,7 +153,7 @@ class VideoCuePhaseTests(unittest.TestCase):
                    'output_start': '0', 'output_end': '2/30',
                    'source_start': '0', 'source_end': '4/30',
                    'phase_map': {'version': 1, 'original_start_frame': 0,
-                                 'original_frame_count': 3, 'original_time_base': '1/15360',
+                                 'original_frame_count': 3, 'original_time_base': '1/15360', 'original_input_pts_shift': 0,
                                  'original_timestamps': [0, 512, 1024], 'frames': [0, 2]}}
             for bad in ({'version': 1, 'original_start_frame': 0, 'original_frame_count': 3, 'frames': [0, 3]},
                         {'version': 1, 'original_start_frame': 0, 'original_frame_count': 3, 'frames': [2, 1]},

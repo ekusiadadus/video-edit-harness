@@ -112,6 +112,12 @@ def parser():
     a.add_argument('render_id')
     a=command('retime-source',actor=None)
     a.add_argument('render_id')
+    a=command('caption-source',actor=None)
+    a.add_argument('render_id')
+    a=command('caption-groups',note=True)
+    a.add_argument('render_id')
+    a.add_argument('--spec-file',type=Path,required=True,
+                   help='Exact word-occurrence groups, language, protected phrases and reading thresholds')
     a=command('retime',note=True)
     a.add_argument('render_id')
     a.add_argument('--request-file',type=Path,required=True)
@@ -264,6 +270,8 @@ def dispatch(args):
     if action == 'motion-cuts': return session.propose_motion_cut(args.render_id,_object(args.request_file),args.actor,args.note)
     if action == 'tracking-source': return session.tracking_source(args.render_id)
     if action == 'retime-source': return session.retime_source(args.render_id)
+    if action == 'caption-source': return session.caption_source(args.render_id)
+    if action == 'caption-groups': return session.propose_caption_groups(args.render_id,_object(args.spec_file),args.actor,args.note)
     if action == 'retime': return session.propose_retime(args.render_id,_object(args.request_file),args.actor,args.note,timeline_settings=args.timeline_settings)
     if action == 'track-effect':
         from .tracking_cli import read_corrections

@@ -178,6 +178,12 @@ def _copy_portrait_caption_layout(derivative, folder, files):
 
 
 def bundle(render, brief, target, folder, accepted=False, derivative=None):
+    if render['files'].get('captions'):
+        reference = render['files']['captions']
+        if fingerprint(reference['path']) != reference:
+            raise ValueError('Caption evidence changed before delivery')
+        from .caption_timing import verify_caption_evidence
+        verify_caption_evidence(read(reference['path']), render['files']['subtitles']['sha256'])
     production = None
     prepared_fcp = None
     if render['files'].get('production'):
@@ -202,7 +208,7 @@ def bundle(render, brief, target, folder, accepted=False, derivative=None):
     folder.mkdir(parents=True, exist_ok=False)
     files = {}
     labels = ['video', 'audio', 'xml', 'subtitles', 'lut', 'mapping', 'plan']
-    labels += [key for key in ('transitions', 'pre_transition_mapping', 'motion_template') if key in render['files']]
+    labels += [key for key in ('transitions', 'pre_transition_mapping', 'motion_template', 'captions') if key in render['files']]
     for label in labels:
         if production and (label == 'xml' or label == 'audio' and not audio_allowed):
             continue

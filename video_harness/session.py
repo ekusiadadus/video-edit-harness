@@ -294,6 +294,16 @@ class Session:
                 check_ref(render[key])
         for ref in render['files'].values():
             check_ref(ref)
+        if render['files'].get('overlays'):
+            layers = read(render['files']['overlays']['path']).get('video_cue_layers', [])
+            for index, row in enumerate(layers):
+                reference = row['layer']
+                registered = render['files'].get(f'overlay_layer_{index}')
+                if registered != {key: reference[key] for key in ('path', 'bytes', 'sha256')}:
+                    raise ValueError('Rendered overlay layer reference is not sealed')
+        if render['files'].get('captions'):
+            from .caption_timing import verify_caption_evidence
+            verify_caption_evidence(read(render['files']['captions']['path']), render['files']['subtitles']['sha256'])
         if render['files'].get('production'):
             from .production import verify_production
             verify_production(read(render['files']['production']['path']))
@@ -674,7 +684,7 @@ class Session:
         require_note(note)
         allowed = {'depth_layer', 'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
-                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'fcp_audio_automation', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version'}
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'fcp_audio_automation', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version', 'caption_groups'}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError('Only color/audio/render project settings can change here')
         with self._lock():
@@ -718,7 +728,7 @@ class Session:
         actor_name(actor)
         allowed = {'depth_layer', 'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
-                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'fcp_audio_automation', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version'}
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'fcp_audio_automation', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version', 'caption_groups'}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError('Candidate changes must be render settings only')
         with self._lock():
@@ -848,6 +858,33 @@ class Session:
         candidate=self.create_candidate({'audio_cuts':setting},actor,note,
                         expected_project=state['project'],base_render_id=render_id)
         return {'candidate':candidate,'adopted':False,'review_required':True}
+
+    def caption_source(self, render_id):
+        """Return sealed, observed word occurrences for a grouping proposal."""
+        state = self._load(); self._verify(state)
+        render = self._find_render(state, render_id); self._verify_render(render)
+        if read(render['project']['path']).get('edit_basis') == 'visual':
+            raise ValueError('Caption groups require transcript-backed speech words')
+        if 'captions' not in render['files']:
+            raise ValueError('Render has no sealed caption word stream; render the original edit again')
+        evidence = read(render['files']['captions']['path'])
+        from .caption_timing import verify_caption_evidence
+        verify_caption_evidence(evidence, render['files']['subtitles']['sha256'])
+        return {'render_id': render_id, 'render_sha256': render['files']['video']['sha256'],
+                'word_stream_sha256': evidence['word_stream_sha256'],
+                'words': evidence['words'], 'junctions': evidence['junctions'],
+                'timing_basis': evidence['timing_basis'], 'review_required': True}
+
+    def propose_caption_groups(self, render_id, spec, actor, note):
+        require_note(note); actor_name(actor)
+        state = self._load(); self._idle(state); self._verify(state)
+        stream = self.caption_source(render_id)
+        from .caption_groups import group_reviewed_captions
+        report = group_reviewed_captions(stream['words'], spec, junctions=stream['junctions'])
+        candidate = self.create_candidate({'caption_groups': spec}, actor, note,
+                    expected_project=state['project'], base_render_id=render_id)
+        return {'candidate': candidate, 'caption_proposal': report,
+                'adopted': False, 'review_required': True}
 
     def retime_source(self, render_id):
         state=self._load();self._verify(state)
@@ -1358,6 +1395,14 @@ class Session:
             files['production'] = fingerprint(folder / 'production.json')
         if (folder / 'overlay-evidence.json').is_file():
             files['overlays'] = fingerprint(folder / 'overlay-evidence.json')
+            for index, row in enumerate(read(files['overlays']['path']).get('video_cue_layers', [])):
+                reference = row['layer']
+                actual = fingerprint(reference['path'])
+                if actual != {key: reference[key] for key in ('path', 'bytes', 'sha256')}:
+                    raise ValueError('Rendered overlay layer changed before registration')
+                files[f'overlay_layer_{index}'] = actual
+        if (folder / 'caption-evidence.json').is_file():
+            files['captions'] = fingerprint(folder / 'caption-evidence.json')
         if (folder / 'effects-evidence.json').is_file():
             files['effects'] = fingerprint(folder / 'effects-evidence.json')
         if (folder / 'depth-evidence.json').is_file():

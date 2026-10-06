@@ -102,13 +102,18 @@ class VisualSettingMigrationTests(unittest.TestCase):
                "output_end": "1/6", "source_start": "0", "source_end": "1", "reason": "Observed video"}
         cfg = config(cue_plan={"version": 1, "mapping_sha256": digest(old), "cues": [cue]})
         with patch("video_harness.retime_settings.validate_cues"):
-            clock = {'original_start_frame': 2, 'original_frame_count': 3,
-                     'original_time_base': '1/30', 'original_timestamps': [2, 3, 4]}
+            layer = {'path': '/sealed.mkv', 'sha256': 'a'*64, 'bytes': 10,
+                     'width': 160, 'height': 90, 'frame_count': 3, 'fps': '30/1'}
+            clock = {'original_start_frame': 2, 'original_frame_count': 3, 'original_layer': layer, 'original_cue_sha256': 'a'*64,
+                     'original_time_base': '1/30', 'original_input_pts_shift': 0, 'original_timestamps': [2, 3, 4]}
             result = self.migrate(cfg, old, video_clocks={'video': clock})
         moved = result["changes"]["cue_plan"]["cues"][0]
-        self.assertEqual(moved["phase_map"], {"version": 1, "original_start_frame": 2, "original_frame_count": 3, "original_time_base": "1/30",
-                                             "original_timestamps": [2, 3, 4], "frames": [0, 0, 1, 1, 2, 2, 2]})
+        self.assertEqual(moved["phase_map"], {"version": 2, "original_start_frame": 2, "original_frame_count": 3,
+                                             "original_layer": layer, "original_cue_sha256": "a"*64, "frames": [0, 0, 1, 1, 2, 2, 2]})
         self.assertEqual(result["evidence"]["items"][0]["content_policy"], "original_output_frame_video_content")
+        with self.assertRaisesRegex(ValueError, 'sealed overlay layer'):
+            self.migrate(cfg, old, video_clocks={'video': {key: value for key, value in clock.items()
+                                                         if key != 'original_layer'}})
 
     def test_sfx_requires_complete_one_to_one_content(self):
         old = mapping()
@@ -120,6 +125,23 @@ class VisualSettingMigrationTests(unittest.TestCase):
             for frames in ([0, 1, 3, 4, 5], [0, 1, 2, 3, 3, 4, 5]):
                 with self.assertRaisesRegex(ValueError, "source-content retiming"):
                     self.migrate(cfg, old, compiled(frames))
+
+    def test_video_existing_sealed_samples_are_composed(self):
+        old = mapping()
+        layer = {'path': '/sealed.mkv', 'sha256': 'a'*64, 'bytes': 10,
+                 'width': 160, 'height': 90, 'frame_count': 5, 'fps': '30/1'}
+        phase = {'version': 2, 'original_start_frame': 1, 'original_frame_count': 5,
+                 'original_layer': layer, 'original_cue_sha256': 'b'*64, 'frames': [1, 2, 4]}
+        cue = {'id': 'video', 'role': 'video', 'asset_id': 'v', 'output_start': '1/15',
+               'output_end': '1/6', 'source_start': '0', 'source_end': '1', 'phase_map': phase}
+        cfg = config(cue_plan={'version': 1, 'mapping_sha256': digest(old), 'cues': [cue]})
+        before = deepcopy(cfg)
+        with patch('video_harness.retime_settings.validate_cues'):
+            moved = self.migrate(cfg, old)['changes']['cue_plan']['cues'][0]
+        self.assertEqual(moved['phase_map']['frames'], [1, 1, 2, 2, 4, 4, 4])
+        self.assertEqual(moved['phase_map']['original_layer'], layer)
+        self.assertEqual(moved['phase_map']['original_cue_sha256'], 'b'*64)
+        self.assertEqual(cfg, before)
 
     def test_music_explicitly_keeps_normal_playback_on_new_clock(self):
         old = mapping()

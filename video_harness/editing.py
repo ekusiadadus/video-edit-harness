@@ -275,6 +275,11 @@ def render_edit(cfg, plan, out, preview=True):
             export_timeline(retimed, probe(retimed), [(0, total)], out/'timeline.fcpxml',
                             cfg.get('name', 'Retimed Speech Edit'))
         write(out/'speech-assembly.json', assembly_evidence)
+        from .caption_timing import write_caption_evidence
+        write_caption_evidence(out, plan, read(out/'frame-mapping.json'),
+                               grouping=cfg.get('caption_groups'),
+                               retime=setting if retimed is not None else None,
+                               audio_cuts=compiled if has_audio_cuts else None)
         from .production import resolve_production, mix_key, production_sources
         production = resolve_production(cfg, read(out / 'frame-mapping.json'))
         audio_cues = [c for c in production['cues'] if c['role'] in ('music', 'sfx')]

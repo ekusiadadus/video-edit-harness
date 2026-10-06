@@ -52,7 +52,7 @@ class ProductionFCPTests(unittest.TestCase):
                 'id': 'overlay', 'asset_id': 'v', 'role': 'video',
                 'output_start': '1/30', 'output_end': '7/30', 'source_start': '0', 'source_end': '1/10',
                 'phase_map': {'version': 1, 'original_start_frame': 1,
-                              'original_frame_count': 3, 'original_time_base': '1/15360',
+                              'original_frame_count': 3, 'original_time_base': '1/15360', 'original_input_pts_shift': 0,
                               'original_timestamps': [512, 1024, 1536], 'frames': [0, 0, 1, 1, 2, 2]}}]}
             with self.assertRaisesRegex(ValueError, 'baked'):
                 export_production_xml(base, production, mixed, root / 'editable.fcpxml', mode='editable')

@@ -1,5 +1,26 @@
 # 編集パターン実装の進捗と検証台帳
 
+## 2026-10-07: 保存済みレイヤーを変速候補へ接続（開発版）
+
+- 動画cueのversion-2 phase mapで元の保存層を参照し、実RGBAサンプルを保持／間引きする。素材SHA・trim・配置・透明度も束縛し、保存済み画素と異なる設定を黙って使わない。層の改変は元renderと候補renderのどちらでも拒否する。旧timestamp形式は読み戻せるが、再描画には新しい元の保存層が必要。
+- FFmpeg6のgeneric timeline条件が素材側のフレーム消費でも再評価される経路をソースと実showinfoで確認。変速層の表示はその開始時刻・実フレーム数・EOFで制御し、主映像を出力CFR時計にそろえる。元の通常描画は保持する。静止背景だけでなく、色の変わる背景で表示領域と未被覆領域の両方を検査する。
+- 現行FFmpegの関連37試験成功（24.086秒、`sealed-overlay-native-content-seal.log`）。FFmpeg6.1.2の関連29試験成功（2.801秒、`sealed-overlay-ffmpeg6-content-seal.log`）。旧形式の読み戻しとmap合成の追加後、契約16試験成功（0.069秒、`sealed-overlay-legacy-contract.log`）。フレーム比較の許容値は緩めていない。
+- 接続後の全629試験成功（336.207秒、`sealed-overlay-final-full-suite.log`）。直前の保存機能だけの状態でも全624試験成功（296.086秒、`overlay-capture-full-suite.log`）。4種類のローカル比較MP4を別々に生成し、全AVデコード・fps・実フレーム数・48kHzステレオ・音量／ピークを検査。通常YouTubeの重複見出しはv2で修正し、旧版も保存した。最新証跡は`output/demos/youtube-four-comparisons-20261007/review-manifest-v2.json`。GitHub CI・配布物・人の全編視聴／試聴・Content IDは別途検証が必要。投稿は行っていない。公開alpha.7には未収録。
+
+## 2026-10-07: 元の出力サンプルを透明レイヤーへ保存（開発中）
+
+- 通常の動画overlay描画と同じFFmpegコマンドで透明FFV1層も生成し、実際の出力フレーム区間を保存する。RGBA・フレーム数・寸法・fps・SHAを検査し、セッションに保存層のfingerprintを登録する。プレビュー寸法の流用、参照改変、範囲外・逆順のフレーム指定を拒否する。
+- 保存を加えたMP4と従来のgraphで描画したMP4の全デコード画素が一致すること、保存したalphaから元区間の画素を再構成できることを、分数fps・ミリ秒時計の先頭CFR複製・素材alphaで検査。FFmpeg9.0.2の関連8試験成功（2.837秒）、隔離したFFmpeg6.1.2でも8試験成功（1.884秒）。証跡: `output/implementation-maya/overlay-capture-native-success.log`／`overlay-capture-ffmpeg6-success.log`。
+- これは保存／リマップ部品の検証。変速候補の移行・再描画はまだ旧時計再計算を使うため、先のLinux CI失敗の解消は未証明。新方式への接続と全体検査を続ける。直前の字幕・時計修正の状態では全616試験成功（295.333秒、`caption-groups-full-suite.log`）。公開alpha.7は変更していない。
+- ユーザーはYouTube向け・ダンス・エフェクト・音ハメを、それぞれ音付きの編集前後比較MP4へ分けることを指定。投稿はユーザー本人が行う。4本の最終納品・人の試聴は未完了。
+
+## 2026-10-07: 単語IDに結び付いた字幕の区切り（alpha.7後の開発版）
+
+- `session caption-source`で実表示の単語ID・出現番号と時刻を取得し、`session caption-groups --spec-file`で日本語／英語の区切りを未採用候補として指定する。全単語の順序・表記・完全な被覆をhashへ結び付け、未知・重複・欠落、カットをまたぐ区切り、指定語句の分断を拒否する。自動の意味理解ではない。
+- 元の実単語時刻、発話retimeの単語保護フレーム、J/Lカットの実音声サンプルから表示時刻を生成する。読み時間・句読点・字幕重なりは警告とし、時刻や発話を自動変更しない。SRTと字幕証跡のSHAをセッション・納品で照合する。通常YouTubeは別SRT、縦型の焼き込みと実機確認は別工程。[操作と制約](CAPTION_GROUPS.ja.md)。
+- 関連29試験成功（16.069秒）: `output/implementation-maya/caption-groups-final-focused-success.log`。合成発話の候補・変速・未採用状態、映像SHAの不変、実SRTと証跡の改変拒否、納品コピーを検査。全体検査・人の理解／読みやすさ・実機UI・最終MP4は未証明。
+- 前回動画overlayのcommit `f467d38`のCI37514812521はUbuntu3.11のフレーム比較3件で失敗。隔離したFFmpeg6.1.2で混在fpsとミリ秒時計の2件を再現。区間先頭の同期初期化と、音声負時刻による入力PTSのずれを調査し、先頭のCFR複製との対応を引き続き修正する。比較閾値は維持。公開alpha.7の資産は変更していない。全計画は継続し、YouTube投稿はユーザー本人が行う。
+
 ## 2026-10-07: 動画overlayの素材フレームを変速後へ移行（alpha.7後の開発版）
 
 - 動画cueの`phase_map`に元区間のフレーム番号と、元の描画入力から実観測したtimebase／timestamp配列を保持する。素材を従来のtrim・配置・透明度・FFmpeg framesyncでRGBA透明層へ描画し、rawフレームを間引き／複製してlossless FFV1層を作る。最終MP4は通常のエンコードを通る。元素材の音を追加せず、元の音声をコピーする。

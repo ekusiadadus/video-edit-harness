@@ -68,7 +68,30 @@ def validate_video_phase(cue, fps):
     if cue.get("loop", False):
         raise ValueError("Looped video phase migration is not supported yet")
     rate = _seconds(fps, "fps")
-    if rate <= 0 or not isinstance(phase, dict) or set(phase) != {"version", "original_start_frame", "original_frame_count", "original_time_base", "original_timestamps", "frames"}:
+    if isinstance(phase, dict) and type(phase.get('version')) is int and phase['version'] == 2:
+        if set(phase) != {'version', 'original_start_frame', 'original_frame_count', 'original_layer', 'original_cue_sha256', 'frames'}:
+            raise ValueError('Invalid sealed video cue phase_map')
+        signature = phase['original_cue_sha256']
+        if not isinstance(signature, str) or len(signature) != 64 or any(c not in '0123456789abcdef' for c in signature):
+            raise ValueError('Invalid sealed video cue content digest')
+        from .overlay_layers import validate_overlay_layer_reference
+        count, frames = phase['original_frame_count'], phase['frames']
+        if type(count) is not int or not 1 <= count <= 4096:
+            raise ValueError('Invalid sealed video cue original count')
+        if type(phase['original_start_frame']) is not int or not 0 <= phase['original_start_frame'] <= 2**31-1:
+            raise ValueError('Invalid sealed video cue original start frame')
+        reference = validate_overlay_layer_reference(phase['original_layer'], rate, count=count)
+        start = _seconds(cue['output_start'], 'output_start') * rate
+        end = _seconds(cue['output_end'], 'output_end') * rate
+        if start.denominator != 1 or end.denominator != 1 or start < 0 or end <= start:
+            raise ValueError('Sealed video cue phase_map needs an exact frame-aligned interval')
+        if (not isinstance(frames, list) or not 1 <= len(frames) <= 4096 or len(frames) != end-start
+                or any(type(frame) is not int or not 0 <= frame < count for frame in frames)
+                or any(a > b for a, b in zip(frames, frames[1:]))):
+            raise ValueError('Invalid sealed video cue original frame map')
+        return {**phase, 'original_layer': reference, 'frames': frames.copy()}
+    legacy_keys = {"version", "original_start_frame", "original_frame_count", "original_time_base", "original_timestamps", "frames"}
+    if rate <= 0 or not isinstance(phase, dict) or set(phase) not in (legacy_keys, legacy_keys | {'original_input_pts_shift'}):
         raise ValueError("Invalid video cue phase_map")
     count, frames = phase["original_frame_count"], phase["frames"]
     if type(phase["original_start_frame"]) is not int or not 0 <= phase["original_start_frame"] <= 2**31-1:
@@ -79,8 +102,13 @@ def validate_video_phase(cue, fps):
         raise ValueError('Video cue original timebase must be a rational string')
     tb = _seconds(phase['original_time_base'], 'original_time_base')
     ticks = phase['original_timestamps']
+    shift = phase.get('original_input_pts_shift')
+    if 'original_input_pts_shift' in phase and (type(shift) is not int or not -2**63 <= shift <= 2**63-1):
+        raise ValueError('Invalid observed video input PTS shift')
     if tb <= 0 or not isinstance(ticks, list) or len(ticks) != count or any(type(tick) is not int or not 0 <= tick <= 2**63-1 for tick in ticks):
         raise ValueError('Invalid video cue original timestamps')
+    if shift is not None and any(not 0 <= tick + shift <= 2**63-1 for tick in ticks):
+        raise ValueError('Video effective timestamps are out of range')
     step = 1/(rate*tb)
     tolerance = min(Fraction(1), step/4)
     if any(abs(tick-(phase['original_start_frame']+index)*step) > tolerance for index, tick in enumerate(ticks)) or any(a >= b for a,b in zip(ticks,ticks[1:])):
@@ -95,7 +123,10 @@ def validate_video_phase(cue, fps):
         raise ValueError("Video cue phase_map needs bounded original integer frames")
     if any(left > right for left, right in zip(frames, frames[1:])):
         raise ValueError("Video cue phase_map frames must be nondecreasing")
-    return {"version": 1, "original_start_frame": phase["original_start_frame"], "original_frame_count": count, "original_time_base": phase["original_time_base"], "original_timestamps": ticks.copy(), "frames": frames.copy()}
+    result = {"version": 1, "original_start_frame": phase["original_start_frame"], "original_frame_count": count, "original_time_base": phase["original_time_base"], "original_timestamps": ticks.copy(), "frames": frames.copy()}
+    if 'original_input_pts_shift' in phase:
+        result['original_input_pts_shift'] = shift
+    return result
 
 
 def validate_cues(cues, assets, duration, fps=None):

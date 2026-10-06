@@ -95,13 +95,13 @@ def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clo
                 first, end, selected = source_frames(cue)
                 prior_phase = validate_video_phase(cue, fps)
                 clock = prior_phase or (video_clocks or {}).get(cue['id'])
-                if not clock or (not prior_phase and (clock.get('original_start_frame') != first or clock.get('original_frame_count') != end-first)):
-                    raise ValueError(f"cue_plan:{cue.get('id')} needs a render with observed overlay clock evidence")
-                moved["phase_map"] = {"version": 1,
+                if not clock or 'original_layer' not in clock or 'original_cue_sha256' not in clock or (not prior_phase and (clock.get('original_start_frame') != first or clock.get('original_frame_count') != end-first)):
+                    raise ValueError(f"cue_plan:{cue.get('id')} needs a fresh original render with sealed overlay layer evidence")
+                moved["phase_map"] = {"version": 2,
                     "original_start_frame": clock['original_start_frame'],
                     "original_frame_count": clock['original_frame_count'],
-                    "original_time_base": clock['original_time_base'],
-                    "original_timestamps": deepcopy(clock['original_timestamps']),
+                    "original_layer": deepcopy(clock['original_layer']),
+                    "original_cue_sha256": clock['original_cue_sha256'],
                     "frames": [prior_phase["frames"][base-first] if prior_phase else base-first for base in selected]}
             if role == "sfx":
                 require_translation(cue, f"cue_plan:{cue.get('id')}")

@@ -269,17 +269,19 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
         current = input_video
         video_phase_layers = []
         video_cue_clocks = []
+        video_cue_layers = []
         for index, cue in enumerate(cues):
             role = cue["role"]
             source = root / f"title-{index}.png" if role == "title" else Path(assets[cue["asset_id"]]["path"])
             if role == "title":
                 _title_image(cue["text"], source, width, height)
+            clock = None
             if role == 'video':
                 stream = next(s for s in _probe(source)['streams'] if s['codec_type'] == 'video')
                 source_width, source_height = check_video_geometry(stream)
                 check_overlay_video_clock(source, stream)
                 from .video_cue_phase import capture_overlay_clock
-                clock = capture_overlay_clock(current, cue, info['fps'])
+                clock = capture_overlay_clock(current, cue, info['fps']) if 'phase_map' not in cue else None
                 if clock is not None:
                     video_cue_clocks.append(clock)
             else:
@@ -300,6 +302,7 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                                                     log_path=log_path)
                 _check_asset(cue['asset_id'], assets)
                 video_phase_layers.append(provenance)
+                video_cue_layers.append({'cue_id': cue['id'], 'layer': provenance['phase_map']['original_layer']})
                 first = _seconds(cue['output_start'], 'output_start') * info['fps']
                 last = _seconds(cue['output_end'], 'output_end') * info['fps']
                 if first.denominator != 1 or last.denominator != 1:
@@ -310,7 +313,6 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                 scale = "null"
                 opacity = 1
                 overlay_x = overlay_y = 0
-                enable = f"gte(n,{first.numerator})*lt(n,{last.numerator})"
             elif role == "video":
                 overlay_input = ["-i", str(source)]
                 source_start = format(float(_seconds(cue['source_start'], 'source_start')), '.9f')
@@ -325,20 +327,70 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
                 opacity = placement['opacity']
                 overlay_x, overlay_y = placement['x_pixels'], placement['y_pixels']
                 enable = f"between(t,{cue['output_start']},{cue['output_end']})"
+            # On FFmpeg 6, the generic timeline gate can be reevaluated while
+            # consuming the secondary input, using its own frame counter.
+            # A sealed layer already has exact start/count/EOF, so use those
+            # timestamps rather than a second n-based timeline gate.
+            gate = ("repeatlast=0:" if 'phase_map' in cue else f"enable='{enable}':")
             filter_graph = (f"[1:v]{source_filter}{scale},format=rgba,"
                             f"colorchannelmixer=aa={opacity}[layer];"
-                            f"[0:v][layer]overlay=x={overlay_x}:y={overlay_y}:"
-                            f"enable='{enable}':"
+                            f"[0:v][layer]overlay=x={overlay_x}:y={overlay_y}:" + gate +
                             "eof_action=pass:shortest=0[v]")
+            if role == 'video' and 'phase_map' in cue:
+                # Frame selection refers to final CFR indices.
+                # Normalize the primary before framesync so the muxer cannot
+                # introduce a second, independent initial-frame duplication.
+                primary = (f"[0:v]fps=fps={info['fps']}:start_time=0:round=near,"
+                           f"settb=expr={info['fps'].denominator}/{info['fps'].numerator},"
+                           "setpts=N[phase_primary];")
+                filter_graph = primary + filter_graph.replace('[0:v][layer]', '[phase_primary][layer]')
+            retained_layer = None
+            if role == 'video' and 'phase_map' not in cue and clock is not None:
+                # Capture the actual framesync result in this very render, then
+                # let both encoders perform the same CFR output normalization.
+                # Reconstructing this result later from input PTS loses samples
+                # when a demuxer offset causes an initial output duplication.
+                retained_layer = root / f"original-layer-{index}.mkv"
+                filter_graph = (
+                    f"[1:v]{source_filter}{scale},format=rgba,"
+                    f"colorchannelmixer=aa={opacity},split[layer][saved_layer];"
+                    "[0:v]split[primary][saved_primary];"
+                    f"[primary][layer]overlay=x={overlay_x}:y={overlay_y}:"
+                    f"enable='{enable}':eof_action=pass:shortest=0[v];"
+                    "[saved_primary]format=rgba,"
+                    "colorchannelmixer=rr=0:gg=0:bb=0:aa=0[transparent];"
+                    f"[transparent][saved_layer]overlay=x={overlay_x}:y={overlay_y}:"
+                    f"enable='{enable}':eof_action=pass:shortest=0:format=auto,"
+                    "format=bgra[saved]"
+                )
             if info['rec709_tags']:
                 filter_graph += ';[v]setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[retained_rec709]'
             picture_label = '[retained_rec709]' if info['rec709_tags'] else '[v]'
             target = root / f"overlay-{index}.mp4"
-            _ffmpeg(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(current),
+            command = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(current),
                      *overlay_input, "-filter_complex", filter_graph, "-map", picture_label,
                      "-map", "0:a?", "-c:v", "libx264", "-preset", "ultrafast" if preview else "medium",
                      "-crf", "23" if preview else "18", "-pix_fmt", "yuv420p", "-c:a", "copy",
-                     "-t", str(duration), *timing_options, str(target)])
+                     *(["-fps_mode", "passthrough"] if 'phase_map' in cue else []),
+                     "-t", str(duration), *timing_options, str(target)]
+            if retained_layer is not None:
+                command += ["-map", "[saved]", "-an", "-c:v", "ffv1", "-level", "3",
+                            "-pix_fmt", "bgra", "-fps_mode", "cfr", "-r", str(info['fps']),
+                            "-t", str(duration), str(retained_layer)]
+            _ffmpeg(command)
+            if retained_layer is not None:
+                from .overlay_layers import slice_overlay_layer
+                sealed = slice_overlay_layer(
+                    retained_layer, clock['original_start_frame'],
+                    clock['original_start_frame'] + clock['original_frame_count'],
+                    info['fps'], output.parent / f"{output.stem}-video-cue-{index}.mkv",
+                    log_path=output.parent / f"{output.stem}-video-cue-{index}.log")
+                clock['original_layer'] = sealed
+                from .video_cue_phase import video_cue_content_sha256
+                asset = assets[cue['asset_id']]
+                clock['original_cue_sha256'] = video_cue_content_sha256(
+                    cue, asset.get('sha256') or asset.get('file_sha256'))
+                video_cue_layers.append({'cue_id': cue['id'], 'layer': sealed})
             current = target
         if cues:
             _ffmpeg(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(current),
@@ -350,5 +402,6 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
             "duration": float(duration), "preview": bool(preview),
             "video_phase_layers": video_phase_layers,
             "video_cue_clocks": video_cue_clocks,
+            "video_cue_layers": video_cue_layers,
             "safe_area": "overlays fit central 70 percent width and above lower 25 percent",
             "subject_clearance": "unverified; inspect every overlay against moving subjects and captions"}

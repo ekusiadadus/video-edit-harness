@@ -174,6 +174,8 @@ def render_visual_edit(cfg, plan, out, preview=True):
     The XML is an original-source cut reference. Creative additions, grade and
     normalized sound are established by the reviewed MP4, not this XML.
     """
+    if cfg.get('caption_groups') is not None:
+        raise ValueError('Word-anchored caption groups require a transcript-backed speech edit')
     pipeline_version=visual_pipeline_version(cfg)
     has_transitions = cfg.get('transitions') is not None
     if has_transitions:

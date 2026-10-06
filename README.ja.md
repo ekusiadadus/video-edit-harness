@@ -232,3 +232,7 @@ alpha.7の実験的な `tracked_background` は、追跡対象のフレームご
 開発版の `tiktok-export --caption-layout` は、日本語・英語字幕を実フォント幅で折り返し、指定語句と元SRTの時刻・手動改行を保持します。納品には元パスを含まない配置証跡を残します。[操作と制約](docs/CAPTION_LAYOUT.ja.md)。
 
 開発版の編集可能FCP素材には、共通のピクセル計算から静的な大きさ・位置・透明度を記録します。実FCP表示の一致と音量の再現は未確認です。[操作と制約](docs/FCP_OVERLAY_PLACEMENT.ja.md)。
+
+開発版では「否定・名前・単位を分けない字幕」を実単語IDから指定できます。`session caption-source`で表示順と出現番号を取得し、`session caption-groups --spec-file`で未採用候補を作ります。カット・発話変速・J/L音声の実時刻へ追従し、読み時間の警告とSRT証跡を保存します。[操作と制約](docs/CAPTION_GROUPS.ja.md)。通常YouTubeは別SRT、縦型MP4の焼き込みと実機の見やすさは別途確認してください。公開alpha.7には未収録です。
+
+用途別に編集前後を見たい場合は[4種類の比較デモ仕様](docs/COMPARISON_DEMOS.ja.md)を参照してください。YouTube向け・ダンス・エフェクト・音ハメを別の音付きMP4で比較する仕様です。ローカル確認用4本は生成・技術検査済みですが、公開配布や人の最終承認とは別です。動画の投稿は利用者が行います。

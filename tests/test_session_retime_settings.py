@@ -37,13 +37,24 @@ class SessionRetimeSettingTests(unittest.TestCase):
             candidate = session.propose_retime(observed['id'], request, 'codex', 'Keep video synchronized')
             changed = read(candidate['candidate']['project']['path'])
             phase = changed['cue_plan']['cues'][0]['phase_map']
-            self.assertEqual(phase['original_timestamps'], clock['original_timestamps'])
-            self.assertEqual(phase['original_time_base'], clock['original_time_base'])
+            self.assertEqual(phase['version'], 2)
+            self.assertEqual(phase['original_layer'], clock['original_layer'])
             self.assertEqual(phase['frames'], [0, 1, 1, 1])
             rendered = session.render(preview=False, actor='codex', candidate_id=candidate['candidate']['id'])
             self.assertEqual(read(rendered['files']['result']['path'])['technical_status'], 'pass')
             self.assertEqual(read(rendered['files']['overlays']['path'])['video_phase_layers'][0]['phase_map'], phase)
             self.assertEqual(session._load()['project'], before)
+            session._verify_render(rendered)
+            layer = Path(clock['original_layer']['path'])
+            saved = layer.read_bytes()
+            changed_layer = bytearray(saved)
+            changed_layer[-1] ^= 1
+            layer.write_bytes(changed_layer)
+            with self.assertRaises(ValueError):
+                session._verify_render(rendered)
+            with self.assertRaises(ValueError):
+                session.propose_retime(observed['id'], request, 'codex', 'Reject changed layer')
+            layer.write_bytes(saved)
             with Path(observed['files']['overlays']['path']).open('a') as stream:
                 stream.write('changed')
             with self.assertRaises(ValueError):
