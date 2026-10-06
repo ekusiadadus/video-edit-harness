@@ -17,6 +17,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 from .cues import _asset_map, _check_asset, validate_cues
+from .overlay_placement import parse_static_placement
 from .production_fcp import (DTD_PATHS, FCP_FRAME_SAMPLING, FCP_SOURCE_RATES, _fcp_time,
                              _read_time, resolve_media_path)
 
@@ -27,7 +28,8 @@ STRUCTURE = {'fcpxml', 'import-options', 'option', 'resources', 'format', 'asset
              'asset-clip', 'conform-rate', 'marker', 'adjust-volume', 'param',
              'fadeIn', 'fadeOut', 'note', 'metadata', 'md', 'array',
              'bookmark', 'smart-collection', 'match-media', 'match-clip',
-             'match-ratings', 'match-analysis-type', 'adjust-colorConform'}
+             'match-ratings', 'match-analysis-type', 'adjust-colorConform',
+             'adjust-conform', 'adjust-transform', 'adjust-blend'}
 
 
 def _xml_path(path):
@@ -79,7 +81,21 @@ def _safe_xml(path):
             if checked.returncode:
                 raise ValueError(f'FCPXML {version} DTD invalid: {checked.stderr[-600:]}')
     parent = {child: node for node in root.iter() for child in node}
+    project_spine = root.find('./library/event/project/sequence/spine')
     for node in root.iter():
+        if node.tag in {'adjust-conform', 'adjust-transform', 'adjust-blend'}:
+            owner = parent.get(node)
+            anchor = parent.get(owner)
+            spine_owner = parent.get(anchor)
+            if (owner is None or owner.tag != 'asset-clip' or owner.get('srcEnable') != 'video'
+                    or anchor is None or anchor.tag != 'asset-clip'
+                    or spine_owner is None or spine_owner is not project_spine):
+                raise ValueError('unsupported visual placement location')
+            order = [child.tag for child in owner if child.tag in
+                     {'adjust-conform', 'adjust-transform', 'adjust-blend'}]
+            if order != ['adjust-conform', 'adjust-transform', 'adjust-blend']:
+                raise ValueError('unsupported visual placement order')
+            parse_static_placement(owner)
         if node.tag == 'bookmark' and parent[node].tag != 'media-rep':
             raise ValueError('unsupported bookmark location')
         if node.tag == 'smart-collection' and parent[node].tag not in {'library', 'event'}:
@@ -225,7 +241,8 @@ def _snapshot(path):
             if child.get('lane') is None:
                 raise ValueError('connected layer lacks lane')
             if any(node.tag not in {'adjust-volume', 'conform-rate', 'note', 'metadata',
-                                    'adjust-colorConform'} for node in child):
+                                    'adjust-colorConform', 'adjust-conform', 'adjust-transform',
+                                    'adjust-blend'} for node in child):
                 raise ValueError('connected effect unsupported')
             start_output = offset + _read_time(child.get('offset')) - start
             clip_length = _read_time(child.get('duration'))
@@ -248,12 +265,19 @@ def _snapshot(path):
                 conform = None
             else:
                 raise ValueError('connected layer source enable is ambiguous')
+            if src_enable == 'video' and child.find('adjust-volume') is not None:
+                raise ValueError('visual layer cannot carry audio volume')
+            placement = parse_static_placement(child)
+            if src_enable == 'audio' and placement is not None:
+                raise ValueError('audio layer cannot carry visual placement')
             volume = _volume(child)
             connected.append({'sha256': reference['sha256'], 'name': child.get('name'),
                               'role': child.get('audioRole') if src_enable == 'audio' else child.get('videoRole'),
                               'src_enable': src_enable, 'lane': child.get('lane'),
                               'output_start': start_output, 'source_start': _read_time(child.get('start', '0s')),
-                              'duration': clip_length, 'conform': conform, **volume})
+                              'duration': clip_length, 'conform': conform,
+                              'source_size': (reference['width'], reference['height']) if src_enable == 'video' else None,
+                              'placement': placement, **volume})
     if not primary:
         raise ValueError('empty primary timeline')
     if output['duration'] != sum((row['duration'] for row in primary), Fraction(0)):
@@ -324,6 +348,9 @@ def _match_editable(reference, returned, production):
             raise ValueError(f'cue {cue_id} lost or gained a connected part')
         if any(row['conform'] != baseline['conform'] for row, baseline in zip(after, before)):
             raise ValueError(f'cue {cue_id} frame conform changed')
+        if any(row['placement'] != baseline['placement'] or row['source_size'] != baseline['source_size']
+               for row, baseline in zip(after, before)):
+            raise ValueError(f'cue {cue_id} visual placement or source size changed; import unsupported')
         if any(row['source_start'] != baseline['source_start'] for row, baseline in zip(after, before)):
             raise ValueError(f'cue {cue_id} source in-point changed')
         if len(after) > 1 and not cue.get('loop'):

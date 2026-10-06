@@ -13,6 +13,8 @@ import tempfile
 from PIL import Image, ImageDraw, ImageFont
 
 from .cues import _asset_map, _check_asset, _seconds, validate_cues
+from .overlay_placement import (check_overlay_video_clock, check_video_geometry,
+                                measure_placement)
 
 
 def _probe(path):
@@ -256,6 +258,7 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
         raise ValueError("input video missing or overlay output exists")
     info = _video_info(input_video)
     width, height = info["width"], info["height"]
+    check_video_geometry(next(s for s in _probe(input_video)['streams'] if s['codec_type'] == 'video'))
     assets = _asset_map(assets)
     cues = validate_cues(cues, assets, duration, info["fps"])
     if any(c["role"] not in {"image", "video", "title"} for c in cues):
@@ -269,6 +272,16 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
             source = root / f"title-{index}.png" if role == "title" else Path(assets[cue["asset_id"]]["path"])
             if role == "title":
                 _title_image(cue["text"], source, width, height)
+            if role == 'video':
+                stream = next(s for s in _probe(source)['streams'] if s['codec_type'] == 'video')
+                source_width, source_height = check_video_geometry(stream)
+                check_overlay_video_clock(source, stream)
+            else:
+                with Image.open(source) as picture:
+                    if picture.getexif().get(274, 1) != 1:
+                        raise ValueError('rotated image geometry is unsupported')
+                    source_width, source_height = picture.size
+            placement = measure_placement(cue, width, height, source_width, source_height)
             if role == "video":
                 overlay_input = ["-i", str(source)]
                 source_filter = (f"trim=start={cue['source_start']}:end={cue['source_end']},"
@@ -276,22 +289,11 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False, 
             else:
                 overlay_input = ["-loop", "1", "-i", str(source)]
                 source_filter = ""
-            # Keep picture inside an 80% x 65% central safe box. Lower third
-            # captions and outer 10% edges remain free; position is explicit.
-            if role == "title":
-                scale = f"scale={width}:{height}"
-            else:
-                scale = f"scale={int(width*.7)}:{int(height*.5)}:force_original_aspect_ratio=decrease"
-            position = cue.get("position", "center")
-            if position not in {"center", "top"}:
-                raise ValueError("overlay position must be center or top")
-            y = "H*0.25" if position == "center" else "H*0.1"
-            opacity = float(cue.get("opacity", 1))
-            if not 0 <= opacity <= 1:
-                raise ValueError("overlay opacity must be 0..1")
+            scale = f"scale={placement['rendered_size'][0]}:{placement['rendered_size'][1]}"
+            opacity = placement['opacity']
             filter_graph = (f"[1:v]{source_filter}{scale},format=rgba,"
                             f"colorchannelmixer=aa={opacity}[layer];"
-                            f"[0:v][layer]overlay=x=(W-w)/2:y={y}:"
+                            f"[0:v][layer]overlay=x={placement['x_pixels']}:y={placement['y_pixels']}:"
                             f"enable='between(t,{cue['output_start']},{cue['output_end']})':"
                             "eof_action=pass:shortest=0[v]")
             if info['rec709_tags']:

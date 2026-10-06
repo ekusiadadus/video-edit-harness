@@ -230,3 +230,5 @@ alpha.7の実験的な `tracked_background` は、追跡対象のフレームご
 開発版の `depth prepare/infer/correct/stabilize/validate/render` は、元映像に結び付けた相対深度を保持し、Smallモデルのローカル推定と反復する手動修正に対応します。`session depth-layer` は全解像度のRec.709 graded pictureと登録済み同サイズRGBA画像を結び付け、未採用候補・比較・選択・採用・baked納品に対応します。最終SHAに対する `depth_contours` 視覚レビューが必要です。納品用の深度証跡はローカルパスを除き、フィールドとSHAを保持します。モデル・元画像は外部参照です。明示指定で時間方向の補正候補を作り、信頼性が低いフレームやカットで履歴をリセットします。実写の輪郭・時間方向の品質の承認は未完了です。[操作と制約](docs/DEPTH_LAYERS.ja.md)。
 
 開発版の `tiktok-export --caption-layout` は、日本語・英語字幕を実フォント幅で折り返し、指定語句と元SRTの時刻・手動改行を保持します。納品には元パスを含まない配置証跡を残します。[操作と制約](docs/CAPTION_LAYOUT.ja.md)。
+
+開発版の編集可能FCP素材には、共通のピクセル計算から静的な大きさ・位置・透明度を記録します。実FCP表示の一致と音量の再現は未確認です。[操作と制約](docs/FCP_OVERLAY_PLACEMENT.ja.md)。

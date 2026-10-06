@@ -228,5 +228,103 @@ class ProductionImportTests(unittest.TestCase):
                     self.assertEqual(report['status'], 'comparison_only', report['reasons'])
 
 
+
+    def visual_fixture(self, root):
+        from PIL import Image
+        base, mixed, _, _ = self.fixture(root)
+        image = root / 'wide-overlay.png'
+        Image.new('RGBA', (120, 40), (255, 0, 0, 255)).save(image)
+        record = {'asset_id': 'visual1', 'kind': 'image', 'path': str(image),
+                  'sha256': hashlib.sha256(image.read_bytes()).hexdigest()}
+        production = {'mapping_sha256': 'b' * 64, 'assets': [record], 'cues': [
+            {'id': 'illustration', 'asset_id': 'visual1', 'role': 'image',
+             'output_start': .25, 'output_end': 1.25,
+             'position': 'top', 'opacity': .35}]}
+        reference = root / 'placed.fcpxml'
+        export_production_xml(base, production, mixed, reference, 'editable')
+        return production, reference
+
+    def test_static_visual_placement_survives_semantic_return(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            production, reference = self.visual_fixture(root)
+            output = root / 'placed-return.fcpxml'
+            self.returned_copy(reference, output)
+            result = import_production_xml(reference, output, production, 'codex',
+                                           'Verify unchanged placement after resource renaming')
+            self.assertEqual(result['status'], 'review_required', result)
+            self.assertEqual(result['changes'], [])
+            self.assertEqual(result['cue_plan']['cues'][0]['position'], 'top')
+            self.assertEqual(result['cue_plan']['cues'][0]['opacity'], .35)
+            self.assertEqual(result['gui_playback'], 'unverified')
+
+    def test_return_refuses_dropped_or_changed_visual_placement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            production, reference = self.visual_fixture(root)
+            for modification in ('dropped', 'position', 'opacity', 'source_size'):
+                with self.subTest(modification=modification):
+                    output = root / (modification + '.fcpxml')
+                    tree = ET.parse(reference)
+                    connected = tree.find('.//asset-clip/asset-clip')
+                    if modification == 'dropped':
+                        connected.remove(connected.find('adjust-transform'))
+                    elif modification == 'position':
+                        connected.find('adjust-transform').set('position', '1 2')
+                    elif modification == 'opacity':
+                        connected.find('adjust-blend').set('amount', '0.9')
+                    else:
+                        resource = tree.find("./resources/asset[@id='%s']" % connected.get('ref'))
+                        tree.find("./resources/format[@id='%s']" % resource.get('format')).set('width', '100')
+                    tree.write(output)
+                    result = import_production_xml(reference, output, production, 'codex',
+                                                   'Detect changed visual finishing')
+                    self.assertEqual(result['status'], 'rejected', result)
+                    self.assertIsNone(result['cue_plan'])
+
+    def test_return_refuses_unknown_visual_automation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            production, reference = self.visual_fixture(root)
+            output = root / 'animated.fcpxml'
+            tree = ET.parse(reference)
+            transform = tree.find('.//asset-clip/asset-clip/adjust-transform')
+            ET.SubElement(transform, 'param', name='position', value='0 0')
+            tree.write(output)
+            result = import_production_xml(reference, output, production, 'codex',
+                                           'Do not drop unsupported transform automation')
+            self.assertEqual(result['status'], 'rejected', result)
+            self.assertIsNone(result['cue_plan'])
+
+
+    def test_spatial_tags_in_wrong_locations_rejected_without_dtd(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            production, reference = self.visual_fixture(root)
+            for location in ('asset', 'sequence', 'primary', 'extra_spine'):
+                with self.subTest(location=location):
+                    tree = ET.parse(reference)
+                    target = (tree.find('./resources/asset') if location == 'asset' else
+                              tree.find('.//sequence') if location == 'sequence' else
+                              tree.find('.//spine/asset-clip'))
+                    if location == 'extra_spine':
+                        extra = ET.SubElement(tree.getroot(), 'spine')
+                        primary = ET.SubElement(extra, 'asset-clip')
+                        target = ET.SubElement(primary, 'asset-clip', srcEnable='video')
+                        ET.SubElement(target, 'adjust-conform', type='none')
+                        ET.SubElement(target, 'adjust-blend', amount='1')
+                    ET.SubElement(target, 'adjust-transform', position='4 8', scale='1 1')
+                    if location == 'extra_spine':
+                        target.remove(target.find('adjust-blend'))
+                        ET.SubElement(target, 'adjust-blend', amount='1')
+                    output = root / ('misplaced-' + location + '.fcpxml')
+                    tree.write(output)
+                    with patch('video_harness.production_import.DTD_PATHS', ()):
+                        result = import_production_xml(reference, output, production, 'codex',
+                                                       'Reject ignored spatial nodes without Apple DTD')
+                    self.assertEqual(result['status'], 'rejected', result)
+                    self.assertIsNone(result['cue_plan'])
+
 if __name__ == '__main__':
     unittest.main()

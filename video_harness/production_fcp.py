@@ -16,8 +16,11 @@ import subprocess
 import tempfile
 import wave
 import xml.etree.ElementTree as ET
+from PIL import Image
 
 from .cues import _asset_map, _check_asset, _seconds, validate_cues
+from .overlay_placement import (check_overlay_video_clock, check_video_geometry,
+                                measure_placement, parse_static_placement, xml_number)
 from .visual import _title_image
 
 MIX_RATE = 48000
@@ -29,7 +32,8 @@ DTD_PATHS = (
 )
 SUPPORTED_TAGS = {'fcpxml', 'resources', 'format', 'asset', 'media-rep', 'library',
                   'event', 'project', 'sequence', 'spine', 'asset-clip', 'marker',
-                  'adjust-volume', 'param', 'fadeIn', 'fadeOut', 'conform-rate'}
+                  'adjust-volume', 'param', 'fadeIn', 'fadeOut', 'conform-rate',
+                  'adjust-conform', 'adjust-transform', 'adjust-blend'}
 FCP_SOURCE_RATES = {Fraction(24000, 1001): '23.98', Fraction(24): '24',
                     Fraction(25): '25', Fraction(30000, 1001): '29.97',
                     Fraction(30): '30', Fraction(60): '60',
@@ -123,18 +127,24 @@ def _add_asset(resources, identifier, path, kind, duration, *, channels=None):
         attrs.update(hasVideo='0', hasAudio='1', audioSources='1',
                      audioChannels=str(channels), audioRate=str(sample_rate))
     else:
-        video_format = 'fmt'
+        video_format = identifier + '_format'
         if kind == 'video':
             picture = next((s for s in _stream_info(path)['streams'] if s['codec_type'] == 'video'), None)
             if picture is None:
                 raise ValueError('visual cue asset has no video')
-            source_rate = Fraction(picture['r_frame_rate'])
-            if source_rate <= 0:
-                raise ValueError('visual cue asset FPS is invalid')
-            video_format = identifier + '_format'
-            ET.SubElement(resources, 'format', id=video_format,
-                          frameDuration=_fcp_time(1 / source_rate),
-                          width=str(picture['width']), height=str(picture['height']))
+            source_width, source_height = check_video_geometry(picture)
+            source_rate = check_overlay_video_clock(path, picture)
+            frame_duration = _fcp_time(1 / source_rate)
+        else:
+            with Image.open(path) as image:
+                if image.getexif().get(274, 1) != 1:
+                    raise ValueError('rotated image geometry is unsupported')
+                source_width, source_height = image.size
+            canvas_format = resources.find("format[@id='fmt']")
+            frame_duration = canvas_format.get('frameDuration')
+        ET.SubElement(resources, 'format', id=video_format,
+                      frameDuration=frame_duration,
+                      width=str(source_width), height=str(source_height))
         attrs.update(hasVideo='1', hasAudio='0', format=video_format)
     asset = ET.SubElement(resources, 'asset', attrs)
     ET.SubElement(asset, 'media-rep', kind='original-media', src=path.as_uri())
@@ -169,6 +179,9 @@ def _validate_base(root, production):
     if any(node.tag in {'timeMap', 'filter-video', 'filter-audio', 'transition', 'gap', 'title'}
            for node in root.iter()):
         raise ValueError('base XML has unsupported edits')
+    if any(node.tag in {'adjust-conform', 'adjust-transform', 'adjust-blend'}
+           for node in root.iter()):
+        raise ValueError('base XML has unsupported spatial adjustments')
     _base_conform(root, sequence, spine)
     cues = validate_cues(production.get('cues', []), production.get('assets', []), total)
     return sequence, spine, total, cues
@@ -350,8 +363,18 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix'):
                         if source_rate in FCP_SOURCE_RATES:
                             attrs['srcFrameRate'] = FCP_SOURCE_RATES[source_rate]
                         ET.SubElement(node, 'conform-rate', attrs)
-                if role in {'image', 'video'}:
-                    manual.append(f"Visual cue {cue['id']} preserves source/range only; match preview scale, crop, position, color and subject/subtitle clearance in FCP.")
+                source_format = resources.find(f"format[@id='{identifier}_format']")
+                canvas_format = resources.find("format[@id='fmt']")
+                placement = measure_placement(cue, int(canvas_format.get('width')),
+                                              int(canvas_format.get('height')),
+                                              int(source_format.get('width')),
+                                              int(source_format.get('height')))
+                ET.SubElement(node, 'adjust-conform', type='none')
+                ET.SubElement(node, 'adjust-transform',
+                              position=' '.join(xml_number(value) for value in placement['transform_position']),
+                              scale=' '.join(xml_number(value) for value in placement['transform_scale']))
+                ET.SubElement(node, 'adjust-blend', amount=xml_number(placement['opacity']))
+                manual.append(f"Visual cue {cue['id']} has static placement; inspect FCP geometry, color and subject/subtitle clearance against preview.")
             if cue.get('beat_anchor') is not None:
                 anchor_time = _seconds(cue['beat_anchor'], 'beat_anchor')
                 if not begin <= anchor_time < finish:
@@ -388,6 +411,9 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix'):
     result = {'mode': mode, 'xml': str(output), 'duration': _fcp_time(total),
               'resources': resource_evidence, 'manual_remaining': manual,
               'dtd': dtd_result, 'gui_import': 'unverified'}
+    if mode == 'editable' and any(cue['role'] in {'image', 'video', 'title'} for cue in cues):
+        result['placement_status'] = 'pending_fcp_gui_calibration'
+        result['geometry_source'] = 'shared_preview_pixel_model'
     inspect_production_xml(output, expected=result)
     return result
 
@@ -399,6 +425,7 @@ def inspect_production_xml(path, expected=None):
     unknown = {node.tag for node in root.iter()} - SUPPORTED_TAGS
     if unknown:
         raise ValueError(f'unknown or unsupported FCPXML structure: {sorted(unknown)}')
+    _validate_spatial_context(root, spine)
     conform = _base_conform(root, sequence, spine)
     forbidden = {'timeMap', 'filter-video', 'filter-audio', 'transition', 'gap',
                  'sync-clip', 'multicam', 'mc-clip', 'ref-clip', 'title'}
@@ -451,11 +478,21 @@ def inspect_production_xml(path, expected=None):
                 raise ValueError(f'unknown primary clip child: {node.tag}')
             if node.get('ref') not in asset_refs or not node.get('lane'):
                 raise ValueError('connected clip lacks resource/lane')
-            if any(child.tag not in {'adjust-volume', 'conform-rate'} for child in node):
+            if any(child.tag not in {'adjust-volume', 'conform-rate', 'adjust-conform',
+                                    'adjust-transform', 'adjust-blend'} for child in node):
                 raise ValueError('connected effect/structure is unsupported')
+            spatial_order = [child.tag for child in node if child.tag in
+                             {'adjust-conform', 'adjust-transform', 'adjust-blend'}]
+            if spatial_order and spatial_order != ['adjust-conform', 'adjust-transform', 'adjust-blend']:
+                raise ValueError('visual placement node order is unsupported')
             source_asset = asset_refs[node.get('ref')]
             connected_conform = None
-            if node.get('srcEnable') == 'video' and source_asset.get('format'):
+            if node.get('srcEnable') not in {'video', 'audio'}:
+                raise ValueError('connected clip source enable must be video or audio')
+            video_format = None
+            if node.get('srcEnable') == 'video':
+                if not source_asset.get('format'):
+                    raise ValueError('connected visual source format missing')
                 video_format = format_refs.get(source_asset.get('format'))
                 if video_format is None:
                     raise ValueError('connected visual source format missing')
@@ -463,6 +500,11 @@ def inspect_production_xml(path, expected=None):
                 connected_conform = _check_conform_node(node, source_rate, output_rate)
             elif node.find('conform-rate') is not None:
                 raise ValueError('audio connection cannot have conform-rate')
+            placement = parse_static_placement(node)
+            if node.get('srcEnable') == 'audio' and placement is not None:
+                raise ValueError('audio connection cannot have visual placement')
+            if node.get('srcEnable') == 'video' and node.find('adjust-volume') is not None:
+                raise ValueError('video connection cannot have audio volume')
             volume = node.find('adjust-volume')
             cue_output = parent_output + _read_time(node.get('offset')) - parent_start
             cue_duration = _read_time(node.get('duration'))
@@ -474,6 +516,9 @@ def inspect_production_xml(path, expected=None):
                               'start': node.get('start'), 'duration': node.get('duration'),
                               'srcEnable': node.get('srcEnable'), 'audioRole': node.get('audioRole'),
                               'videoRole': node.get('videoRole'), 'conform_rate': connected_conform,
+                              'placement': placement,
+                              'source_size': ([int(video_format.get('width')), int(video_format.get('height'))]
+                                              if node.get('srcEnable') == 'video' else None),
                               'gain': volume.get('amount') if volume is not None else None,
                               'fade_in': volume.find('.//fadeIn').get('duration') if volume is not None and volume.find('.//fadeIn') is not None else None,
                               'fade_out': volume.find('.//fadeOut').get('duration') if volume is not None and volume.find('.//fadeOut') is not None else None})
@@ -494,6 +539,29 @@ def inspect_production_xml(path, expected=None):
                                               or connected[0]['ref'] != 'production_mix'):
             raise ValueError('mix XML would double original audio or omit mixed PCM')
     return observed
+
+
+def _validate_spatial_context(root, spine):
+    """Only direct connected visual clips may carry static spatial nodes."""
+    spatial = {'adjust-conform', 'adjust-transform', 'adjust-blend'}
+    parents = {child: parent for parent in root.iter() for child in parent}
+    connected = set()
+    for node in root.iter():
+        if node.tag not in spatial:
+            continue
+        owner = parents.get(node)
+        primary = parents.get(owner)
+        if (owner is None or owner.tag != 'asset-clip' or
+                owner.get('srcEnable') != 'video' or
+                primary is None or primary.tag != 'asset-clip' or
+                parents.get(primary) is not spine):
+            raise ValueError('visual placement is outside a connected video clip')
+        connected.add(owner)
+    for clip in connected:
+        order = [child.tag for child in clip if child.tag in spatial]
+        if order != ['adjust-conform', 'adjust-transform', 'adjust-blend']:
+            raise ValueError('visual placement node order is unsupported')
+        parse_static_placement(clip)
 
 
 def compare_production_reexport(expected_xml, reexport_xml):
