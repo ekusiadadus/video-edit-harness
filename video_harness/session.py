@@ -963,20 +963,21 @@ class Session:
         """A sealed local comparison page; creating it has no adoption effect."""
         if not isinstance(render_ids, list) or not 2 <= len(render_ids) <= 4 or len(set(render_ids)) != len(render_ids):
             raise ValueError('Compare two to four distinct renders (up to three additions plus natural)')
-        if mode not in {'effects','timing'}:
-            raise ValueError('Comparison mode must be effects or timing')
+        if mode not in {'effects','timing','structure'}:
+            raise ValueError('Comparison mode must be effects, timing or structure')
         with self._lock():
             state = self._load()
             self._idle(state)
             self._verify(state)
             renders = [self._find_render(state, rid) for rid in render_ids]
-            if len({r['plan']['sha256'] for r in renders}) != 1 or len({r['brief']['sha256'] for r in renders}) != 1:
+            if ((mode != 'structure' and len({r['plan']['sha256'] for r in renders}) != 1)
+                    or len({r['brief']['sha256'] for r in renders}) != 1):
                 raise ValueError('Compare candidates of the same edit plan and brief')
             from .comparison import comparison_evidence
             for render in renders:
                 self._verify_render(render)
             evidence = comparison_evidence(renders, state['source'], mode=mode)
-            timing_rows = {row['render_id']:row for row in evidence['candidates']} if mode=='timing' else {}
+            timing_rows = {row['render_id']:row for row in evidence['candidates']} if mode in {'timing','structure'} else {}
             rows = []
             for render in renders:
                 label = read(render['project']['path']).get('editing_pattern', {}).get('id', 'natural')
@@ -987,7 +988,10 @@ class Session:
                                  'retime_operations':timing_rows[render['id']]['retime_operations'],
                                  'source_coverage':timing_rows[render['id']]['source_coverage'],
                                  'production_changes':timing_rows[render['id']].get('production_changes',{})}
-                                if mode=='timing' else {})})
+                                if mode in {'timing','structure'} else {}),
+                             **({'structure':timing_rows[render['id']]['structure'],
+                                 'source_span_changes':timing_rows[render['id']]['source_span_changes']}
+                                if mode=='structure' else {})})
             folder = self.root / 'comparisons'
             folder.mkdir(exist_ok=True)
             target = folder / (uuid.uuid4().hex[:12] + '.html')

@@ -1,5 +1,6 @@
 """Evidence for fair creative comparisons; never a perceptual approval."""
 from copy import deepcopy
+from collections import Counter
 from fractions import Fraction
 from pathlib import Path
 
@@ -11,10 +12,10 @@ from .time_mapping import compile_retime
 
 def comparison_page(rows, mode='effects'):
     """Offline synchronized comparison; selection export is feedback, not approval."""
-    if mode not in ('effects', 'timing'):
+    if mode not in ('effects', 'timing', 'structure'):
         raise ValueError('Unknown comparison mode')
-    if mode == 'timing':
-        return _timing_page(rows)
+    if mode in ('timing', 'structure'):
+        return _timing_page(rows, mode=mode)
     import html
     import json
     cards = []
@@ -75,7 +76,7 @@ FIXED_SETTINGS = ('input_color', 'white_balance_gains', 'use_case', 'style',
                   'region_corrections', 'composition_guides', 'visual_pipeline_version')
 
 
-def _timing_page(rows):
+def _timing_page(rows, mode='timing'):
     """Retiming changes output time, so each full video has its own controls."""
     import html
     import json
@@ -110,13 +111,25 @@ def _timing_page(rows):
             details += (f'<p>追加した音: {sum(c.get("role") in ("music", "sfx") for c in cues)} 箇所、'
                         f'追加した映像・文字: {sum(c.get("role") not in ("music", "sfx") for c in cues)} 箇所、'
                         f'エフェクト: {len(additions.get("rendered_effects", []))} 箇所</p>')
+        if mode == 'structure':
+            details += '<h3>素材の順序・範囲</h3><ol>' + ''.join(
+                '<li>' + html.escape(_structure_label(span)) + '</li>'
+                for span in row.get('structure', [])) + '</ol>'
+            changes = row.get('source_span_changes', {})
+            details += (f'<p>自然版に対する範囲の変更: 追加 {len(changes.get("added", []))}、'
+                        f'除去 {len(changes.get("removed", []))}。同じ範囲の反復も別に数えます。</p>')
+            for key, title in (('added', '追加した範囲'), ('removed', '除去した範囲')):
+                if changes.get(key):
+                    details += '<h3>' + title + '</h3><ul>' + ''.join(
+                        '<li>' + html.escape(_structure_label(span)) + '</li>'
+                        for span in changes[key]) + '</ul>'
         cards.append(f'<article><h2>{html.escape(row["label"])}</h2>'
                      f'<video controls preload="metadata" playsinline src="{html.escape(row["video"], quote=True)}"></video>'
                      + details +
                      f'<button data-choice="{index}">この案を候補に選ぶ</button>'
                      f'<p>SHA-256: <code>{html.escape(row["sha256"])}</code></p></article>')
     data = json.dumps(rows, ensure_ascii=False).replace('<', '\\u003c')
-    return '''<!doctype html><html lang="ja"><meta charset="utf-8">
+    page = '''<!doctype html><html lang="ja"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width"><title>間の比較</title>
 <style>body{font:16px system-ui;background:#171717;color:#eee;margin:24px}
 main{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px}
@@ -146,6 +159,12 @@ const a=document.createElement('a');a.href=url;a.download='comparison-selection.
 setTimeout(()=>URL.revokeObjectURL(url),1000);
 status.textContent='修正メモを保存しました。生成した動画を再確認してください。';};
 </script></html>'''
+    if mode == 'structure':
+        page = page.replace('<title>間の比較</title>', '<title>構成の比較</title>').replace(
+            '<h1>同じ元のカットを使った間の比較</h1>', '<h1>構成・順序・間の比較</h1>').replace(
+            '速度変更や停止で各案の長さと元映像の使われ方が変わります。',
+            '素材の選択範囲・順序・速度変更によって、各案の内容と長さが変わります。')
+    return page
 
 
 def _timing_mapping(render, mapping, cfg):
@@ -198,9 +217,9 @@ def _timing_dimensions(mapping, fallback=None):
     elif isinstance(mapping.get('xml'), dict) and 'frame_duration' in mapping['xml']:
         fps = 1 / Fraction(str(mapping['xml']['frame_duration']).removesuffix('s'))
         frames = Fraction(str(mapping['duration'])) * fps
-        if frames.denominator != 1:
-            raise ValueError('Speech original duration is not frame aligned')
-        count = int(frames)
+        # Summed frame-aligned float ranges may serialize with tiny residue.
+        # The common duration tolerance below still rejects fractional frames.
+        count = round(frames)
     elif fallback is not None:
         fps, count = fallback
     else:
@@ -211,10 +230,36 @@ def _timing_dimensions(mapping, fallback=None):
     return fps, count
 
 
-def _timing_evidence(renders, source):
+def _structure_label(span):
+    """Display exact original source ranges without exposing local paths."""
+    if 'asset_id' in span:
+        fps = Fraction(span['source_fps'])
+        start = float(Fraction(span['source_first_frame'], 1) / fps)
+        end = float(Fraction(span['source_end_frame_exclusive'], 1) / fps)
+        text = (f'{span.get("id", "区間")}: {span["asset_id"]} / {start:.3f}–{end:.3f} 秒 '
+                f'（{span["source_first_frame"]}–{span["source_end_frame_exclusive"]} フレーム、'
+                f'{fps} fps、終了を含まない）')
+    else:
+        text = f'{span.get("id", "区間")}: {span["source_start"]}–{span["source_end"]} 秒'
+    return text + (f' / {span["reason"]}' if span.get('reason') else '')
+
+
+def _span_inventory(spans):
+    """Count source ranges, preserving duplicate uses but ignoring sequence IDs."""
+    return Counter(digest({key: value for key, value in span.items() if key not in ('id','reason')}) for span in spans)
+
+
+def _timing_evidence(renders, source, *, mode='timing'):
     if not 2 <= len(renders) <= 4:
         raise ValueError('Compare two to four renders')
     rows = []
+    source_pool = set()
+    if mode == 'structure':
+        for render in renders:
+            mapping = read(render['files']['mapping']['path'])
+            original, _ = _timing_mapping(render, mapping, read(render['project']['path']))
+            if original.get('edit_basis') == 'visual':
+                source_pool.update(span['asset_id'] for span in original['sequence'])
     for render in renders:
         cfg = read(render['project']['path'])
         mapping = read(render['files']['mapping']['path'])
@@ -223,15 +268,21 @@ def _timing_evidence(renders, source):
         source_ids = {row['asset_id'] for row in original.get('sequence', [])
                       if original.get('edit_basis') == 'visual'}
         registry = {a['asset_id']: a for a in cfg.get('assets', [])}
-        if not source_ids <= registry.keys():
+        required_sources = source_pool if mode == 'structure' else source_ids
+        if not required_sources <= registry.keys():
             raise ValueError('Comparison source asset is missing')
         fixed = {'source_sha256': source['sha256'],
-                 'visual_sources': {key: registry[key]['sha256'] for key in sorted(source_ids)},
+                 'visual_sources': {key: registry[key]['sha256'] for key in sorted(required_sources)},
                  'original_mapping_sha256': digest(original),
                  'settings': {key: deepcopy(cfg.get(key, 1 if key == 'visual_pipeline_version' else None))
                               for key in FIXED_SETTINGS if key != 'composition_guides'},
                  'preview': render.get('preview')}
+        if mode == 'structure':
+            fixed.pop('original_mapping_sha256')
+            fixed['edit_basis'] = original.get('edit_basis', 'speech')
         original_fps, base_frames = _timing_dimensions(original)
+        if mode == 'structure':
+            fixed['fps'] = str(original_fps)
         fps, output_frames = _timing_dimensions(mapping, (original_fps, base_frames))
         if fps != original_fps:
             raise ValueError('Timing comparison FPS differs from original edit')
@@ -257,19 +308,57 @@ def _timing_evidence(renders, source):
                                          'omitted_original_timeline_frames': base_frames - len(set(selected)),
                                          'repeated_output_frames': output_frames - len(set(selected)),
                                          'explanation': 'These counts refer to the retained original cut timeline; speed ramps may omit frames and holds may repeat frames.'}})
+        if mode == 'structure':
+            plan = render.get('plan')
+            if not plan or not plan.get('sha256'):
+                raise ValueError('Structure comparison requires sealed render plans')
+            rows[-1]['plan_sha256'] = plan['sha256']
+            rows[-1]['original_mapping_sha256'] = digest(original)
+            if fixed['edit_basis'] == 'visual':
+                for span in original['sequence']:
+                    if span['source_sha256'] != registry[span['asset_id']]['sha256']:
+                        raise ValueError('Structure mapping source SHA differs from registered asset')
+                spans = [{key: deepcopy(span[key]) for key in ('id','asset_id','source_sha256',
+                    'source_fps','source_first_frame','source_end_frame_exclusive')}
+                         for span in original['sequence']]
+            else:
+                if original.get('source', {}).get('sha256') != source['sha256']:
+                    raise ValueError('Structure speech mapping source SHA differs from session source')
+                identities = original.get('sequence_ids', [f'span-{i+1}' for i in range(len(original['keep']))])
+                spans = [{'id': identity, 'source_start': span[0], 'source_end': span[1]}
+                         for identity, span in zip(identities, original['keep'], strict=True)]
+            if plan.get('path'):
+                reasons = {span['id']: span.get('reason', '') for span in read(plan['path']).get('sequence', [])}
+                for span in spans:
+                    span['reason'] = reasons.get(span['id'], '')
+            rows[-1]['structure'] = spans
     if len({digest(row['fixed']) for row in rows}) != 1:
-        raise ValueError('Timing comparison must fix original source coverage, color, base audio settings and preview mode')
+        raise ValueError('Timing comparison must fix original source coverage, color, base audio settings and preview mode'
+                         if mode == 'timing' else 'Structure comparison must fix source pool, edit basis, color, base audio settings and preview mode')
     if not any(row['pattern'] == 'natural' and not row['retime_operations'] for row in rows):
         raise ValueError('Include a natural no-addition baseline in the comparison')
-    return {'version': 2, 'mode': 'timing', 'conditions': rows[0]['fixed'], 'candidates': rows,
+    if mode == 'structure':
+        baseline = next(row for row in rows if row['pattern'] == 'natural' and not row['retime_operations'])
+        inventory = _span_inventory(baseline['structure'])
+        for row in rows:
+            current = _span_inventory(row['structure'])
+            ranges = {digest({key: value for key, value in span.items() if key not in ('id','reason')}):
+                      {key: deepcopy(value) for key, value in span.items() if key not in ('id','reason')}
+                      for span in baseline['structure'] + row['structure']}
+            row['source_span_changes'] = {'baseline_render_id': baseline['render_id'],
+                'added': [ranges[key] for key in (current - inventory).elements()],
+                'removed': [ranges[key] for key in (inventory - current).elements()],
+                'same_range_multiplicity': current == inventory,
+                'explanation': 'Exact original source spans, including duplicate occurrences. Retiming frame omissions/repetitions are reported separately.'}
+    return {'version': 2 if mode == 'timing' else 3, 'mode': mode, 'conditions': rows[0]['fixed'], 'candidates': rows,
             'review_status': 'awaiting_selection_and_exact_render_review',
             'timeline_explanation': 'Each output has its own timeline and duration. Equal output timestamps do not identify the same original frames.',
             'audio_basis': 'Same base audio settings; timing changes may alter audio duration and rhythm.'}
 
 
 def comparison_evidence(renders, source, mode='effects'):
-    if mode == 'timing':
-        return _timing_evidence(renders, source)
+    if mode in ('timing', 'structure'):
+        return _timing_evidence(renders, source, mode=mode)
     if mode != 'effects':
         raise ValueError('Unknown comparison mode')
     if not 2 <= len(renders) <= 4:

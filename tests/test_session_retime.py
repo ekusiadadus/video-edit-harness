@@ -9,6 +9,37 @@ from video_harness.session import Session
 
 
 class SessionRetimeTests(unittest.TestCase):
+    def test_structure_comparison_accepts_sealed_reordered_plans_without_adoption(self):
+        from copy import deepcopy
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);cfg,plan=helpers.VisualEditingTests().fixture(root,source_audio=True)
+            cfg['edit_basis']='visual'
+            project=root/'project.json';write(project,cfg)
+            session=Session.start(project,root/'session')
+            session.propose_visual(plan,'automation');session.approve('automation','Synthetic original sequence')
+            first=session.render(preview=False,actor='automation')
+            reordered=deepcopy(plan);reordered['sequence'].reverse()
+            session.propose_visual(reordered,'automation');session.approve('automation','Synthetic result-first sequence')
+            second=session.render(preview=False,actor='automation')
+            before=session._load()
+            self.assertNotEqual(first['plan']['sha256'],second['plan']['sha256'])
+            for mode in ('effects','timing'):
+                with self.assertRaisesRegex(ValueError,'same edit plan'):
+                    session.compare_candidates([first['id'],second['id']],mode=mode)
+            comparison=session.compare_candidates([first['id'],second['id']],mode='structure')
+            evidence=read(comparison['evidence']['path'])
+            self.assertEqual(evidence['mode'],'structure')
+            self.assertEqual([s['id'] for s in evidence['candidates'][1]['structure']],['second','first'])
+            self.assertTrue(evidence['candidates'][1]['source_span_changes']['same_range_multiplicity'])
+            self.assertEqual([r['video_sha256'] for r in evidence['candidates']],
+                [first['files']['video']['sha256'],second['files']['video']['sha256']])
+            page=Path(comparison['artifact']['path']).read_text()
+            self.assertIn('構成・順序・間の比較',page)
+            self.assertEqual(page.count('<video controls'),2)
+            after=session._load()
+            for key in ('plan','project','reviews','adopted_candidate_id'):
+                self.assertEqual(before.get(key),after.get(key))
+
     def test_visual_retime_effects_keep_pcm_and_fractional_endpoint_through_fcp_mix(self):
         from fractions import Fraction
         import json

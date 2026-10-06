@@ -115,8 +115,8 @@ def parser():
     a = command('adopt-candidate', note=True)
     a.add_argument('candidate_id')
     a = command('compare-candidates', actor=None)
-    a.add_argument('--mode', choices=['effects','timing'], default='effects',
-                   help='effects: synchronized same mapping; timing: independent full retimed playback')
+    a.add_argument('--mode', choices=['effects','timing','structure'], default='effects',
+                   help='effects: same mapping; timing: same cuts; structure: different plans with independent full playback')
     a.add_argument('render_ids', nargs='+')
     a = command('native-finish', note=True)
     a.add_argument('render_id')
