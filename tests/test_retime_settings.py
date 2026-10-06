@@ -115,7 +115,7 @@ class VisualSettingMigrationTests(unittest.TestCase):
             self.migrate(cfg, old, video_clocks={'video': {key: value for key, value in clock.items()
                                                          if key != 'original_layer'}})
 
-    def test_sfx_requires_complete_one_to_one_content(self):
+    def test_sfx_rejects_frame_maps_without_continuous_spans(self):
         old = mapping()
         for role in ("sfx",):
             cue = {"id": "media", "role": role, "asset_id": "asset",
@@ -123,8 +123,33 @@ class VisualSettingMigrationTests(unittest.TestCase):
                    "source_end": "1", "reason": "Observed synchronized media"}
             cfg = config(cue_plan={"version": 1, "mapping_sha256": digest(old), "cues": [cue]})
             for frames in ([0, 1, 3, 4, 5], [0, 1, 2, 3, 3, 4, 5]):
-                with self.assertRaisesRegex(ValueError, "source-content retiming"):
+                with self.assertRaisesRegex(ValueError, "compiled continuous mapping"):
                     self.migrate(cfg, old, compiled(frames))
+
+    def test_sfx_migrates_old_fades_and_continuous_content(self):
+        from video_harness.time_mapping import compile_retime
+        old = mapping()
+        cue = {'id': 'hit', 'asset_id': 'sfx', 'role': 'sfx',
+               'output_start': '1/15', 'output_end': '1/6',
+               'source_start': '0', 'source_end': '1/10', 'fade_in': '1/30',
+               'fade_out': '1/30', 'reason': 'Observed picture accent'}
+        asset = {'asset_id': 'sfx', 'path': '/hit.wav', 'sha256': 'b'*64, 'kind': 'sfx'}
+        cfg = config(assets=[asset], cue_plan={'version': 1,
+            'mapping_sha256': digest(old), 'cues': [cue]})
+        retime = compile_retime(6, '30/1', [{'id': 'slow', 'kind': 'ramp',
+            'source_first_frame': 2, 'source_end_frame_exclusive': 5,
+            'speed_start': .5, 'speed_end': .5, 'reason': 'Preserve action detail'}])
+        with patch('video_harness.cues._check_asset', return_value=asset), \
+             patch('video_harness.cues.subprocess.check_output',
+                   return_value=json.dumps({'format': {'duration': '1'}}).encode()):
+            result = self.migrate(cfg, old, retime, audio_backend='phase_vocoder')
+        moved = result['changes']['cue_plan']['cues'][0]
+        self.assertEqual((moved['output_start'], moved['output_end']), ('1/15', '4/15'))
+        self.assertEqual(moved['fade_in'], cue['fade_in'])
+        self.assertEqual(moved['audio_retime']['mapping'], retime)
+        self.assertEqual(moved['audio_retime']['backend'], 'phase_vocoder')
+        self.assertEqual(result['evidence']['items'][0]['content_policy'],
+                         'original_pcm_pitch_preserving_content_retime')
 
     def test_video_existing_sealed_samples_are_composed(self):
         old = mapping()

@@ -13,7 +13,7 @@ import subprocess
 ROLES = {"music", "sfx", "image", "video", "title"}
 FIELDS = {"id", "asset_id", "role", "output_start", "output_end", "source_start",
           "source_end", "gain_db", "fade_in", "fade_out", "loop", "duck",
-          "reason", "text", "position", "opacity", "beat_anchor", "phase_map"}
+          "reason", "text", "position", "opacity", "beat_anchor", "phase_map", "audio_retime"}
 
 
 def _seconds(value, name):
@@ -182,9 +182,15 @@ def validate_cues(cues, assets, duration, fps=None):
         if role == "image" and (source_start or source_end):
             raise ValueError("image cues have no source time range")
         phase = validate_video_phase(cue, fps)
+        from .sfx_retime import validate_audio_retime
+        audio_retime = validate_audio_retime(cue, assets, fps)
         if phase is not None:
             cue["phase_map"] = phase
         required_duration = Fraction(phase["original_frame_count"], 1) / _seconds(fps, "fps") if phase else stop - start
+        if audio_retime:
+            required_duration = Fraction(audio_retime['original_end_frame_exclusive'] - audio_retime['original_start_frame'], 1) / Fraction(audio_retime['mapping']['fps'])
+            if abs(end - Fraction(audio_retime['mapping']['output_frame_count'], 1) / Fraction(audio_retime['mapping']['fps'])) > Fraction(1, 1000000):
+                raise ValueError('SFX retime mapping duration differs from output duration')
         if not cue.get("loop", False) and role in {"music", "sfx", "video"} and source_end - source_start < required_duration:
             raise ValueError(f"source too short without loop: {cue_id}")
         if role in {"image", "title"} and cue.get("loop"):
@@ -193,7 +199,7 @@ def validate_cues(cues, assets, duration, fps=None):
             value = _seconds(cue.get(name, 0), name)
             if name != "gain_db" and value < 0:
                 raise ValueError(f"negative {name}")
-        if _seconds(cue.get("fade_in", 0), "fade_in") + _seconds(cue.get("fade_out", 0), "fade_out") > stop - start:
+        if _seconds(cue.get("fade_in", 0), "fade_in") + _seconds(cue.get("fade_out", 0), "fade_out") > (required_duration if audio_retime else stop - start):
             raise ValueError(f"fades exceed cue duration: {cue_id}")
         for name in ("loop", "duck"):
             if name in cue and not isinstance(cue[name], bool):

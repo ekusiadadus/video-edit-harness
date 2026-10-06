@@ -57,6 +57,8 @@ def cue_identity(cue):
     result["loop"] = cue.get("loop", False)
     result["duck"] = cue.get("duck", cue["role"] == "music")
     result.update({key: str(_seconds(cue.get(key, 0), key)) for key in _TIMES})
+    if 'audio_retime' in cue:
+        result['audio_retime_sha256'] = _digest(cue['audio_retime'])
     return result
 
 
@@ -183,8 +185,12 @@ def load_audio_envelopes(path, *, expected_cues=None, expected_assets=None,
                                                   "source_period_samples", "array", "array_sha256"}:
             raise ValueError("invalid audio gain cue")
         cue = row["cue"]
-        if not isinstance(cue, dict) or set(cue) != {"id", "asset_id", "role", "loop", "duck", *_TIMES}:
+        identity_keys = {"id", "asset_id", "role", "loop", "duck", *_TIMES}
+        if not isinstance(cue, dict) or set(cue) not in (identity_keys, identity_keys | {'audio_retime_sha256'}):
             raise ValueError("invalid audio gain cue identity")
+        if 'audio_retime_sha256' in cue and (cue.get('role') != 'sfx' or cue.get('loop') or
+                not isinstance(cue['audio_retime_sha256'], str) or not _HEX.fullmatch(cue['audio_retime_sha256'])):
+            raise ValueError('invalid audio gain SFX retime binding')
         if (not isinstance(cue["id"], str) or not cue["id"] or cue["id"] in curves or
                 not isinstance(cue["asset_id"], str) or cue["role"] not in ("music", "sfx") or
                 type(cue["loop"]) is not bool or type(cue["duck"]) is not bool or

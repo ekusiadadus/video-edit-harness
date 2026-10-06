@@ -114,6 +114,9 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
     for cue in cues:
         asset = assets[cue["asset_id"]]
         path = Path(asset.get("path") or asset.get("local_path"))
+        retime_source_identity = file_identity(path) if 'audio_retime' in cue else None
+        if retime_source_identity and retime_source_identity['sha256'] != cue['audio_retime']['source_sha256']:
+            raise ValueError('SFX source changed since retime validation')
         if gain_output is not None:
             asset_identities[cue["asset_id"]] = file_identity(path)
             if asset_identities[cue["asset_id"]]["sha256"] != (asset.get("sha256") or asset.get("file_sha256")):
@@ -125,6 +128,8 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
         chunk = _decode(path, float(_seconds(cue["source_start"], 'source_start')), source_len)
         if gain_output is not None and file_identity(path) != asset_identities[cue["asset_id"]]:
             raise ValueError(f"cue asset changed during decode: {cue['id']}")
+        if retime_source_identity and file_identity(path) != retime_source_identity:
+            raise ValueError('SFX source changed during content decode')
         if not len(chunk):
             raise ValueError(f"cue asset has no decoded audio: {cue['id']}")
         expected_chunk = round(source_len * RATE)
@@ -134,7 +139,15 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
             chunk = np.pad(chunk, ((0, expected_chunk - len(chunk)), (0, 0)))
         elif len(chunk) > expected_chunk:
             chunk = chunk[:expected_chunk]
-        if cue["loop"]:
+        retime_evidence = None
+        if 'audio_retime' in cue:
+            from .sfx_retime import render_retimed_sfx
+            clip, retime_evidence = render_retimed_sfx(chunk, cue,
+                log_dir=Path(output_wav).parent / (Path(output_wav).stem + f'.sfx-{len(evidence_cues)}-logs'))
+            if len(clip) != target:
+                raise ValueError('Retimed SFX PCM count differs from output cue')
+            seam_gain = None
+        elif cue["loop"]:
             # Keep the musical period exactly len(chunk) samples. A short
             # taper around each seam removes clicks without changing cue/beat
             # timing; the resulting dip still needs an audible phrase review.
@@ -166,8 +179,8 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
             relative = 20 * math.log10(speech_rms / cue_rms) - separation
             gain_db += min(0.0, relative)  # never automatically boost a quiet track
         gain = np.full(target, 10 ** (gain_db / 20), dtype=np.float32)
-        fade_in = min(target, round(_seconds(cue["fade_in"], 'fade_in') * RATE))
-        fade_out = min(target, round(_seconds(cue["fade_out"], 'fade_out') * RATE))
+        fade_in = 0 if retime_evidence else min(target, round(_seconds(cue["fade_in"], 'fade_in') * RATE))
+        fade_out = 0 if retime_evidence else min(target, round(_seconds(cue["fade_out"], 'fade_out') * RATE))
         if fade_in:
             gain[:fade_in] *= np.linspace(0, 1, fade_in, dtype=np.float32)
         if fade_out:
@@ -185,6 +198,8 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
                               "duck": bool(cue["duck"] and duck_envelope is not None),
                               "loop": cue["loop"], "loop_period_samples": len(chunk) if cue["loop"] else None,
                               "loop_seam_taper_seconds": .01 if cue["loop"] else 0})
+        if retime_evidence:
+            evidence_cues[-1]['content_retime'] = retime_evidence
     peak_before = float(np.max(np.abs(output)))
     if not math.isfinite(peak_before):
         raise ValueError("mixed audio contains non-finite samples")

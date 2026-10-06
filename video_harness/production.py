@@ -99,6 +99,9 @@ def resolve_production(cfg, mapping):
         if explicit['mapping_sha256'] != mapping_sha:
             raise ValueError('Cue plan is stale: output timeline changed')
         cues = validate_cues(explicit['cues'], assets, duration, mapping.get('fps'))
+        for cue in cues:
+            if 'audio_retime' in cue and cue['audio_retime']['mapping'] != mapping.get('retime', {}).get('compiled_mapping'):
+                raise ValueError('SFX content retime differs from the rendered picture mapping')
         reasons = ['Explicit timeline-bound cue plan.']
     else:
         context = deepcopy(cfg.get('asset_selection_request', {}))

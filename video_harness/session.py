@@ -951,7 +951,8 @@ class Session:
                     raise ValueError('Existing settings refer to a different retime stage; rebuild from the original edit')
                 overlay_evidence = read(render['files']['overlays']['path']) if 'overlays' in render['files'] else {}
                 clocks = {row['cue_id']: row for row in overlay_evidence.get('video_cue_clocks', [])}
-                migrated=migrate_visual_settings(cfg,original_mapping,proposal['mapping'], video_clocks=clocks)
+                migrated=migrate_visual_settings(cfg,original_mapping,proposal['mapping'], video_clocks=clocks,
+                    audio_backend=proposal['request'].get('audio_backend', 'rubberband'))
                 changes.update(migrated['changes'])
                 migration={**migrated['evidence'], 'actor':actor, 'reason':note,
                            'base_render_id':render_id, 'base_render_sha256':render['files']['video']['sha256'],

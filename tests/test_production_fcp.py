@@ -23,6 +23,35 @@ def asset(path, kind, identifier):
 
 
 class ProductionFCPTests(unittest.TestCase):
+    def test_sfx_content_retime_baked_mix_and_project_clock_binding(self):
+        from video_harness.sfx_retime import make_audio_retime
+        from video_harness.time_mapping import compile_retime
+        from fractions import Fraction
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base, mixed, assets = self.fixtures(root)
+            sound = dict(assets[0], kind='sfx')
+            cue = {'id': 'hit', 'asset_id': sound['asset_id'], 'role': 'sfx',
+                   'output_start': '0', 'output_end': '1', 'source_start': '0', 'source_end': '1'}
+            mapping = compile_retime(60, '30', [{'id': 'ramp', 'kind': 'ramp',
+                'source_first_frame': 0, 'source_end_frame_exclusive': 60,
+                'speed_start': .5, 'speed_end': 1.5, 'reason': 'Synthetic SFX stretch'}])
+            metadata = make_audio_retime(cue, [sound], mapping)
+            selected = [i for i, frame in enumerate(mapping['frame_map']) if frame < 30]
+            cue.update(audio_retime=metadata, output_end=str(Fraction(selected[-1]+1, 30)))
+            production = {'assets': [sound], 'cues': [cue]}
+            result = export_production_xml(base, production, mixed, root / 'baked.fcpxml', mode='mix')
+            self.assertEqual(result['mode'], 'mix')
+            self.assertTrue((root / 'baked.fcpxml').is_file())
+            tree = ET.parse(base)
+            tree.getroot().find('./resources/format').set('frameDuration', '1/24s')
+            for clip in tree.getroot().findall('.//spine/asset-clip'):
+                ET.SubElement(clip, 'conform-rate', scaleEnabled='0', srcFrameRate='30', frameSampling='floor')
+            bad = root / 'wrong-clock.fcpxml'
+            tree.write(bad)
+            with self.assertRaisesRegex(ValueError, 'FPS differs'):
+                export_production_xml(bad, production, mixed, root / 'wrong.fcpxml', mode='mix')
+
     def fixtures(self, root):
         source = root / 'source.mp4'
         subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-y', '-f', 'lavfi',

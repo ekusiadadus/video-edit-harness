@@ -29,7 +29,7 @@ def _seconds(frame, fps):
     return str(Fraction(frame, 1) / fps)
 
 
-def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clocks=None):
+def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clocks=None, audio_backend='rubberband'):
     """Return atomic candidate changes and frame-level migration evidence.
 
     ``original_mapping`` must be the observed render's mapping. The caller also
@@ -104,10 +104,12 @@ def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clo
                     "original_cue_sha256": clock['original_cue_sha256'],
                     "frames": [prior_phase["frames"][base-first] if prior_phase else base-first for base in selected]}
             if role == "sfx":
-                require_translation(cue, f"cue_plan:{cue.get('id')}")
+                from .sfx_retime import make_audio_retime
+                moved['audio_retime'] = make_audio_retime(cue, cfg.get('assets', []), compiled_retime, audio_backend)
             evidence["items"][-1]["content_policy"] = (
                 "normal_playback_on_new_output_clock" if role == "music" else
                 "original_output_frame_video_content" if role == "video" else
+                "original_pcm_pitch_preserving_content_retime" if role == "sfx" else
                 "source_content_unchanged_pure_translation" if role in {"video", "sfx"} else
                 "static_content_new_output_clock_fades")
             if "beat_anchor" in cue:
