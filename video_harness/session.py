@@ -672,7 +672,7 @@ class Session:
         require_note(note)
         allowed = {'depth_layer', 'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
-                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version'}
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'fcp_audio_automation', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version'}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError('Only color/audio/render project settings can change here')
         with self._lock():
@@ -716,7 +716,7 @@ class Session:
         actor_name(actor)
         allowed = {'depth_layer', 'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
-                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version'}
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'fcp_audio_automation', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version'}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError('Candidate changes must be render settings only')
         with self._lock():

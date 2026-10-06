@@ -43,6 +43,9 @@ def frozen_pattern(cfg):
 
 def freeze_pattern(cfg, refresh=False):
     result = deepcopy(cfg)
+    measured = result.get('fcp_audio_automation')
+    if measured is not None and (measured != 'measured' or result.get('fcp_handoff') != 'editable'):
+        raise ValueError('fcp_audio_automation measured requires explicit editable handoff')
     if 'editing_pattern' in result:
         result['_editing_pattern_snapshot'] = resolve_pattern(result) if refresh else frozen_pattern(result)
     return result
@@ -208,6 +211,9 @@ def prepare_fcp_handoff(cfg, production, out):
     mode = cfg.get('fcp_handoff', 'mix')
     if mode not in ('mix', 'editable', 'video_only'):
         raise ValueError('Invalid fcp_handoff mode')
+    measured_audio = cfg.get('fcp_audio_automation')
+    if measured_audio is not None and (measured_audio != 'measured' or mode != 'editable'):
+        raise ValueError('fcp_audio_automation measured requires explicit editable handoff')
     if mode == 'editable' and production.get('effects', {}).get('events'):
         raise ValueError('Video effects require burned mix/video_only handoff; editable FCP effects are unsupported')
     if mode == 'editable' and cfg.get('depth_layer'):
@@ -248,7 +254,23 @@ def prepare_fcp_handoff(cfg, production, out):
         base = out / 'finished-picture.fcpxml'
         export_timeline(picture, probe(picture), [(0, duration)], base,
                         cfg.get('name', 'Production Mix'))
-    evidence = export_production_xml(base, production, pcm, output, mode)
+    gain_inputs = None
+    if measured_audio is not None:
+        if mode != 'editable':
+            raise ValueError('measured audio automation cannot fall back to another handoff mode')
+        gain_evidence = read(out / 'audio-gain-evidence.json')
+        if gain_evidence.get('version') != 1 or gain_evidence.get('scope') != 'pre_normalization':
+            raise ValueError('measured audio evidence is unsupported')
+        for name in ('manifest', 'speech', 'mixed_input'):
+            ref = gain_evidence.get(name)
+            if not isinstance(ref, dict) or not ref.get('path') or fingerprint(ref['path']) != ref:
+                raise ValueError('measured audio evidence changed: ' + name)
+        manifest = Path(gain_evidence['manifest']['path'])
+        if manifest.resolve() != (out / 'audio-envelopes' / 'manifest.json').resolve():
+            raise ValueError('measured audio evidence refers to another render')
+        gain_inputs = {'folder': manifest.parent, 'speech': gain_evidence['speech']['path'],
+                       'mixed': gain_evidence['mixed_input']['path']}
+    evidence = export_production_xml(base, production, pcm, output, mode, gain_inputs=gain_inputs)
     if mode == 'mix':
         evidence['picture'] = 'Finished graded MP4, including overlays; do not apply look.cube again.'
         evidence['picture_file'] = fingerprint(picture)

@@ -11,6 +11,7 @@ from fractions import Fraction
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 import hashlib
+import json
 import math
 import subprocess
 import tempfile
@@ -33,7 +34,8 @@ DTD_PATHS = (
 SUPPORTED_TAGS = {'fcpxml', 'resources', 'format', 'asset', 'media-rep', 'library',
                   'event', 'project', 'sequence', 'spine', 'asset-clip', 'marker',
                   'adjust-volume', 'param', 'fadeIn', 'fadeOut', 'conform-rate',
-                  'adjust-conform', 'adjust-transform', 'adjust-blend'}
+                  'adjust-conform', 'adjust-transform', 'adjust-blend',
+                  'keyframeAnimation', 'keyframe'}
 FCP_SOURCE_RATES = {Fraction(24000, 1001): '23.98', Fraction(24): '24',
                     Fraction(25): '25', Fraction(30000, 1001): '29.97',
                     Fraction(30): '30', Fraction(60): '60',
@@ -240,7 +242,8 @@ def _safe_name(name):
     return ''.join(ch if ch.isalnum() or ch in '-_' else '_' for ch in name)[:64]
 
 
-def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix'):
+def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix', *,
+                          gain_inputs=None):
     """Write one FCP handoff mode and return exact support/fidelity evidence.
 
     ``mix`` disables original audio and connects a full-length PCM replacement.
@@ -249,6 +252,8 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix'):
     """
     if mode not in {'mix', 'editable', 'video_only'}:
         raise ValueError('unsupported production FCP mode')
+    if gain_inputs is not None and mode != 'editable':
+        raise ValueError('measured audio automation requires editable mode')
     if mode == 'editable' and production.get('depth_layer'):
         raise ValueError('Depth layer requires baked mix/video_only FCP handoff')
     output = Path(output)
@@ -265,6 +270,20 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix'):
     if resources is None or resources.find("format[@id='fmt']") is None:
         raise ValueError('base FCPXML format resource is unsupported')
     assets = _asset_map(production.get('assets', []))
+    gain_manifest, gain_curves = None, None
+    automation_evidence = []
+    if gain_inputs is not None:
+        from .audio_envelopes import load_audio_envelopes
+        if (not isinstance(gain_inputs, dict) or
+                set(gain_inputs) != {'folder', 'speech', 'mixed'} or
+                gain_inputs['speech'] is None or gain_inputs['mixed'] is None):
+            raise ValueError('measured audio automation needs bound mixer inputs')
+        gain_manifest, gain_curves = load_audio_envelopes(
+            gain_inputs['folder'], expected_cues=[cue for cue in cues if cue['role'] in {'music', 'sfx'}],
+            expected_assets=assets, expected_speech=gain_inputs['speech'],
+            expected_mixed_wav=gain_inputs['mixed'])
+        if abs(Fraction(gain_manifest['samples'], MIX_RATE) - total) > Fraction(1, MIX_RATE):
+            raise ValueError('audio automation duration differs from sequence')
     for cue in cues:
         if cue.get('asset_id'):
             _check_asset(cue['asset_id'], assets)
@@ -293,6 +312,24 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix'):
         # represented by a static connected track. Preserve editable content and
         # make the remaining finishing explicit.
         pending_markers = []
+        if gain_manifest is not None:
+            speech = Path(gain_inputs['speech'])
+            speech_duration, channels = _sound_duration(speech)
+            if abs(speech_duration - total) > Fraction(1, MIX_RATE):
+                raise ValueError('dialogue PCM does not match sequence duration')
+            for clip in spine:
+                clip.set('srcEnable', 'video')
+            _add_asset(resources, 'production_dialogue', speech, 'mix', speech_duration, channels=channels)
+            dialogue = ET.SubElement(spine[0], 'asset-clip', ref='production_dialogue',
+                name='Measured Dialogue PCM', lane='-3',
+                offset=_fcp_time(_anchor_local_time(spine[0], Fraction(0))),
+                start='0s', duration=_fcp_time(min(total, speech_duration)),
+                srcEnable='audio', audioRole='dialogue')
+            guard_db = 20 * math.log10(gain_manifest['global_peak_guard_gain'])
+            ET.SubElement(dialogue, 'adjust-volume', amount=f'{guard_db:.9f}dB')
+            resource_evidence.append({'id': 'production_dialogue', 'path': str(speech.resolve()),
+                'sha256': hashlib.sha256(speech.read_bytes()).hexdigest()})
+            manual.append('Measured audio automation is pre-normalization; final loudness processing and FCP source-clock/interpolation playback calibration remain unverified. Do not treat this XML as the reviewed final mix.')
         for cue in cues:
             role = cue['role']
             identifier = 'prod_' + _safe_name(cue['id'])
@@ -322,16 +359,24 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix'):
             resource_evidence.append({'id': identifier, 'path': str(asset_path.resolve()),
                                       'sha256': hashlib.sha256(asset_path.read_bytes()).hexdigest()})
             if role in {'music', 'sfx'}:
+                if gain_manifest is not None:
+                    row = next(item for item in gain_manifest['cues'] if item['cue']['id'] == cue['id'])
+                    begin, finish = Fraction(row['first_sample'], MIX_RATE), min(total, Fraction(row['end_sample'], MIX_RATE))
+                    length = finish - begin
                 raw_span = _seconds(cue['source_end'], 'source_end') - _seconds(cue['source_start'], 'source_start')
                 span = Fraction(round(float(raw_span) * MIX_RATE), MIX_RATE)
                 periods = math.ceil(length / span) if cue['loop'] else 1
-                if cue['loop']:
+                if gain_manifest is not None and periods + len(automation_evidence) > 1000:
+                    raise ValueError('measured audio exceeds connected part budget')
+                if cue['loop'] and gain_manifest is None:
                     manual.append(f"Cue {cue['id']} uses butt-joined repeats in XML; preview loop crossfade needs FCP review.")
                 for repeat in range(periods):
                     part_start = begin + repeat * span
                     part_length = min(span, finish - part_start)
                     if part_length <= 0:
                         break
+                    if gain_manifest is not None and _seconds(cue['source_start'], 'source_start') + part_length > media_duration:
+                        raise ValueError('measured audio part exceeds source media duration')
                     anchor = _anchor(spine, part_start)
                     node = ET.SubElement(anchor, 'asset-clip',
                                          ref=identifier, name=cue['id'], lane='-1' if role == 'music' else '-2',
@@ -340,7 +385,27 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix'):
                                          duration=_fcp_time(part_length), srcEnable='audio',
                                          audioRole='music' if role == 'music' else 'effects')
                     amount = ET.SubElement(node, 'adjust-volume', amount=f"{float(_seconds(cue['gain_db'], 'gain_db')):.3f}dB")
-                    if repeat == 0 and float(_seconds(cue['fade_in'], 'fade_in')) or repeat == periods - 1 and float(_seconds(cue['fade_out'], 'fade_out')):
+                    if gain_manifest is not None:
+                        from .audio_keyframes import compile_gain_keyframes
+                        first = round((part_start - begin) * MIX_RATE)
+                        last = first + round(part_length * MIX_RATE)
+                        compiled = compile_gain_keyframes(gain_curves[cue['id']][first:last],
+                            source_start=_seconds(cue['source_start'], 'source_start'),
+                            scalar_gain=gain_manifest['global_peak_guard_gain'])
+                        if sum(part['keyframes'] for part in automation_evidence) + len(compiled['keyframes']) > 200000:
+                            raise ValueError('measured audio exceeds total keyframe budget')
+                        amount.set('amount', '0dB')
+                        animation = ET.SubElement(ET.SubElement(amount, 'param', name='amount'), 'keyframeAnimation')
+                        for frame in compiled['keyframes']:
+                            ET.SubElement(animation, 'keyframe', {key: frame[key] for key in ('time', 'value', 'interp', 'curve')})
+                        automation_evidence.append({'cue_id': cue['id'], 'repeat': repeat,
+                            'samples': compiled['samples'], 'keyframes': len(compiled['keyframes']),
+                            'output_start': _fcp_time(part_start), 'source_start': node.get('start'),
+                            'duration': node.get('duration'),
+                            'keyframes_sha256': _animation_digest([{key: frame[key] for key in ('time', 'value', 'interp', 'curve')} for frame in compiled['keyframes']]),
+                            'max_absolute_gain_error': compiled['max_absolute_gain_error'],
+                            'zero_floor_db': compiled['zero_floor_db']})
+                    elif repeat == 0 and float(_seconds(cue['fade_in'], 'fade_in')) or repeat == periods - 1 and float(_seconds(cue['fade_out'], 'fade_out')):
                         param = ET.SubElement(amount, 'param', name='amount')
                         if repeat == 0 and float(_seconds(cue['fade_in'], 'fade_in')):
                             ET.SubElement(param, 'fadeIn', duration=_fcp_time(_seconds(cue['fade_in'], 'fade_in')))
@@ -380,15 +445,22 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix'):
                 if not begin <= anchor_time < finish:
                     raise ValueError('beat anchor outside cue')
                 pending_markers.append((anchor_time, cue['id']))
-            if cue.get('duck'):
+            if cue.get('duck') and gain_manifest is None:
                 manual.append(f"Cue {cue['id']} needs speech-linked ducking reapplied and listened to in FCP.")
         for anchor_time, cue_id in pending_markers:
             anchor = _anchor(spine, anchor_time)
             ET.SubElement(anchor, 'marker', start=_fcp_time(_anchor_local_time(anchor, anchor_time)),
                           value=f"Beat: {cue_id}")
-        if any(c['role'] in {'music', 'sfx'} for c in cues):
+        if gain_manifest is None and any(c['role'] in {'music', 'sfx'} for c in cues):
             manual.append('Static XML gains do not reproduce the preview mixer\'s measured relative gain or peak guard; compare and adjust final audio.')
         manual.append('Import in FCP, check role lanes, media relinking, overlays, fades, and re-export against the reviewed render.')
+    if gain_manifest is not None:
+        checked_manifest, _ = load_audio_envelopes(
+            gain_inputs['folder'], expected_cues=[cue for cue in cues if cue['role'] in {'music', 'sfx'}],
+            expected_assets=assets, expected_speech=gain_inputs['speech'],
+            expected_mixed_wav=gain_inputs['mixed'])
+        if checked_manifest['manifest_sha256'] != gain_manifest['manifest_sha256']:
+            raise ValueError('audio automation inputs changed during export')
     output.parent.mkdir(parents=True, exist_ok=True)
     xml = ET.tostring(root, encoding='utf-8', xml_declaration=True)
     xml = xml.replace(b'?>\n', b'?>\n<!DOCTYPE fcpxml>\n', 1)
@@ -411,6 +483,12 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix'):
     result = {'mode': mode, 'xml': str(output), 'duration': _fcp_time(total),
               'resources': resource_evidence, 'manual_remaining': manual,
               'dtd': dtd_result, 'gui_import': 'unverified'}
+    if gain_manifest is not None:
+        result['audio_automation'] = {'scope': 'pre_normalization',
+            'status': 'pending_fcp_gui_calibration',
+            'manifest_sha256': gain_manifest['manifest_sha256'],
+            'global_peak_guard_gain': gain_manifest['global_peak_guard_gain'],
+            'parts': automation_evidence, 'return_import': 'unsupported'}
     if mode == 'editable' and any(cue['role'] in {'image', 'video', 'title'} for cue in cues):
         result['placement_status'] = 'pending_fcp_gui_calibration'
         result['geometry_source'] = 'shared_preview_pixel_model'
@@ -426,6 +504,7 @@ def inspect_production_xml(path, expected=None):
     if unknown:
         raise ValueError(f'unknown or unsupported FCPXML structure: {sorted(unknown)}')
     _validate_spatial_context(root, spine)
+    _validate_audio_animation_context(root, spine)
     conform = _base_conform(root, sequence, spine)
     forbidden = {'timeMap', 'filter-video', 'filter-audio', 'transition', 'gap',
                  'sync-clip', 'multicam', 'mc-clip', 'ref-clip', 'title'}
@@ -520,6 +599,7 @@ def inspect_production_xml(path, expected=None):
                               'source_size': ([int(video_format.get('width')), int(video_format.get('height'))]
                                               if node.get('srcEnable') == 'video' else None),
                               'gain': volume.get('amount') if volume is not None else None,
+                              'audio_keyframes': _read_audio_animation(node),
                               'fade_in': volume.find('.//fadeIn').get('duration') if volume is not None and volume.find('.//fadeIn') is not None else None,
                               'fade_out': volume.find('.//fadeOut').get('duration') if volume is not None and volume.find('.//fadeOut') is not None else None})
     observed = {'duration': sequence.get('duration'), 'primary': primary,
@@ -530,6 +610,21 @@ def inspect_production_xml(path, expected=None):
         actual = {node['ref'] for node in connected}
         if required != actual:
             raise ValueError(f'production XML resource mismatch: {required ^ actual}')
+        if expected.get('audio_automation') is not None:
+            parts = expected['audio_automation']['parts']
+            dialogue = [item for item in connected if item['ref'] == 'production_dialogue']
+            guard_db = 20 * math.log10(expected['audio_automation']['global_peak_guard_gain'])
+            if (any(item['srcEnable'] != 'video' for item in primary) or len(dialogue) != 1 or
+                    dialogue[0]['audioRole'] != 'dialogue' or dialogue[0]['gain'] != f'{guard_db:.9f}dB' or
+                    dialogue[0]['audio_keyframes'] is not None):
+                raise ValueError('measured dialogue or original audio muting changed')
+            actual_parts = [item for item in connected if item['audioRole'] in {'music', 'effects'}]
+            expected_signatures = sorted((part['cue_id'], part['output_start'], part['source_start'],
+                part['duration'], part['keyframes_sha256']) for part in parts)
+            actual_signatures = sorted((item['name'], item['output_start'], item['start'],
+                item['duration'], _animation_digest(item['audio_keyframes'])) for item in actual_parts)
+            if expected_signatures != actual_signatures:
+                raise ValueError('measured audio automation differs from expected evidence')
         for item in expected.get('resources', []):
             local_path = resolve_media_path(resource_uris[item['id']], path)
             if not local_path.is_file() or hashlib.sha256(local_path.read_bytes()).hexdigest() != item['sha256']:
@@ -539,6 +634,67 @@ def inspect_production_xml(path, expected=None):
                                               or connected[0]['ref'] != 'production_mix'):
             raise ValueError('mix XML would double original audio or omit mixed PCM')
     return observed
+
+
+def _animation_digest(rows):
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def _read_audio_animation(clip):
+    """Read the bounded generated volume automation; reject silent losses."""
+    volumes = clip.findall('adjust-volume')
+    animations = clip.findall('.//keyframeAnimation')
+    if not animations:
+        return None
+    if len(volumes) != 1 or len(animations) != 1:
+        raise ValueError('ambiguous audio keyframe animation')
+    volume = volumes[0]
+    if (volume.attrib != {'amount': '0dB'} or len(volume) != 1 or
+            volume[0].tag != 'param' or volume[0].attrib != {'name': 'amount'} or
+            len(volume[0]) != 1 or volume[0][0] is not animations[0] or animations[0].attrib):
+        raise ValueError('unsupported audio keyframe placement')
+    start = _read_time(clip.get('start', '0s'))
+    finish = start + _read_time(clip.get('duration'))
+    rows = []
+    previous = None
+    for frame in animations[0]:
+        if (frame.tag != 'keyframe' or len(frame) or
+                set(frame.attrib) != {'time', 'value', 'interp', 'curve'} or
+                frame.get('interp') != 'linear' or frame.get('curve') != 'linear'):
+            raise ValueError('unsupported audio keyframe attributes')
+        time = _read_time(frame.get('time'))
+        value = frame.get('value')
+        if not value.endswith('dB'):
+            raise ValueError('unsupported audio keyframe unit')
+        try:
+            db = float(value[:-2])
+        except ValueError as exc:
+            raise ValueError('invalid audio keyframe gain') from exc
+        if (not math.isfinite(db) or not -96 <= db <= 24 or
+                not start <= time < finish or previous is not None and time <= previous):
+            raise ValueError('invalid audio keyframe time or gain')
+        rows.append(dict(frame.attrib))
+        previous = time
+    if not rows or len(rows) > 20000 or _read_time(rows[0]['time']) != start:
+        raise ValueError('invalid audio keyframe coverage')
+    return rows
+
+
+def _validate_audio_animation_context(root, spine):
+    parents = {child: parent for parent in root.iter() for child in parent}
+    for animation in root.iter('keyframeAnimation'):
+        param = parents.get(animation)
+        volume = parents.get(param)
+        owner = parents.get(volume)
+        primary = parents.get(owner)
+        if (param is None or param.tag != 'param' or volume is None or volume.tag != 'adjust-volume' or
+                owner is None or owner.tag != 'asset-clip' or owner.get('srcEnable') != 'audio' or
+                primary is None or primary.tag != 'asset-clip' or parents.get(primary) is not spine):
+            raise ValueError('audio animation outside connected audio clip')
+        _read_audio_animation(owner)
+    if any(parents.get(frame) is None or parents[frame].tag != 'keyframeAnimation'
+           for frame in root.iter('keyframe')):
+        raise ValueError('orphan audio keyframe')
 
 
 def _validate_spatial_context(root, spine):
