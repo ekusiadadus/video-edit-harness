@@ -12,6 +12,14 @@ import math
 
 
 _EFFECTS = {
+    "motion_trail": {
+        "version":1, "intent":"Briefly blend actual past frames within one shot; preserve sound and timing.",
+        "input_count":1, "backend":"local_burned",
+        "parameters":{
+            "history_frames":{"type":"integer","minimum":2,"maximum":4,"default":3},
+            "decay":{"type":"number","minimum":.1,"maximum":.6,"default":.3},
+        },
+    },
     "tracked_zoom": {
         "version": 1, "intent": "Emphasize an explicitly tracked local object; reject lost or stale tracking.",
         "input_count": 1, "backend": "local_burned",
@@ -148,6 +156,10 @@ def validate_parameters(kind: str, parameters: dict | None, *, version: int = 1)
                     f"{kind}.{name} must be between {spec['minimum']} and {spec['maximum']}"
                 )
             normalized[name] = number
+        elif spec['type'] == 'integer':
+            if type(value) is not int or not spec['minimum'] <= value <= spec['maximum']:
+                raise ValueError(f"{kind}.{name} must be an integer between {spec['minimum']} and {spec['maximum']}")
+            normalized[name] = value
         elif spec['type'] == 'file':
             from pathlib import Path
             if not isinstance(value, str) or not value.strip():

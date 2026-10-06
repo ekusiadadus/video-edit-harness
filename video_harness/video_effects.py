@@ -13,7 +13,7 @@ import subprocess
 import uuid
 
 TYPES = {'zoom_pulse', 'split_screen', 'monochrome', 'color_frame',
-         'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe', 'keyword_title', 'tracked_title'}
+         'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe', 'keyword_title', 'tracked_title', 'motion_trail'}
 INTENSITY = {'low': .35, 'medium': .65, 'high': 1.0}
 
 
@@ -104,16 +104,18 @@ def _canonical_event(row, rate, count):
                 raise ValueError('Tracking artifact changed')
             params['track_sha256'] = sha
             _tracking_data(result, rate)
-    elif row['type'] in {'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe'}:
+    elif row['type'] in {'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe', 'motion_trail'}:
         if 'font_sha256' in row or 'layout_binding' in row:
             raise ValueError('Only text effects accept a font binding')
         if type(row.get('effect_version', 1)) is not int or row.get('effect_version', 1) != 1:
             raise ValueError('Unsupported effect version')
-        if row['type'] != 'comparison_wipe' and last - first < 3:
+        if row['type'] not in {'comparison_wipe','motion_trail'} and last - first < 3:
             raise ValueError('Smooth pulse effects require at least three frames')
         from .effect_catalog import validate_parameters
         result['parameters'] = validate_parameters(row['type'], row.get('parameters', {}))
         result['effect_version'] = 1
+        if row['type']=='motion_trail' and last-first < result['parameters']['history_frames']:
+            raise ValueError('Motion trail window is shorter than its history')
         if row['type']=='tracked_zoom':
             params=result['parameters'];sha=_sha(params['track_path'])
             if params['track_sha256'] is not None and params['track_sha256']!=sha:
@@ -166,6 +168,11 @@ def resolve_effects(setting, mapping, assets=None):
         preset = None
         events = setting['events']
     normalized = [_canonical_event(event, rate, count) for event in events]
+    for event in normalized:
+        if event['type'] == 'motion_trail':
+            start,end = _time(event['output_start'],'start'),_time(event['output_end'],'end')
+            if any(start < _time(row['output_start'],'cut') < end for row in mapping['sequence'] if row.get('output_start') is not None):
+                raise ValueError('Motion trail cannot cross a mapped cut; split the event')
     from .cues import _asset_map, _check_asset
     registry = _asset_map(assets or [])
     for event in normalized:
@@ -179,8 +186,16 @@ def resolve_effects(setting, mapping, assets=None):
             params['asset_sha256'] = asset['sha256']
     if len({event['id'] for event in normalized}) != len(normalized):
         raise ValueError('Duplicate effect ids')
+    _check_trail_overlaps(normalized)
     normalized.sort(key=lambda item: (_time(item['output_start'], 'start'), item['type'], item['id']))
     return {'version': 1, 'mapping_sha256': mapping_sha, 'preset': preset, 'events': normalized}
+
+
+def _check_trail_overlaps(events):
+    trails = [event for event in events if event['type'] == 'motion_trail']
+    for index,event in enumerate(trails):
+        if any(_time(event['output_start'],'start') < _time(other['output_end'],'end') and _time(other['output_start'],'start') < _time(event['output_end'],'end') for other in trails[index+1:]):
+            raise ValueError('Motion trail windows cannot overlap')
 
 
 def revise_effects(setting, mapping, operations, assets=None):
@@ -398,6 +413,7 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
     # The public plan is bound to the real frame mapping by resolve_effects.
     # Here event frame validity is checked again against the observed input.
     events = [_canonical_event(event, rate, count) for event in plan['events']]
+    _check_trail_overlaps(events)
     if composition is not None:
         from .composition import resolve_guides
         if not isinstance(composition, dict) or composition.get('version') != 1 or composition.get('mapping_sha256') != plan['mapping_sha256']:
@@ -435,6 +451,16 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
     if width % 2 or height % 2:
         raise ValueError('Effects source dimensions must be even')
     graph, label = _filter_graph(events, width, height, rate)
+    temporal_inputs = []
+    from .motion_trail import build_trail_graph
+    for index,event in enumerate(events):
+        if event['type'] != 'motion_trail':
+            continue
+        next_label = f'vtrail{index}'
+        fragment,evidence = build_trail_graph(label,next_label,event,rate,count)
+        graph += ';' + fragment
+        label = next_label
+        temporal_inputs.append({'event_id':event['id'],**evidence})
     secondary = []
     from .cues import _asset_map, _check_asset
     registry = _asset_map(assets or [])
@@ -602,6 +628,7 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
     return {'version': 1, 'input_sha256': source_sha, 'output_sha256': _sha(target),
             'mapping_sha256': plan['mapping_sha256'], 'events': events,
             'text_assets': titles,
+            'temporal_inputs': temporal_inputs,
             'tracking_inputs': tracking_inputs,
             'composition': composition_evidence,
             'title_collision_checks': title_collision_checks,
