@@ -241,6 +241,45 @@ def _check_trail_overlaps(events):
             raise ValueError('Motion trail windows cannot overlap')
 
 
+def comparison_effect_controls(plan):
+    """Only expose edits that can be rendered without discarding sealed clocks."""
+    if any('content_map' in event for event in plan['events']):
+        return []  # Captured temporal stages bind the entire ordered plan.
+    strength_types = {'zoom_pulse', 'smooth_zoom', 'tracked_zoom', 'saturation_pulse',
+                      'color_frame', 'keyword_title', 'tracked_title',
+                      'motion_trail', 'tracked_background'}
+    return [{'id': event['id'], 'kind': event['type'], 'strength': event['strength'],
+             'adjustable_strength': event['type'] in strength_types}
+            for event in plan['events'] if 'phase_map' not in event]
+
+
+def revise_comparison_effects(setting, mapping, operations, assets=None):
+    """Validate the small browser receipt contract before ordinary revision."""
+    plan = resolve_effects(setting, mapping, assets)
+    controls = {row['id']: row for row in comparison_effect_controls(plan)}
+    if not isinstance(operations, list) or not operations or len(operations) > len(controls):
+        raise ValueError('Comparison adjustments need existing adjustable effects')
+    seen = set()
+    for operation in operations:
+        if not isinstance(operation, dict):
+            raise ValueError('Comparison effect operation must be an object')
+        event_id = operation.get('id')
+        if not isinstance(event_id, str) or event_id not in controls or event_id in seen:
+            raise ValueError('Comparison adjustment needs a unique adjustable effect id')
+        seen.add(event_id)
+        if operation.get('action') == 'remove' and set(operation) == {'action', 'id'}:
+            continue
+        if (operation.get('action') != 'update' or set(operation) != {'action', 'id', 'changes'}
+                or not isinstance(operation['changes'], dict)
+                or set(operation['changes']) != {'strength'}
+                or not controls[event_id]['adjustable_strength']):
+            raise ValueError('Comparison adjustments support effect strength or off only')
+        strength = operation['changes']['strength']
+        if type(strength) not in (int, float) or not 0 < strength <= 1:
+            raise ValueError('Comparison effect strength must be finite and in (0, 1]')
+    return revise_effects(setting, mapping, operations, assets)
+
+
 def revise_effects(setting, mapping, operations, assets=None):
     """Create a new explicit plan; removal is off, originals remain untouched."""
     from copy import deepcopy

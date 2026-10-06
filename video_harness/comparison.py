@@ -39,18 +39,70 @@ def comparison_page(rows, mode='effects'):
 main{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px}
 video{width:100%;max-height:60vh}button,input,textarea{font:inherit;margin:6px;padding:8px}
 article{padding:12px;border:2px solid #555;border-radius:8px}article.selected{border-color:#fff}
-code{overflow-wrap:anywhere;font-size:11px}textarea{width:min(90%,700px)}</style>
+code{overflow-wrap:anywhere;font-size:11px}textarea{width:min(90%,700px)}
+#effect-panel{border:1px solid #777;border-radius:8px;padding:12px;margin:18px 0}
+#effect-list{list-style:none;padding:0}#effect-list li{border-top:1px solid #555;padding:8px 0}
+#effect-list label{display:inline-block;margin-right:12px}#effect-list input[type=range]{vertical-align:middle;width:min(34vw,220px)}
+</style>
 <h1>同じ編集範囲の候補</h1><p>同じ時刻で比較します。音声は一案ずつ再生します。</p>
 <button id="play">再生／停止</button><button id="start">先頭に戻す</button>
 <label>再生位置 <input id="seek" type="range" min="0" max="0" step="0.01" value="0"></label>
 <output id="time">0.00秒</output><p id="status" role="status">読み込み中</p>
 <main>''' + ''.join(cards) + '''</main>
+<section id="effect-panel" aria-label="選んだ候補のエフェクト調整">
+<h2>選んだ候補のエフェクト調整</h2>
+<p>調整は保存する提案です。この動画の見た目は変わりません。反映後の動画を再確認してください。</p>
+<p id="effect-summary">候補を選ぶと調整できるエフェクトを表示します。</p>
+<ul id="effect-list"></ul>
+<button id="undo-effects" type="button" disabled>直前の調整を戻す</button>
+<button id="reset-effects" type="button" disabled>この候補の調整をすべて戻す</button>
+</section>
 <label>修正したい点<br><textarea id="note" placeholder="例: 中盤のズームを弱める"></textarea></label>
 <br><button id="save">選択と修正メモを保存</button>
 <p>保存は候補の採用・人の最終承認・投稿を行いません。</p>
 <script>const rows=''' + data + ''';
 const videos=[...document.querySelectorAll('video')],seek=document.querySelector('#seek'),status=document.querySelector('#status');
 let playing=false,choice=null,audio=0;
+const staged=rows.map(()=>({values:new Map(),disabled:new Set(),history:[]}));
+const effectList=document.querySelector('#effect-list'),effectSummary=document.querySelector('#effect-summary');
+const undoEffects=document.querySelector('#undo-effects'),resetEffects=document.querySelector('#reset-effects');
+function controlsFor(index){return Array.isArray(rows[index].effect_controls)?rows[index].effect_controls:[];}
+function snapshot(state){return {values:new Map(state.values),disabled:new Set(state.disabled)};}
+function remember(state){state.history.push(snapshot(state));}
+function operationsFor(index){const state=staged[index];return controlsFor(index).flatMap(event=>{
+if(state.disabled.has(event.id))return [{action:'remove',id:event.id}];
+const strength=state.values.get(event.id);
+return strength!==undefined && strength!==Number(event.strength)
+? [{action:'update',id:event.id,changes:{strength}}] : [];});}
+function renderEffects(){effectList.replaceChildren();
+if(choice===null){effectSummary.textContent='候補を選ぶと調整できるエフェクトを表示します。';
+undoEffects.disabled=true;resetEffects.disabled=true;return;}
+const controls=controlsFor(choice),state=staged[choice];
+effectSummary.textContent=controls.length
+? rows[choice].label+'：'+controls.length+' 件。変更 '+operationsFor(choice).length+' 件。'
+: rows[choice].label+'：調整できるエフェクトはありません。';
+for(const event of controls){const item=document.createElement('li');
+const title=document.createElement('span');title.textContent=String(event.kind)+' / '+String(event.id)+' ';item.append(title);
+if(event.adjustable_strength){const strengthLabel=document.createElement('label');strengthLabel.textContent='強さ ';
+const slider=document.createElement('input');slider.type='range';slider.min=String(Math.min(0.01,Number(event.strength)));slider.max='1';slider.step='any';
+slider.value=String(state.values.get(event.id) ?? event.strength);slider.disabled=state.disabled.has(event.id);
+const value=document.createElement('output');value.textContent=slider.value;let adjusting=false;
+slider.addEventListener('input',()=>{if(!adjusting){remember(state);adjusting=true;}state.values.set(event.id,Number(slider.value));
+value.textContent=slider.value;effectSummary.textContent=rows[choice].label+'：'+controls.length+' 件。変更 '+operationsFor(choice).length+' 件。';
+undoEffects.disabled=false;resetEffects.disabled=operationsFor(choice).length===0;});
+slider.addEventListener('change',()=>{adjusting=false;});
+strengthLabel.append(slider,value);item.append(strengthLabel);}
+const offLabel=document.createElement('label');offLabel.textContent='オフ ';
+const off=document.createElement('input');off.type='checkbox';off.checked=state.disabled.has(event.id);
+off.addEventListener('change',()=>{remember(state);if(off.checked)state.disabled.add(event.id);
+else state.disabled.delete(event.id);renderEffects();});offLabel.append(off);item.append(offLabel);
+effectList.append(item);}
+undoEffects.disabled=state.history.length===0;
+resetEffects.disabled=state.history.length===0 || operationsFor(choice).length===0;}
+undoEffects.onclick=()=>{if(choice===null)return;const state=staged[choice],previous=state.history.pop();
+if(!previous)return;state.values=previous.values;state.disabled=previous.disabled;renderEffects();};
+resetEffects.onclick=()=>{if(choice===null)return;const state=staged[choice];
+if(!operationsFor(choice).length)return;remember(state);state.values.clear();state.disabled.clear();renderEffects();};
 function message(text){status.textContent=text;}
 function stop(){playing=false;videos.forEach(v=>v.pause());}
 function position(t){videos.forEach(v=>{if(Number.isFinite(v.duration))v.currentTime=Math.min(t,v.duration);});seek.value=t;}
@@ -66,13 +118,17 @@ document.querySelector('#start').onclick=()=>{stop();position(0);};
 seek.oninput=()=>{stop();position(Number(seek.value));};
 document.querySelectorAll('[data-audio]').forEach(b=>b.onclick=()=>{audio=Number(b.dataset.audio);videos.forEach((v,i)=>v.muted=i!==audio);message(rows[audio].label+' の音声');});
 document.querySelectorAll('[data-choice]').forEach(b=>b.onclick=()=>{choice=Number(b.dataset.choice);
-document.querySelectorAll('article').forEach((a,i)=>a.classList.toggle('selected',i===choice));message('候補: '+rows[choice].label);});
+document.querySelectorAll('article').forEach((a,i)=>a.classList.toggle('selected',i===choice));
+renderEffects();message('候補: '+rows[choice].label);});
 function tick(){if(playing){const t=videos[0].currentTime;seek.value=t;videos.slice(1).forEach(v=>{if(Math.abs(v.currentTime-t)>.12)v.currentTime=t;});}
 document.querySelector('#time').textContent=Number(seek.value).toFixed(2)+'秒';requestAnimationFrame(tick);}tick();
 document.querySelector('#save').onclick=()=>{if(choice===null){message('先に候補を選んでください');return;}
-const result={version:1,kind:'comparison_selection_proposal',render_id:rows[choice].render_id,
+const operations=operationsFor(choice);
+const result={version:operations.length?2:1,kind:'comparison_selection_proposal',render_id:rows[choice].render_id,
 render_sha256:rows[choice].sha256,output_time:Number(seek.value),note:document.querySelector('#note').value,
-adopted:false,final_review:false};const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));
+adopted:false,final_review:false};
+if(operations.length)result.effect_operations=operations;
+const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));
 const a=document.createElement('a');a.href=url;a.download='comparison-selection.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 message('修正メモを保存しました。ハーネスで反映後、生成した動画を再確認してください。');};
 </script></html>'''

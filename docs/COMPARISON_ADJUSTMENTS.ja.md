@@ -1,0 +1,16 @@
+# 比較ページからエフェクトを調整する
+
+開発版の `effects` 比較ページでは、選んだ案のエフェクトを弱めたり、個別にオフにできます。元の映像と編集設定は残ります。公開済み alpha.7 には含まれません。
+
+1. `uv run --no-sync video-harness session compare-candidates SESSION NATURAL_RENDER EFFECT_RENDER` で比較ページを作成し、表示された HTML を開きます。
+2. 「この案を候補に選ぶ」で対象を選びます。調整欄で強さを変更するか「オフ」を選びます。案を切り替えても各案の調整は保持します。「直前の調整を戻す」「この候補の調整をすべて戻す」で取り消せます。
+3. 「選択と修正メモを保存」で JSON をダウンロードします。画面の動画は元のままです。スライダー操作は再レンダーや採用を行いません。
+4. `uv run --no-sync video-harness session select-comparison SESSION --data-file comparison-selection.json --actor codex --note '比較で指定した調整を候補化'` で未採用の候補を保存します。
+5. `uv run --no-sync video-harness session render SESSION --full --candidate-id CANDIDATE_ID` で実際の映像を生成し、映像と音を確認します。必要なら新しい比較ページを作り、調整を繰り返します。
+6. 採用する場合は `uv run --no-sync video-harness session adopt-candidate SESSION CANDIDATE_ID --actor codex --note '修正版を確認して選択'`。採用とは別に、正確な出力 SHA に対する全編レビューを残します。
+
+変更がない場合は従来の version 1 選択 JSON、変更がある場合は version 2 と `effect_operations` を保存します。version 2 は既存のイベント ID に対する強さ変更（0 より大きく 1 以下）と削除だけを受け付けます。未知の ID、重複操作、非数値・無限値、不正なパラメーター、古い動画 SHA は拒否します。合成・二分割・白黒など強さが映像へ反映されない効果はオフだけを表示します。
+
+リタイムで保存した `phase_map` の効果は調整欄に出ません。`content_map` を含む候補は効果全体の順序・設定に依存するため、このページから調整できません。元の通常速度の候補を選んで調整し、必要なリタイムを改めて作成します。保存済みの時計や映像の結び付きを削除して強制適用しません。
+
+この機能は効果の区間・位置・追跡対象・BGM の変更や、区間だけの高速再レンダーを提供しません。通常の候補レンダーを使います。選択 JSON は採用・人の承認・アップロードの記録ではありません。投稿はユーザーが行います。

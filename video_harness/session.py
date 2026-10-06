@@ -1220,12 +1220,14 @@ class Session:
         return candidate
 
     def candidate_from_selection(self, selection, actor, note):
-        """Restore a render's exact input snapshot as an unadopted candidate."""
+        """Restore selected inputs, optionally applying bounded effect adjustments."""
         require_note(note)
         actor_name(actor)
         fields = {'version','kind','render_id','render_sha256','output_time','note','adopted','final_review'}
+        if isinstance(selection, dict) and type(selection.get('version')) is int and selection['version'] == 2:
+            fields = fields | {'effect_operations'}
         if (not isinstance(selection, dict) or set(selection) != fields
-                or type(selection['version']) is not int or selection['version'] != 1
+                or type(selection['version']) is not int or selection['version'] not in (1, 2)
                 or selection['kind'] != 'comparison_selection_proposal'
                 or not isinstance(selection['render_id'], str)
                 or not isinstance(selection['render_sha256'], str)
@@ -1250,6 +1252,15 @@ class Session:
             if fingerprint(cfg['source'])['sha256'] != state['source']['sha256']:
                 raise ValueError('Comparison selection source differs from session source')
             self._validate_edit_plan(plan, cfg)
+            adjusted_project = None
+            if selection['version'] == 2:
+                from .video_effects import revise_comparison_effects
+                cfg['video_effects'] = revise_comparison_effects(
+                    cfg.get('video_effects'), read(render['files']['mapping']['path']),
+                    selection['effect_operations'], cfg.get('assets', []))
+                from .production import resolve_production
+                resolve_production(cfg, read(render['files']['mapping']['path']))
+                adjusted_project = cfg
             transcript = deepcopy(render.get('transcript'))
             legacy_transcript = None
             if 'transcript' not in render and plan.get('version') != 4:
@@ -1266,14 +1277,16 @@ class Session:
                 folder = self.root / 'artifacts' / ('selection-transcript-' + uuid.uuid4().hex[:12])
                 transcript = fingerprint(save_transcript(folder, legacy_transcript))
                 packed = self._artifact('selection-packed', packed_data)
-            item = {'id': uuid.uuid4().hex[:12], 'project': deepcopy(render['project']),
+            item = {'id': uuid.uuid4().hex[:12],
+                    'project': (self._artifact('candidate-project', adjusted_project)
+                                if adjusted_project is not None else deepcopy(render['project'])),
                     'plan': deepcopy(render['plan']), 'brief': deepcopy(render['brief']),
                     'transcript': transcript, 'packed': packed,
                     'pattern': pattern, 'actor': actor, 'note': note, 'created_at': now(),
                     'comparison_selection': self._artifact('comparison-selection', selection),
                     'selected_render_id': render['id'], 'selected_video_sha256': selection['render_sha256'],
                     'selection_position': mapped}
-            if render['files'].get('motion_template'):
+            if adjusted_project is None and render['files'].get('motion_template'):
                 item['motion_template'] = deepcopy(render['files']['motion_template'])
             state.setdefault('candidates', []).append(item)
             self._save(state, 'comparison_selection_proposed', actor,
@@ -1323,10 +1336,15 @@ class Session:
             timing_rows = {row['render_id']:row for row in evidence['candidates']} if mode in {'timing','structure'} else {}
             rows = []
             for render in renders:
-                label = read(render['project']['path']).get('editing_pattern', {}).get('id', 'natural')
+                cfg = read(render['project']['path'])
+                label = cfg.get('editing_pattern', {}).get('id', 'natural')
+                from .video_effects import resolve_effects, comparison_effect_controls
+                controls = comparison_effect_controls(resolve_effects(
+                    cfg.get('video_effects'), read(render['files']['mapping']['path']), cfg.get('assets', [])))
                 video = Path(render['files']['video']['path']).as_uri()
                 rows.append({'label': f'{label} / {render["id"]}', 'video': video,
                              'render_id': render['id'], 'sha256': render['files']['video']['sha256'],
+                             'effect_controls': controls,
                              'transitions': next(row.get('transitions',row.get('production_changes',{}).get('transitions',[]))
                                                  for row in evidence['candidates'] if row['render_id']==render['id']),
                              **({'duration_seconds':timing_rows[render['id']]['duration_seconds'],
