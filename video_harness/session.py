@@ -1745,6 +1745,64 @@ class Session:
         render = self._find_render(state, rid)
         return inspect_render(render, self.root / 'inspections' / uuid.uuid4().hex[:12], start, duration)
 
+    def preview_effects(self, rid, effect_ids=None, context_frames=8):
+        """Inspect changed effects on the finished clock without adopting them."""
+        from fractions import Fraction
+        from .video_effects import resolve_effects, revise_comparison_effects, _frame, _time
+        from .effect_preview import export_effect_preview
+        if type(context_frames) is not int or not 0 <= context_frames <= 300:
+            raise ValueError('Effect preview context must be 0..300 frames')
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            render = self._find_render(state, rid)
+            self._verify_render(render)
+            if render['preview'] or not render.get('candidate_id'):
+                raise ValueError('Effect preview requires a full revised candidate render')
+            candidate = self._find_candidate(state, render['candidate_id'])
+            if not candidate.get('comparison_selection'):
+                raise ValueError('Effect preview requires a comparison adjustment candidate')
+            receipt = read(candidate['comparison_selection']['path'])
+            if receipt.get('version') != 2:
+                raise ValueError('Effect preview requires version-2 comparison adjustments')
+            original = self._find_render(state, candidate['selected_render_id'])
+            self._verify_render(original)
+            if original['preview']:
+                raise ValueError('Effect preview requires a full original render; select that render first')
+            if receipt['render_sha256'] != original['files']['video']['sha256']:
+                raise ValueError('Effect preview original video SHA changed')
+            if render['plan'] != original['plan'] or render['brief'] != original['brief']:
+                raise ValueError('Effect preview requires the same source edit plan and brief')
+            mapping = read(original['files']['mapping']['path'])
+            cfg = read(original['project']['path'])
+            expected = deepcopy(cfg)
+            expected['video_effects'] = revise_comparison_effects(
+                cfg.get('video_effects'), mapping, receipt['effect_operations'], cfg.get('assets', []))
+            if read(render['project']['path']) != expected:
+                raise ValueError('Effect preview candidate differs from the comparison adjustments')
+            changed = [row['id'] for row in receipt['effect_operations']]
+            selected = changed if effect_ids is None else effect_ids
+            if (not isinstance(selected, list) or not selected
+                    or any(not isinstance(key, str) for key in selected)
+                    or len(set(selected)) != len(selected) or set(selected) - set(changed)):
+                raise ValueError('Effect preview must select unique changed effect ids')
+            events = {event['id']: event for event in resolve_effects(
+                cfg.get('video_effects'), mapping, cfg.get('assets', []))['events']}
+            rate = Fraction(str(mapping['fps']))
+            intervals = [{'id': key,
+                          'first_frame': _frame(_time(events[key]['output_start'], 'start'), rate, 'start'),
+                          'end_frame_exclusive': _frame(_time(events[key]['output_end'], 'end'), rate, 'end')}
+                         for key in selected]
+            first = max(0, min(row['first_frame'] for row in intervals) - context_frames)
+            last = min(round(Fraction(str(mapping['duration'])) * rate),
+                       max(row['end_frame_exclusive'] for row in intervals) + context_frames)
+            metadata = {'candidate_id': candidate['id'], 'effect_intervals': intervals,
+                        'context_frames': context_frames,
+                        'comparison_selection': candidate['comparison_selection']}
+            return export_effect_preview(original, render,
+                self.root / 'inspections' / ('effects-' + uuid.uuid4().hex[:12]), first, last, metadata)
+
     def native_finish(self, rid, request, actor, note):
         """Record a TikTok finishing proposal without uploading media."""
         from .native_finishing import plan_native_finishing

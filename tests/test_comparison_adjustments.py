@@ -76,6 +76,42 @@ class ComparisonAdjustmentTests(unittest.TestCase):
             self.assertEqual(read(rendered['files']['mapping']['path']), mapping)
             self.assertEqual(session._load()['reviews'], [])
             self.assertEqual(read(original['project']['path'])['video_effects'], effects)
+            unchanged = session._load()
+            with self.assertRaisesRegex(ValueError, 'changed effect'):
+                session.preview_effects(rendered['id'], ['unknown'], 0)
+            with self.assertRaisesRegex(ValueError, 'context'):
+                session.preview_effects(rendered['id'], ['mono'], True)
+            preview_ref = session.preview_effects(rendered['id'], ['mono'], 0)
+            preview = read(preview_ref['path'])
+            self.assertEqual(preview['first_frame'], 4)
+            self.assertEqual(preview['end_frame_exclusive'], 8)
+            self.assertEqual(preview['review_status'], 'pending')
+            self.assertEqual(session._load(), unchanged)
+            from unittest.mock import patch
+            def failed_excerpt(source, target, first, end, rate, log):
+                target.write_bytes(b'incomplete video')
+                log.write_text('Synthetic failure after output creation')
+                raise RuntimeError('Synthetic excerpt failure')
+            folders = set((session.root / 'inspections').iterdir())
+            with patch('video_harness.effect_preview._excerpt', side_effect=failed_excerpt):
+                with self.assertRaisesRegex(RuntimeError, 'excerpt failure'):
+                    session.preview_effects(rendered['id'], ['mono'], 0)
+            failed = (set((session.root / 'inspections').iterdir()) - folders).pop()
+            self.assertEqual(read(failed / 'result.json')['technical_status'], 'failed')
+            self.assertFalse((failed / 'before.mp4').exists())
+            self.assertFalse((failed / 'preview.html').exists())
+            self.assertTrue((failed / 'before-render.log').exists())
+            self.assertEqual(session._load(), unchanged)
+            # The preview must be frames 4..7 of the completed picture, not a
+            # restarted effect on frame zero of a shortened source.
+            original_rgb = decode(original, 'video')
+            revised_rgb = decode(rendered, 'video')
+            for name, full_rgb in [('before', original_rgb), ('after', revised_rgb)]:
+                clip = Path(preview_ref['path']).parent / (name + '.mp4')
+                clip_rgb = subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(clip),
+                    '-an', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'])
+                frame_bytes = len(full_rgb) // 8
+                self.assertEqual(clip_rgb, full_rgb[4 * frame_bytes:8 * frame_bytes])
             session.adopt_candidate(adjusted['id'], 'codex', 'Adopt rendered synthetic correction')
             self.assertEqual(session._load()['project'], adjusted['project'])
             self.assertEqual(session._load()['reviews'], [])
