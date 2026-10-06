@@ -4,7 +4,7 @@ from collections import Counter
 from fractions import Fraction
 from pathlib import Path
 
-from .common import read
+from .common import read, fingerprint
 from .production import frozen_pattern
 from .render_cache import digest
 from .time_mapping import compile_retime
@@ -20,7 +20,14 @@ def comparison_page(rows, mode='effects'):
     import json
     cards = []
     for index, row in enumerate(rows):
-        cards.append(f'<article><h2>{html.escape(row["label"])}</h2>'
+        names={'dissolve':'ディゾルブ','push':'プッシュ'}
+        directions={'left':'左','right':'右','up':'上','down':'下'}
+        transitions=''.join('<li>'+html.escape(names.get(event['type'],event['type'])+
+                            (' / '+directions.get(event.get('direction'),event.get('direction',''))
+                             if event.get('direction') else '')+
+                            ' / '+event['left_segment_id'])+'</li>' for event in row.get('transitions',[]))
+        detail=('<p>カット前後の実素材を重ねた候補</p><ul>'+transitions+'</ul>') if transitions else ''
+        cards.append(f'<article><h2>{html.escape(row["label"])}</h2>'+detail+
                      f'<video preload="metadata" muted playsinline src="{html.escape(row["video"], quote=True)}"></video>'
                      f'<button data-audio="{index}">この案の音声</button>'
                      f'<button data-choice="{index}">この案を候補に選ぶ</button>'
@@ -170,13 +177,35 @@ status.textContent='修正メモを保存しました。生成した動画を再
     return page
 
 
+def _transition_original(render, mapping, cfg):
+    """Keep exact base-cut comparison while disclosing the composed picture."""
+    setting = cfg.get('transitions')
+    if 'transitions' not in mapping:
+        if setting is not None:
+            raise ValueError('Transition setting has no composed output mapping')
+        return mapping, []
+    from .transition_feedback import attach_transitions
+    original_path = Path(render['path'])/'pre-transition-mapping.json'
+    if not original_path.is_file() or not isinstance(setting, dict):
+        raise ValueError('Transition comparison needs retained original mapping and setting')
+    original = read(original_path)
+    compiled = mapping['transitions']['compiled']
+    if setting.get('compiled') != compiled or attach_transitions(original, compiled) != mapping:
+        raise ValueError('Transition comparison mapping differs from source-bound proposal')
+    actual = fingerprint(Path(render['path'])/'visual-base.mp4')
+    bound = setting.get('input_video', {})
+    if any(actual[key] != bound.get(key) for key in ('sha256', 'bytes')):
+        raise ValueError('Transition comparison base video changed')
+    return original, deepcopy(compiled['request']['events'])
+
+
 def _timing_mapping(render, mapping, cfg):
     """Verify an output map is exactly the compiled timing of its original edit."""
     retime = mapping.get('retime')
     if retime is None:
         if cfg.get('retime'):
             raise ValueError('Retime setting has no retimed output mapping')
-        return mapping, None
+        return _transition_original(render, mapping, cfg)[0], None
     original_path = Path(render['path']) / 'pre-retime-mapping.json'
     if not original_path.is_file():
         raise ValueError('Retimed comparison requires retained pre-retime mapping')
@@ -302,6 +331,7 @@ def _timing_evidence(renders, source, *, mode='timing'):
                      'retime_operations': deepcopy(operations or []),
                      'production_changes': {'editing_pattern': pattern['id'],
                                             'audio_cuts': deepcopy((cfg.get('audio_cuts') or {}).get('request',{}).get('events',[])),
+                                            'transitions': _transition_original(render, mapping, cfg)[1],
                                             'cue_plan': deepcopy(cfg.get('cue_plan')),
                                             'video_effects': deepcopy(cfg.get('video_effects')),
                                             'rendered_cues': deepcopy(production.get('cues', [])),
@@ -372,6 +402,7 @@ def comparison_evidence(renders, source, mode='effects'):
     for render in renders:
         cfg = read(render['project']['path'])
         mapping = read(render['files']['mapping']['path'])
+        original, transitions = _transition_original(render, mapping, cfg)
         pattern = frozen_pattern(cfg)
         source_ids = {row['asset_id'] for row in mapping.get('sequence', [])
                       if mapping.get('edit_basis') == 'visual'}
@@ -380,12 +411,15 @@ def comparison_evidence(renders, source, mode='effects'):
             raise ValueError('Comparison source asset is missing')
         fixed = {'source_sha256': source['sha256'],
                  'visual_sources': {key: registry[key]['sha256'] for key in sorted(source_ids)},
-                 'mapping_sha256': digest(mapping),
-                 'settings': {key: deepcopy(cfg.get(key,1 if key=='visual_pipeline_version' else None)) for key in FIXED_SETTINGS},
+                 'mapping_sha256': digest(original),
+                 'settings': {key: deepcopy((cfg.get(key) or []) if key=='composition_guides'
+                                            else cfg.get(key,1 if key=='visual_pipeline_version' else None))
+                              for key in FIXED_SETTINGS},
                  'preview': render.get('preview')}
         production = read(render['files']['production']['path']) if 'production' in render['files'] else {}
         rows.append({'render_id': render['id'], 'video_sha256': render['files']['video']['sha256'],
                      'pattern': pattern['id'], 'fixed': fixed,
+                     'output_mapping_sha256': digest(mapping), 'transitions': transitions,
                      'selection': deepcopy(production.get('selection_report')),
                      'placement_reasons': deepcopy(production.get('reasons', [])),
                      'cue_reasons': [{'id': cue['id'], 'reason': cue.get('reason', '')}

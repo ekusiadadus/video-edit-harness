@@ -117,6 +117,10 @@ def render_visual_edit(cfg, plan, out, preview=True):
     normalized sound are established by the reviewed MP4, not this XML.
     """
     pipeline_version=visual_pipeline_version(cfg)
+    has_transitions = cfg.get('transitions') is not None
+    if has_transitions:
+        from .transitions import _eligible
+        _eligible(cfg)
     has_audio_cuts = cfg.get('audio_cuts') is not None
     if has_audio_cuts and cfg.get('retime'):
         raise ValueError('J/L audio cuts and retime require a joint audio-word mapping; this combination is unsupported')
@@ -188,10 +192,21 @@ def render_visual_edit(cfg, plan, out, preview=True):
             mapping=remap_visual_mapping(mapping,evidence['mapping'])
             base={**base,'duration':mapping['duration'],'frame_count':mapping['frame_count']}
             subtitle_text=captions_srt(evidence['captions'])
+        if has_transitions:
+            from .transitions import render_transition_setting
+            from .transition_feedback import attach_transitions
+            write(out/'pre-transition-mapping.json', mapping)
+            _write_xml(out/'original-cut-reference.fcpxml',normalized,mapping,assets,cfg.get('name','Visual Edit'))
+            transitioned = out/'visual-transitioned.mp4'
+            transition_evidence = render_transition_setting(visual_input,mapping,effective,
+                                                            effective['transitions'],transitioned)
+            write(out/'transition-evidence.json',transition_evidence)
+            mapping = attach_transitions(mapping, transition_evidence['compiled'])
+            visual_input = transitioned
         write(out / 'frame-mapping.json', mapping)
         write(out / 'plan.json', normalized)
         (out / 'subtitles.srt').write_text(subtitle_text, encoding='utf-8')
-        if effective.get('retime'):
+        if effective.get('retime') or has_transitions:
             from .fcp import export_timeline
             export_timeline(visual_input,probe(visual_input),[(0,base['duration'])],out/'timeline.fcpxml',cfg.get('name','Retimed Visual Edit'))
         else:
@@ -274,7 +289,7 @@ def render_visual_edit(cfg, plan, out, preview=True):
         run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(out / 'audio-only.mp3'),
              '-f', 'null', '-'], out / 'audio-only-decode.log')
         (out / 'fcp-delivery.json').write_text(json.dumps({
-            'timeline': 'Baked retimed picture/audio; original-cut-reference.fcpxml is pre-retime only' if effective.get('retime') else ('Source-cut XML is a pre-J/L reference; baked mix contains selected audio handles' if has_audio_cuts else 'Original source video and environment audio only'),
+            'timeline': 'Baked transition picture; original-cut-reference.fcpxml is hard-cut reference only' if has_transitions else ('Baked retimed picture/audio; original-cut-reference.fcpxml is pre-retime only' if effective.get('retime') else ('Source-cut XML is a pre-J/L reference; baked mix contains selected audio handles' if has_audio_cuts else 'Original source video and environment audio only')),
             'creative_additions': 'MP4 reference; separate FCP recreation required',
             'color': 'Apply look.cube to original source-cut XML only; baked MP4 picture is already graded',
             'visual_pipeline_version':pipeline_version, 'subtitles': 'No transcript or captions generated',

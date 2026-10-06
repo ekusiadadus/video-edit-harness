@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added optional source-bound optical-motion cut proposals with explicit endpoint choices, ROI, nonspoken interval guards and required plan selection. Added source-bound dissolve/push compilation and a bounded-memory local Rec.709 picture backend. Session, composite feedback and delivery integration remain incomplete.
+- Added optional source-bound optical-motion cut proposals with explicit endpoint choices, ROI, nonspoken interval guards and required plan selection. Added source-bound dissolve/push compilation and a bounded-memory local Rec.709 picture backend. Connected explicit visual `session transitions` candidates to composite feedback, natural synchronized comparison, exact-render transition review and baked delivery. Existing cues/effects/guides are invalidated; returning to natural removes transitions. Real-media acceptance and FCP GUI proof remain outstanding.
 
 - Added opt-in, local-model-bound pose segmentation masks to background-effect session candidates, with sticky identity loss, track/torso matching, binary PNG corrections and exact-render contour review. Legacy GrabCut masks remain the default.
 - Real full-resolution trial retained audio PCM and excluded walls/ceiling, but hand/overlap defects remain; no artistic adoption or human acceptance is claimed.

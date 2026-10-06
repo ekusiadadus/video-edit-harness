@@ -670,7 +670,7 @@ class Session:
         require_note(note)
         allowed = {'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
-                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'visual_pipeline_version'}
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version'}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError('Only color/audio/render project settings can change here')
         with self._lock():
@@ -683,6 +683,10 @@ class Session:
             visual_pipeline_version(cfg)
             if changes.get('editing_pattern',{}).get('id')=='natural' and changes.get('retime'):
                 raise ValueError('Explicit retime conflicts with natural/off')
+            if changes.get('editing_pattern',{}).get('id')=='natural':
+                if changes.get('transitions'):
+                    raise ValueError('Explicit transitions conflict with natural/off')
+                cfg.pop('transitions',None)
             if changes.get('editing_pattern', {}).get('id') == 'natural' and 'video_effects' not in changes:
                 cfg.pop('video_effects', None)
                 cfg.pop('retime', None)
@@ -709,7 +713,7 @@ class Session:
         actor_name(actor)
         allowed = {'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
-                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'visual_pipeline_version'}
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'transitions', 'visual_pipeline_version'}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError('Candidate changes must be render settings only')
         with self._lock():
@@ -732,6 +736,10 @@ class Session:
             visual_pipeline_version(cfg)
             if changes.get('editing_pattern',{}).get('id')=='natural' and changes.get('retime'):
                 raise ValueError('Explicit retime conflicts with natural/off')
+            if changes.get('editing_pattern',{}).get('id')=='natural':
+                if changes.get('transitions'):
+                    raise ValueError('Explicit transitions conflict with natural/off')
+                cfg.pop('transitions',None)
             if changes.get('editing_pattern', {}).get('id') == 'natural' and 'video_effects' not in changes:
                 cfg.pop('video_effects', None)
                 cfg.pop('retime', None)
@@ -744,6 +752,7 @@ class Session:
                 if cfg['editing_pattern']['id'] == 'natural':
                     cfg.pop('video_effects', None)
                     cfg.pop('retime', None)
+                    cfg.pop('transitions', None)
                 cfg = freeze_pattern(cfg)
             else:
                 cfg = freeze_pattern(cfg, refresh='editing_pattern' in changes)
@@ -753,6 +762,9 @@ class Session:
             region_filter(cfg)
             pattern = frozen_pattern(cfg)
             resolve_asset_policy(cfg)
+            if cfg.get('transitions') is not None:
+                from .transitions import _eligible
+                _eligible(cfg)
             item = {'id': uuid.uuid4().hex[:12], 'project': self._artifact('candidate-project', cfg),
                     'plan': deepcopy(state['plan']), 'brief': deepcopy(state['brief']),
                     'transcript': deepcopy(state.get('transcript')), 'packed': deepcopy(state.get('packed')),
@@ -782,7 +794,7 @@ class Session:
             if proposed is not None:
                 proposed['parent_plan']=state['plan'];proposed['motion_proposal']=report
                 state['plan']=self._artifact('plan',proposed)
-                for key in ('cue_plan','video_effects','composition_guides'):
+                for key in ('cue_plan','video_effects','composition_guides','transitions'):
                     if cfg.get(key):
                         invalidated.append(key);cfg.pop(key)
                 if invalidated:state['project']=self._artifact('project',cfg)
@@ -792,6 +804,26 @@ class Session:
                        {'report':report,'render_id':render_id,'note':note})
         return {'plan':state['plan'],'report':report,'source_frames_changed':proposed is not None,
                 'invalidated_timeline_settings':invalidated,'adopted':False,'review_required':True}
+
+    def propose_transitions(self, render_id, request, actor, note):
+        """Propose explicitly requested source-handle picture transitions."""
+        from .transitions import prepare_transitions
+        require_note(note); actor_name(actor)
+        state=self._load(); self._idle(state); self._verify(state)
+        render=self._find_render(state,render_id); self._verify_render(render)
+        if render['plan']!=state['plan'] or render['project']!=state['project']:
+            raise ValueError('Transitions require the current plan and project render')
+        cfg=read(render['project']['path'])
+        folder=Path(render['path'])
+        original=folder/'pre-transition-mapping.json'
+        if not original.is_file():
+            original=Path(render['files']['mapping']['path'])
+        setting=prepare_transitions(folder/'visual-base.mp4',read(original),cfg,request,actor,note)
+        candidate=self.create_candidate({'transitions':setting,'cue_plan':None,
+                                         'video_effects':None,'composition_guides':[]},
+                       actor,note,expected_project=state['project'],base_render_id=render_id)
+        return {'candidate':candidate,'adopted':False,'review_required':True,
+                'invalidated_timeline_settings':['cue_plan','video_effects','composition_guides']}
 
     def propose_audio_cuts(self, render_id, request, actor, note):
         """Propose observed source-handle audio cuts without adopting the result."""
@@ -809,6 +841,8 @@ class Session:
     def retime_source(self, render_id):
         state=self._load();self._verify(state)
         render=self._find_render(state,render_id);self._verify_render(render)
+        if read(render['project']['path']).get('transitions') is not None:
+            raise ValueError('Transitions and retime require a joint composed-source mapping; this combination is unsupported')
         if read(render['project']['path']).get('audio_cuts') is not None:
             raise ValueError('J/L audio cuts and retime require a joint audio-word mapping; this combination is unsupported')
         if read(render['project']['path']).get('edit_basis')!='visual':
@@ -1129,6 +1163,8 @@ class Session:
                 video = Path(render['files']['video']['path']).as_uri()
                 rows.append({'label': f'{label} / {render["id"]}', 'video': video,
                              'render_id': render['id'], 'sha256': render['files']['video']['sha256'],
+                             'transitions': next(row.get('transitions',row.get('production_changes',{}).get('transitions',[]))
+                                                 for row in evidence['candidates'] if row['render_id']==render['id']),
                              **({'duration_seconds':timing_rows[render['id']]['duration_seconds'],
                                  'retime_operations':timing_rows[render['id']]['retime_operations'],
                                  'source_coverage':timing_rows[render['id']]['source_coverage'],
@@ -1210,6 +1246,10 @@ class Session:
             files['effects'] = fingerprint(folder / 'effects-evidence.json')
         if (folder / 'audio-cuts.json').is_file():
             files['audio_cuts'] = fingerprint(folder / 'audio-cuts.json')
+        if (folder / 'transition-evidence.json').is_file():
+            files['transitions'] = fingerprint(folder / 'transition-evidence.json')
+            files['pre_transition_mapping'] = fingerprint(folder / 'pre-transition-mapping.json')
+            files['transition_base'] = fingerprint(folder / 'visual-base.mp4')
         if (folder / 'fcp-production.json').is_file():
             files['fcp_production'] = fingerprint(folder / 'fcp-production.json')
         if (folder / 'production-timeline.fcpxml').is_file():
@@ -1347,6 +1387,8 @@ class Session:
                         checks.append('subject_masks')
             if render['files'].get('audio_cuts'):
                 checks.append('audio_cuts')
+            if render['files'].get('transitions'):
+                checks.append('transitions')
             entries = report.get('checks')
             if not isinstance(entries, list) or len(entries) != len(checks) or {e.get('id') for e in entries} != set(checks):
                 raise ValueError('Review needs each applicable check exactly once: ' + ', '.join(checks))
@@ -1354,7 +1396,7 @@ class Session:
                 require_note(entry.get('note'))
                 if entry.get('status') not in ('pass', 'fail', 'pending') or entry.get('basis') not in ('listening', 'visual', 'text', 'signal', 'synthetic'):
                     raise ValueError('Invalid review status or observation basis')
-                expected = {'subject_masks': {'visual'}, 'audio_cuts': {'listening'}, 'meaning': {'text', 'listening'}, 'pacing': {'listening'},
+                expected = {'transitions': {'visual'}, 'subject_masks': {'visual'}, 'audio_cuts': {'listening'}, 'meaning': {'text', 'listening'}, 'pacing': {'listening'},
                             'audio_only': {'listening'}, 'cut_boundaries': {'listening'},
                             'captions': {'text', 'visual'}, 'color': {'visual'},
                             'music_fit': {'listening'}, 'asset_context': {'visual'},

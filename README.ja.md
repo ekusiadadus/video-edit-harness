@@ -2,7 +2,7 @@
 
 [English](README.md) | 日本語
 
-開発版では `session motion-cuts` で、観察した画像の動きに合わせたカット位置をレビュー用に提案できます。非発話区間・sourceフレーム・ROIを明示し、不確かな動きでは計画を変えません。[操作と制限](docs/MOTION_CUTS.ja.md)を確認してください。実フレームに基づくディゾルブ／プッシュの内部描画処理を追加しましたが、セッション・フィードバック・納品への接続は未完了です。[開発状況](docs/TRANSITIONS.ja.md)を確認してください。
+開発版では `session motion-cuts` で、観察した画像の動きに合わせたカット位置をレビュー用に提案できます。非発話区間・sourceフレーム・ROIを明示し、不確かな動きでは計画を変えません。[操作と制限](docs/MOTION_CUTS.ja.md)を確認してください。開発版の `session transitions` は、指定したディゾルブ／プッシュを比較候補にし、両素材へのフィードバック・自然版比較・正確なrenderの視覚レビュー・合成済みMP4／FCP納品へつなぎます。[操作と制限](docs/TRANSITIONS.ja.md)を確認してください。実素材の受入とFCP GUIの検証はまだです。
 
 alpha.7では、自然な編集を既定にBGM・効果音・補助素材・音ハメを指定できます。[操作ガイド](docs/EDITING_PATTERNS_USAGE.ja.md)、[実装計画](docs/EDITING_PATTERNS_PLAN_2026.ja.md)、[検証状況](docs/EDITING_PATTERNS_IMPLEMENTATION_STATUS.ja.md)を参照してください。生成素材の試験と、人による視聴・試聴やFCP GUI往復の確認は別の証拠です。
 

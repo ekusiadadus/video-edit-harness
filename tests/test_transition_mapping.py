@@ -61,6 +61,18 @@ class TransitionMappingTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 compile_(transition=event)
 
+    def test_available_handle_keeps_normalized_mixed_fps_phase(self):
+        mapping, sources = fixture('30', ('24', '24'), spans=((0, 2), (5, 7)), lengths=(2, 2))
+        result = compile_(mapping, sources, request(before=1, after=1))
+        # At j=2, ceil((2+1/2)*24/30)-1 = 1. This is the actual
+        # normalized-CFR reference, not an invented frame 2 or a cloned handle.
+        frames = result['events'][0]['frames']
+        self.assertEqual([row['left']['source_frame'] for row in frames], [1, 1])
+        self.assertGreater(sources['asset-0']['frame_count'], mapping['sequence'][0]['source_end_frame_exclusive'])
+        sources['asset-0']['frame_count'] = 2
+        with self.assertRaisesRegex(ValueError, 'missing source pre/post handle'):
+            compile_(mapping, sources, request(before=1, after=1))
+
     def test_exact_endpoints_audio_and_real_handles(self):
         mapping, sources = fixture()
         result = compile_(mapping, sources)

@@ -30,6 +30,9 @@ def inspect_render(render, folder, start=0, duration=8):
          str(folder/'listen.mp3')], folder/'listen.log')
     plan = read(render['files']['plan']['path'])
     audio_spans = None
+    if mapping.get('transitions'):
+        # Composed picture handles do not change the assembled environment audio.
+        audio_spans = mapped['cut_reference']['source_spans']
     if render['files'].get('audio_cuts'):
         from .audio_cuts import map_audio_output
         compiled = read(render['files']['audio_cuts']['path'])['compiled']

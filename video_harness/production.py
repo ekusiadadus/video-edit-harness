@@ -196,6 +196,8 @@ def prepare_fcp_handoff(cfg, production, out):
         raise ValueError('Retime requires burned mix/video_only handoff; editable FCP time changes are unsupported')
     if mode == 'editable' and cfg.get('audio_cuts') is not None:
         raise ValueError('J/L audio cuts require baked mix/video_only handoff; editable FCP audio cuts are unsupported')
+    if mode == 'editable' and cfg.get('transitions') is not None:
+        raise ValueError('Transitions require baked mix/video_only handoff; editable FCP transitions are unsupported')
     verify_production(production)
     operation = 'raw_asset_handoff' if mode == 'editable' else 'mixed_audio_handoff'
     if mode != 'video_only':

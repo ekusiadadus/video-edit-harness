@@ -29,7 +29,9 @@ def bundle(render, brief, target, folder, accepted=False, derivative=None):
     folder = Path(folder).resolve()
     folder.mkdir(parents=True, exist_ok=False)
     files = {}
-    for label in ('video', 'audio', 'xml', 'subtitles', 'lut', 'mapping', 'plan'):
+    labels = ['video', 'audio', 'xml', 'subtitles', 'lut', 'mapping', 'plan']
+    labels += [key for key in ('transitions', 'pre_transition_mapping') if key in render['files']]
+    for label in labels:
         if production and (label == 'xml' or label == 'audio' and not audio_allowed):
             continue
         original = Path(render['files'][label]['path'])

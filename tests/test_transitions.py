@@ -123,6 +123,11 @@ class TransitionRenderTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, 'proposal'):
                         render_transitions(base, mapping, stale, root/f'stale-{kind}.mp4',
                                            input_color='rec709', base_binding=fingerprint(base))
+                    stale = deepcopy(compiled)
+                    stale['adopted'] = 0  # Python equality alone considers this False.
+                    with self.assertRaisesRegex(ValueError, 'proposal'):
+                        render_transitions(base, mapping, stale, root/f'bool-{kind}.mp4',
+                                           input_color='rec709', base_binding=fingerprint(base))
                     with self.assertRaisesRegex(ValueError, 'Rec.709'):
                         render_transitions(base, mapping, compiled, root/'log.mp4',
                                            input_color='apple_log', base_binding=fingerprint(base))

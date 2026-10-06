@@ -1,11 +1,40 @@
-# 素材を重ねるトランジションの開発状況
+# 素材を重ねるトランジション
 
-alpha.7後の開発版には、実ソースフレームを対応付けるコンパイラと、ディゾルブ／上下左右プッシュの低レベル描画バックエンドがあります。まだセッションCLI、候補比較、フィードバック、FCP納品には接続していません。通常の編集操作として対応済みとは扱わないでください。
+alpha.7後の開発版は、`session transitions` で隣接カットのディゾルブ／上下左右プッシュを未採用の比較候補として作れます。immutableなalpha.7には含まれません。自然版／演出オフ、リタイム・J/Lカットとの組み合わせ、Apple Log／HDR、編集可能なFCPトランジションは非対応です。
 
-`transition_mapping.compile_transitions(mapping, request, sources, actor, reason)` は、隣接するカットに対して前後の出力フレーム数を指定します。version 4の視覚編集mappingと、実際にprobeしたソースのパス・SHA・バイト数・fps・フレーム数が必要です。素材の余白が不足する場合、重複する窓、リタイム済みmapping、改変されたフレーム対応を拒否します。各窓は1秒以内かつ120フレーム以内です。混在fpsでCFRサンプリングが境界フレームを反復しても、選択範囲の外側に実素材があることを要求します。
+まず非自然パターンを選び、ソースのカット位置を選択した全編を描画してください。そのrender IDを使います。CLIの `--help` で手元の版の対応を確認します。
 
-`transitions.render_transitions(base, mapping, compiled, target, input_color='rec709', base_binding=...)` は、未グレーディングの視覚編集assemblyに適用する内部APIです。呼び出し側は素材登録と権利を検証し、assemblyの実fingerprintを渡す必要があります。ソースと提案を再検証し、実ソースフレームを同じcanvasへfit/padして1フレームずつ合成します。ディゾルブはencoded RGBの整数混合であり、linear-light合成やHDRには対応していません。プッシュは実際の2素材を整数ピクセルで移動させます。
+```sh
+uv run --no-sync video-harness session transitions SESSION RENDER_ID \
+  --request-file transitions.json --actor codex --note '指定したカットを左へのプッシュでつなぐ'
+uv run --no-sync video-harness session render SESSION --full --candidate-id CANDIDATE_ID
+```
 
-尺・出力フレーム数・fpsを維持し、assemblyの音声をコピーします。全編の映像・音声デコードとPCM一致を検証します。証跡には両素材のフレームID、混合比／移動ピクセル、入出力SHAを残します。成功しても採用・人による視聴レビューにはなりません。J/Lカット・可変速との組み合わせ、Apple Log／HDR、編集可能なFCPトランジションは未接続です。
+`transitions.json` の例です。IDは実際の選択済みplanに置き換えてください。最初のショットの後ろ、次のショットの前に十分な実素材がある必要があります。
 
-残る実装は、権利検証付きセッション候補、合成フレームを返すfeedback mapping、既存演出の依存SHA更新、候補比較と正確なrender SHAのレビュー、納品経路です。自然版に自動で追加せず、ユーザーが指定したカット・種類・方向で候補を作る方針です。実素材での見た目と聴取、FCP GUI、YouTube再生の受入証拠はまだありません。
+```json
+{
+  "version": 1,
+  "events": [{
+    "id": "push-1",
+    "left_segment_id": "actual-left-segment-id",
+    "before_frames": 3,
+    "after_frames": 3,
+    "type": "push",
+    "direction": "left",
+    "reason": "観察した移動方向を続ける指定の演出"
+  }]
+}
+```
+
+`type` は `dissolve` または `push`。`direction` はpushだけに指定し、left/right/up/downを選びます。窓はカットの前後に各1フレーム以上、合計1秒以内かつ120フレーム以内で、隣接区間をはみ出す指定や窓の重複を拒否します。方向は自動推測しません。動きの測定は `session motion-cuts` の別機能であり、方向が近いことだけで動作の意味や美しいつながりを保証しません。
+
+準備時と描画時に登録素材の権利・ソースSHA・バイト数・fps・フレーム数を検証します。保持した `visual-base.mp4` のSHAに提案を結び付け、同じプレビュー／全解像度条件で候補を描画します。尺・出力フレーム数・fpsを保ち、環境音声は元のカット順を維持します。既存のcue／effects／構図ガイドは新mappingに対して作り直すため、候補では解除します。後から追加する演出は候補renderに結び付けてください。
+
+各出力フレームに両素材の実source frame IDと混合比／方向を残します。混在fpsではnormalized CFRの位相を維持するため、境界のsource frame IDが反復する場合があります。選択範囲の外に実素材がない場合は拒否し、欠落フレームを捏造・クローン補充しません。画像は同じcanvasへfit/padして1フレームずつ合成します。ディゾルブはencoded RGBの整数混合であり、linear-light合成やHDRではありません。プッシュは実際の2素材を整数ピクセルで動かします。
+
+自然版は同じplan・ソース・色・音声条件で候補として作成し、`session compare-candidates SESSION NATURAL_RENDER TRANSITION_RENDER` で同期比較できます。元のカットmappingを検証したうえで、各案の合成mapping SHAとトランジション指定を別々に残します。通常のfeedbackとinspectは両映像の実フレームを返し、元カットは `cut_reference` として明記します。inspectの `audio_source_spans` は環境音声の元カット対応で、映像の余白を音声として扱いません。
+
+成功したdecodeは人の視聴レビューではありません。実素材で全編を見て、動作・顔・手・画面端・テンポ・音とのつながりを確認し、最終MP4の正確なSHAを指定したreviewに `transitions` のvisualチェックを追加してください。候補の採用と最終reviewは別です。MP4／FCPのmix・video_only納品には合成済み映像を使います。`original-cut-reference.fcpxml` は元のハードカットの参照で、編集可能なトランジションではありません。自然版へ戻す候補ではtransitionsも解除します。
+
+内部処理は `transition_mapping.compile_transitions`、`transitions.prepare_transitions`／`render_transition_setting`、`transition_feedback.attach_transitions` です。低レベルbackendの全編video/audio decode・fps・フレーム数・PCM一致と、候補→feedback→比較→review→MP4納品の検証は合成テスト素材で行いました。実素材の見た目／聴取、人の受入、FCP GUI・配信後再生の検証は別途必要です。完成したYouTube MP4の受入証拠にはなりません。YouTubeへのアップロードはユーザーが行います。

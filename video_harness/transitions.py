@@ -12,8 +12,73 @@ import subprocess
 import numpy as np
 
 from .common import fingerprint
+from .render_cache import digest
 from .transition_mapping import compile_transitions
 from .video_effects import _probe, _stream, _verified_rate
+
+
+def _eligible(cfg):
+    from .production import frozen_pattern
+    if cfg.get('edit_basis') != 'visual' or cfg.get('retime') or cfg.get('audio_cuts') is not None:
+        raise ValueError('Transitions require visual editing without retime or J/L cuts')
+    if cfg.get('input_color') != 'rec709':
+        raise ValueError('Transitions currently require explicit Rec.709 inputs')
+    if cfg.get('fcp_handoff') == 'editable':
+        raise ValueError('Transitions require baked mix/video_only handoff; editable FCP transitions are unsupported')
+    pattern = frozen_pattern(cfg)
+    if pattern['id'] == 'natural' or pattern['intensity'] == 'off':
+        raise ValueError('Transitions conflict with natural/off')
+
+
+def _registered_sources(cfg, mapping):
+    from .assets import validate_asset
+    from .patterns import resolve_asset_policy
+    records = cfg.get('assets')
+    if not isinstance(records, list) or not records:
+        raise ValueError('Transitions require registered local video assets')
+    registry = {row['asset_id']: row for row in records}
+    if len(registry) != len(records):
+        raise ValueError('Duplicate transition asset IDs')
+    sources = {}
+    for row in mapping['sequence']:
+        aid = row['asset_id']
+        if aid in sources:
+            continue
+        if aid not in registry:
+            raise ValueError('Transition source is not registered')
+        asset = validate_asset(registry[aid], resolve_asset_policy(cfg))
+        if asset['kind'] != 'video':
+            raise ValueError('Transition source must be registered video')
+        actual = probe_binding(asset['path'])
+        if actual['sha256'] != asset['sha256'] or actual['bytes'] != asset['bytes']:
+            raise ValueError('Transition source differs from registered asset')
+        sources[aid] = actual
+    return sources
+
+
+def prepare_transitions(base, mapping, cfg, request, actor, reason):
+    """Seal an explicit rights-checked proposal to the retained visual assembly."""
+    _eligible(cfg)
+    compiled = compile_transitions(mapping, request, _registered_sources(cfg, mapping), actor, reason)
+    video = probe_binding(base)
+    if video['frame_count'] != compiled['frame_count'] or Fraction(video['fps']) != Fraction(compiled['fps']):
+        raise ValueError('Transition base does not match mapping frame count/FPS')
+    return {'version': 1, 'compiled': compiled,
+            'input_video': {key: video[key] for key in ('path', 'bytes', 'sha256')}}
+
+
+def render_transition_setting(base, mapping, cfg, setting, target):
+    _eligible(cfg)
+    if (not isinstance(setting, dict) or set(setting) != {'version', 'compiled', 'input_video'}
+            or type(setting['version']) is not int or setting['version'] != 1):
+        raise ValueError('Use a session source-bound transition candidate')
+    proposal = setting['compiled']
+    sources = _registered_sources(cfg, mapping)
+    expected = compile_transitions(mapping, proposal['request'], sources, proposal['actor'], proposal['reason'])
+    if digest(proposal) != digest(expected):
+        raise ValueError('Transition proposal or registered source mapping changed')
+    return render_transitions(base, mapping, proposal, target, input_color=cfg['input_color'],
+                              base_binding=setting['input_video'])
 
 
 def compose_frame(left, right, kind, progress, direction=None):
@@ -132,10 +197,11 @@ def render_transitions(base, mapping, compiled, target, *, input_color, base_bin
     sources = {key: probe_binding(value['path']) for key, value in compiled['source_bindings'].items()}
     expected = compile_transitions(mapping, compiled['request'], sources,
                                    compiled['actor'], compiled['reason'])
-    if expected != compiled:
+    if digest(expected) != digest(compiled):
         raise ValueError('Transition proposal or source binding changed')
     before = fingerprint(base)
-    if before != base_binding:
+    if (not isinstance(base_binding, dict) or set(base_binding) != {'path', 'bytes', 'sha256'}
+            or any(before[key] != base_binding[key] for key in ('bytes', 'sha256'))):
         raise ValueError('Transition base video binding changed')
     info = _probe(base, count=True)
     video = _stream(info, 'video')
