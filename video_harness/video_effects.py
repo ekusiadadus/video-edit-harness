@@ -545,10 +545,13 @@ def _filter_graph(events, width, height, rate):
     return graph, current
 
 
-def render_effects(input, plan, output, assets=None, composition=None, *, preserve_audio_end=False):
+def render_effects(input, plan, output, assets=None, composition=None, *, preserve_audio_end=False,
+                   capture_temporal_samples=True):
     """Render a sealed effect plan; preserve original audio and frame count."""
     if type(preserve_audio_end) is not bool:
         raise ValueError('preserve_audio_end must be boolean')
+    if type(capture_temporal_samples) is not bool:
+        raise ValueError('capture_temporal_samples must be boolean')
     source, target = Path(input).resolve(strict=True), Path(output).resolve()
     if source == target or target.exists():
         raise ValueError('Effects output must be a new file distinct from input')
@@ -616,6 +619,33 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
         raise ValueError('Effects source dimensions must be even')
     graph, label = _filter_graph(events, width, height, rate)
     temporal_inputs = []
+    temporal_samples = []
+
+    def capture_stage(event):
+        nonlocal graph, label
+        if not capture_temporal_samples:
+            return
+        ordinal = len(temporal_samples)
+        first = _frame(_time(event['output_start'], 'start'), rate, 'start')
+        end = _frame(_time(event['output_end'], 'end'), rate, 'end')
+        row = {'event_id': event['id'], 'type': event['type'],
+               'original_start_frame': first, 'original_frame_count': end - first,
+               'stage_ordinal': ordinal, 'original_event_sha256': _digest(event),
+               'mapping_sha256': plan['mapping_sha256'], 'input_sha256': source_sha,
+               'capture_stage_version': 1}
+        if end - first > MAX_PHASE_FRAMES:
+            row['unavailable_reason'] = 'temporal event exceeds 4096 retained frames; render a shorter original event'
+        else:
+            continuing = f'temporal_continue{ordinal}'
+            branch = f'temporal_capture{ordinal}'
+            sample = f'temporal_sample{ordinal}'
+            graph += (f';[{label}]split=2[{continuing}][{branch}]'
+                      f';[{branch}]trim=start_frame={first}:end_frame={end},'
+                      f'settb=expr={rate.denominator}/{rate.numerator},setpts=N,format=bgra[{sample}]')
+            label = continuing
+            row['_label'] = sample
+        temporal_samples.append(row)
+
     from .motion_trail import build_trail_graph
     for index,event in enumerate(events):
         if event['type'] != 'motion_trail':
@@ -625,6 +655,7 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
         graph += ';' + fragment
         label = next_label
         temporal_inputs.append({'event_id':event['id'],**evidence})
+        capture_stage(event)
     secondary = []
     from .cues import _asset_map, _check_asset
     registry = _asset_map(assets or [])
@@ -680,6 +711,7 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
         graph += (f';[{label}][{branch}]overlay=x={overlay_x}:y=0:eof_action=pass:repeatlast=0:'
                   f"enable='gte(t,{start:.9f})*lt(t,{end:.9f})'[{target_label}]")
         label = target_label
+        capture_stage(event)
     for index,item in enumerate(mask_inputs,len(secondary)+1):
         event,doc=item['event'],item['doc']
         from .subject_background import background_graph
@@ -788,7 +820,36 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
     if (video.get('color_primaries'),video.get('color_transfer'),video.get('color_space')) == ('bt709','bt709','bt709'):
         graph += f';[{label}]setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[retained_rec709]'
         label = 'retained_rec709'
-    command += ['-filter_complex', graph, '-map', f'[{label}]', '-map', '0:a:0',
+    selected_asset_bindings = [{'asset_id': item['asset']['asset_id'],
+                                'sha256': item['asset']['sha256'],
+                                'bytes': Path(item['asset']['path']).stat().st_size,
+                                'event_id': item['event']['id']}
+                               for item in secondary]
+    stage_plan_sha = _digest({'version': 1, 'events': events,
+                              'mapping_sha256': plan['mapping_sha256'],
+                              'input_sha256': source_sha,
+                              'selected_asset_bindings': selected_asset_bindings})
+    new_sample_paths = []
+    command += ['-filter_complex', graph]
+    for row in temporal_samples:
+        row['stage_plan_sha256'] = stage_plan_sha
+        row['selected_asset_bindings'] = selected_asset_bindings
+        if '_label' not in row:
+            continue
+        # The digest is opaque, deterministic and does not expose event IDs.
+        sample_name = _digest({'output': str(target),
+                               'stage_plan_sha256': stage_plan_sha,
+                               'stage_ordinal': row['stage_ordinal'],
+                               'original_event_sha256': row['original_event_sha256']})
+        sample_path = target.parent / f'temporal-effect-{sample_name}.mkv'
+        if sample_path.exists():
+            raise FileExistsError(sample_path)
+        new_sample_paths.append(sample_path)
+        command += ['-map', f'[{row.pop("_label")}]', '-an', '-c:v', 'ffv1',
+                    '-level', '3', '-pix_fmt', 'bgra', '-fps_mode', 'passthrough',
+                    '-f', 'matroska', str(sample_path)]
+        row['_path'] = sample_path
+    command += ['-map', f'[{label}]', '-map', '0:a:0',
                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p',
                '-c:a', 'copy', *(['-movie_timescale','48000'] if preserve_audio_end else []),
                '-movflags', '+faststart', str(target)]
@@ -809,6 +870,24 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
             raise ValueError('Effects changed duration')
         if sound['codec_name'] != audio['codec_name']:
             raise ValueError('Effects changed audio codec')
+        if temporal_samples:
+            from .overlay_layers import _probe as probe_layer, validate_overlay_layer_reference
+            for row in temporal_samples:
+                path = row.pop('_path', None)
+                if path is None:
+                    continue
+                actual = probe_layer(path)
+                if (actual['codec'] != 'ffv1' or actual['pix_fmt'] != 'bgra'
+                        or actual['frame_count'] != row['original_frame_count']
+                        or actual['fps'] != rate
+                        or (actual['width'], actual['height']) != (width, height)):
+                    raise ValueError('Temporal stage sample changed codec, pixels, frame count, canvas or fps')
+                reference = {'path': str(path.resolve()), 'sha256': _sha(path),
+                             'bytes': path.stat().st_size, 'frame_count': actual['frame_count'],
+                             'width': width, 'height': height,
+                             'fps': f'{rate.numerator}/{rate.denominator}'}
+                row['original_layer'] = validate_overlay_layer_reference(
+                    reference, rate, count=row['original_frame_count'])
         with log.open('a', encoding='utf-8') as stream:
             subprocess.run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(target), '-f', 'null', '-'],
                            stdout=stream, stderr=stream, check=True)
@@ -826,11 +905,14 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
                 raise ValueError('Tracking resource changed during render')
     except Exception:
         target.unlink(missing_ok=True)
+        for path in new_sample_paths:
+            path.unlink(missing_ok=True)
         raise
     return {'version': 1, 'input_sha256': source_sha, 'output_sha256': _sha(target),
             'mapping_sha256': plan['mapping_sha256'], 'events': events,
             'text_assets': titles,
             'temporal_inputs': temporal_inputs,
+            'temporal_effect_samples': temporal_samples,
             'subject_masks':[{'event_id':item['event']['id'],'manifest_sha256':item['event']['parameters']['mask_sha256'],
                              'manifest_path':item['event']['parameters']['mask_path'],'source_sha256':item['doc']['source']['sha256'],
                              'frames':len(item['doc']['rows']),'review_required':True,

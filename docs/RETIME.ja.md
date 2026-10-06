@@ -111,3 +111,14 @@ uv run --no-sync video-harness session adopt-candidate SESSION CANDIDATE_ID --ac
 開発版の動画ループは、指定trimを一度だけ出力FPSのCFRへ変換し、そのlossless FFV1/BGRAフレーム列を繰り返します。繰り返し後の時刻は出力フレーム番号で付け直し、端数FPSの時刻丸めを周期ごとに蓄積しません。ループの出力区間は厳密なフレーム境界を要求します。`video_loop_periods`へ実際に読んだ周期フレーム数、FPS、動画素材と周期ファイルのSHA、trim、出力範囲を記録します。元の音声はコピーし、secondary動画の音声を勝手に足しません。変速はversion2の保存RGBA層を省略／複製してループ位相・透過・配置・動画fadeを保持します。元／新区間各4096フレームのphase制限は継続。旧timestamp-only loopは読み替えず拒否し、fresh original renderを要求します。loop=trueと非ゼロfade設定は内容digestにも束縛し、変更時は保存層を流用しません。
 
 通常の動画・画像・title cueのfade_in/fade_outをalphaへ適用する描画も開発版へ追加しました。動画fadeは保存層に既に含まれるため、phase再生で二重適用しません。phase cueのfade長は元の区間へ検証します。画像・titleのfadeは出力FPSの時計に合わせます。ゼロfadeの旧描画は維持。現在の編集可能FCPXMLはループと視覚fadeを表現できず、黙って省略せず拒否し、mix/video_onlyを使用します。合成映像のピクセル・PCM検証と、人の全編視聴・試聴・実FCP再生は別の証拠です。
+
+
+## 履歴依存エフェクトの元サンプル保存（開発版・再適用は未接続）
+
+`motion_trail`と`comparison_wipe`を描画すると、各エフェクト直後・次のエフェクトや文字の前の実画素を、同じFFmpeg実行内でFFV1/BGRAへ保存します。区間は元出力の半開フレーム範囲で、フレーム0からのCFRに揃えます。後続処理を含んだ最終MP4から元の残像履歴や別動画の再生位置を推定しません。
+
+`effects-evidence.json`の`temporal_effect_samples`は、元区間、描画順序、入力・マッピング・全エフェクト計画・個別エフェクト・比較素材のSHAと、無劣化サンプルのSHA／bytes／画面サイズ／FPS／フレーム数を保持します。セッションはサンプルを別途登録し、再開・検証時の改変を拒否します。これらはローカルの編集証跡で、通常の配布bundleへ素材として追加しません。
+
+保存対象は1イベント4096フレーム以内です。それを超える通常の描画は可能ですが、`unavailable_reason`を記録し、保存済みと扱いません。`render_effects(..., capture_temporal_samples=False)`は保存なしの比較検証に使えます。保存あり／なしのMP4画素・PCM一致、元の半開区間、残像→ワイプの段階別保存、セッションでの改変拒否を合成素材で検証しました。
+
+**変速後の再適用は次の接続作業です。** 現在の`session retime`は引き続き、残像／ワイプに完全な1対1の区間移動を要求します。この保存機能だけで、速度ランプ・フリーズ・間引き時の演出維持や人の見た目の承認を主張しません。公開alpha.7後の開発機能です。

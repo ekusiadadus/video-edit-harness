@@ -97,3 +97,9 @@ class MotionTrailIntegrationTests(unittest.TestCase):
             self.assertEqual(read(result['files']['mapping']['path']),read(base['files']['mapping']['path']))
             self.assertEqual(session._load()['project'],previous)
             self.assertEqual(session._load()['reviews'],[])
+            layer = evidence['temporal_effect_samples'][0]['original_layer']
+            self.assertEqual(result['files']['temporal_effect_layer_0']['sha256'], layer['sha256'])
+            with Path(layer['path']).open('ab') as stream:
+                stream.write(b'tampered')
+            with self.assertRaises(ValueError):
+                session._verify_render(result)

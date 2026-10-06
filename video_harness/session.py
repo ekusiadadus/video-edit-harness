@@ -301,6 +301,15 @@ class Session:
                 registered = render['files'].get(f'overlay_layer_{index}')
                 if registered != {key: reference[key] for key in ('path', 'bytes', 'sha256')}:
                     raise ValueError('Rendered overlay layer reference is not sealed')
+        if render['files'].get('effects'):
+            samples = read(render['files']['effects']['path']).get('temporal_effect_samples', [])
+            for index, row in enumerate(samples):
+                reference = row.get('original_layer')
+                if reference is None:
+                    continue
+                registered = render['files'].get(f'temporal_effect_layer_{index}')
+                if registered != {key: reference[key] for key in ('path', 'bytes', 'sha256')}:
+                    raise ValueError('Temporal effect sample reference is not sealed')
         if render['files'].get('captions'):
             from .caption_timing import verify_caption_evidence
             verify_caption_evidence(read(render['files']['captions']['path']), render['files']['subtitles']['sha256'])
@@ -1406,6 +1415,14 @@ class Session:
             files['captions'] = fingerprint(folder / 'caption-evidence.json')
         if (folder / 'effects-evidence.json').is_file():
             files['effects'] = fingerprint(folder / 'effects-evidence.json')
+            for index, row in enumerate(read(files['effects']['path']).get('temporal_effect_samples', [])):
+                reference = row.get('original_layer')
+                if reference is None:
+                    continue
+                actual = fingerprint(reference['path'])
+                if actual != {key: reference[key] for key in ('path', 'bytes', 'sha256')}:
+                    raise ValueError('Temporal effect sample changed before registration')
+                files[f'temporal_effect_layer_{index}'] = actual
         if (folder / 'depth-evidence.json').is_file():
             files['depth_evidence'] = fingerprint(folder / 'depth-evidence.json')
             files['depth_manifest'] = fingerprint(read(files['depth_evidence']['path'])['setting']['manifest']['path'])
