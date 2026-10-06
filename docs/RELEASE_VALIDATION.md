@@ -1,3 +1,11 @@
+# Post-alpha.7 motion-cut development / 開発版の検証
+
+- Optional `session motion-cuts` measures manually selected source ROIs and ranks observed adjacent endpoint choices. Changed source intervals require declared nonspoken permission. Source hashes, actual decoded frame windows, FPS, motion/uncertainty, exact render/mapping and actor/reason are retained. Changed cuts remain proposed and require plan selection; existing render/artifacts persist. Old cue/effect/guide timing is invalidated explicitly.
+- Current attached report must describe the exact source-frame sequence; later sequence revisions clear that evidence. Synthetic actual-media integration covers opposite-direction rejection, source-frame readback after selection, permissions on both added/removed sides, stale render/report and replaced source rejection.
+- Final local full suite: 430 tests passed in a serial run. An earlier overlapping full/focused invocation hit the shared render lock and failed four tests; both invocations ended, then the complete suite passed alone. Raw logs: `output/implementation-maya/motion-serial-full-suite.log`, `motion-final-guards.log`, `motion-final-focused.log`; the failed concurrency log is retained.
+- Existing dance derivative probe measured two observed torso windows; direction difference 36.830 degrees and speed ratio 1.754 were classified compatible. This read-only flow probe did not propose/adopt a real cut or establish choreographic/narrative quality. Evidence: `output/implementation-maya/motion-real-20261006/report.json`.
+- Semantic-mask commit `79a07eb` CI `37470009064` passed all three environments. The current motion-cut commit's remote CI is separate. These development features are not in the immutable alpha.7 release. Overlapping transitions, full real-media/human acceptance, FCP/external finishing and the final MP4 remain open.
+
 # Post-alpha.7 semantic-mask development / 開発版の検証
 
 - Optional pose masks are connected to background-effect session candidates and CLI flags. Legacy GrabCut/schema-1 masks remain unchanged by default; semantic schema-2 masks seal source, track, model SHA/bytes, library version, threshold and exact frame interval. Manual binary corrections can replace a lost semantic frame while all remaining frames still require valid selection or explicit correction.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added optional source-bound optical-motion cut proposals with explicit endpoint choices, ROI, nonspoken interval guards and required plan selection. Overlapping transition rendering remains unimplemented.
+
 - Added opt-in, local-model-bound pose segmentation masks to background-effect session candidates, with sticky identity loss, track/torso matching, binary PNG corrections and exact-render contour review. Legacy GrabCut masks remain the default.
 - Real full-resolution trial retained audio PCM and excluded walls/ceiling, but hand/overlap defects remain; no artistic adoption or human acceptance is claimed.
 

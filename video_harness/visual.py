@@ -125,6 +125,7 @@ def revise_visual_edl(edl, sequence, *, actor, reason):
     revised["sequence"] = deepcopy(sequence)
     revised["status"] = "proposed"
     revised.pop("review", None)
+    revised.pop("motion_proposal", None)
     revised["revision"] = {"actor": actor, "reason": reason}
     return revised
 

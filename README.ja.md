@@ -2,6 +2,8 @@
 
 [English](README.md) | 日本語
 
+開発版では `session motion-cuts` で、観察した画像の動きに合わせたカット位置をレビュー用に提案できます。非発話区間・sourceフレーム・ROIを明示し、不確かな動きでは計画を変えません。[操作と制限](docs/MOTION_CUTS.ja.md)を確認してください。重なりを使うトランジション描画は未実装です。
+
 alpha.7では、自然な編集を既定にBGM・効果音・補助素材・音ハメを指定できます。[操作ガイド](docs/EDITING_PATTERNS_USAGE.ja.md)、[実装計画](docs/EDITING_PATTERNS_PLAN_2026.ja.md)、[検証状況](docs/EDITING_PATTERNS_IMPLEMENTATION_STATUS.ja.md)を参照してください。生成素材の試験と、人による視聴・試聴やFCP GUI往復の確認は別の証拠です。
 
 エフェクトの局所修正は `session effects`、対応パラメーターの確認は `effects-catalog` を使用します。滑らかな手動アンカーズーム・彩度演出と、同期再生・音声切替付き比較ページを追加中です。[効果の指定方法](docs/VIDEO_EFFECTS.ja.md)と[高度な編集の実装計画](docs/ADVANCED_EDITING_MAYA_PLAN_2026.ja.md)を参照してください。

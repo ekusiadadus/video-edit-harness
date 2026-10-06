@@ -227,6 +227,8 @@ class Session:
                 check_ref(comparison['evidence'])
         for proposal in state.get('beat_proposals', []):
             check_ref(proposal)
+        for proposal in state.get('motion_proposals', []):
+            check_ref(proposal)
         for finishing in state.get('native_finishing', []):
             check_ref(finishing['artifact'])
         for imported in state.get('production_imports', []):
@@ -261,6 +263,8 @@ class Session:
     @staticmethod
     def _validate_edit_plan(plan, cfg, deep=True):
         if plan.get('version') == 4:
+            if plan.get('motion_proposal'):
+                check_ref(plan['motion_proposal'])
             from .visual import validate_visual_edl
             from .assets import validate_asset
             from .patterns import resolve_asset_policy
@@ -268,7 +272,11 @@ class Session:
             assets = {a['asset_id']: a for a in cfg.get('assets', [])}
             for segment in plan['sequence']:
                 validate_asset(assets[segment['asset_id']], policy)
-            return validate_visual_edl(plan, assets, verify_sources=deep)
+            normalized=validate_visual_edl(plan, assets, verify_sources=deep)
+            if normalized.get('motion_proposal'):
+                from .motion_cuts import validate_motion_report
+                validate_motion_report(normalized)
+            return normalized
         return validate_plan(plan, verify_source=deep)
 
     @staticmethod
@@ -754,6 +762,36 @@ class Session:
             state.setdefault('candidates', []).append(item)
             self._save(state, 'candidate_created', actor, {'candidate_id': item['id'], 'note': note})
         return item
+
+    def propose_motion_cut(self, render_id, request, actor, note):
+        """Measure observed movement and propose source-frame cuts for review."""
+        from .motion_cuts import prepare_motion_cut
+        require_note(note);actor_name(actor)
+        with self._lock():
+            state=self._load();self._idle(state);self._verify(state)
+            render=self._find_render(state,render_id);self._verify_render(render)
+            if render['plan']!=state['plan'] or render['project']!=state['project']:
+                raise ValueError('Motion proposal requires the current plan and project render')
+            cfg=read(state['project']['path'])
+            proposed,evidence=prepare_motion_cut(read(state['plan']['path']),cfg,request,actor,note)
+            evidence.update(render_id=render_id,video_sha256=render['files']['video']['sha256'],
+                            mapping_sha256=digest(read(render['files']['mapping']['path'])),
+                            parent_plan=state['plan'])
+            report=self._artifact('motion-cut-proposal',evidence)
+            invalidated=[]
+            if proposed is not None:
+                proposed['parent_plan']=state['plan'];proposed['motion_proposal']=report
+                state['plan']=self._artifact('plan',proposed)
+                for key in ('cue_plan','video_effects','composition_guides'):
+                    if cfg.get(key):
+                        invalidated.append(key);cfg.pop(key)
+                if invalidated:state['project']=self._artifact('project',cfg)
+                state['phase']='needs_selection'
+            state.setdefault('motion_proposals',[]).append(report)
+            self._save(state,'motion_cuts_proposed' if proposed else 'motion_cuts_observed',actor,
+                       {'report':report,'render_id':render_id,'note':note})
+        return {'plan':state['plan'],'report':report,'source_frames_changed':proposed is not None,
+                'invalidated_timeline_settings':invalidated,'adopted':False,'review_required':True}
 
     def propose_audio_cuts(self, render_id, request, actor, note):
         """Propose observed source-handle audio cuts without adopting the result."""
