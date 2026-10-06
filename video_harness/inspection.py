@@ -31,7 +31,7 @@ def inspect_render(render, folder, start=0, duration=8):
     plan = read(render['files']['plan']['path'])
     words = []
     for span in mapped['source_spans']:
-        for word in plan['transcript']['words']:
+        for word in plan.get('transcript', {}).get('words', []):
             if word['start'] < span['source_end'] and word['end'] > span['source_start']:
                 words.append({**word, 'sequence_id': span['sequence_id']})
     files = {p.name: fingerprint(p) for p in folder.iterdir() if p.is_file()}

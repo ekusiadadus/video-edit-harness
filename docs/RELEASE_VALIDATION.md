@@ -1,4 +1,15 @@
-# Alpha.4 verification / 検証範囲
+# Alpha.6 verification / 検証範囲
+
+The owner requested the alpha.6 README update and release on 2026-10-06. The release includes optional patterns, assets, visual EDL, effects, local tracking and visual-session retime. It does not complete the full MAYA implementation plan.
+
+- Local full suite: 304 tests passed in 64.069 seconds with tracking, pose, beat analysis and retime extras installed. New session retime candidates preserve the adopted state; original source frame references were checked against actual MP4/MKV pixels at four FPS conversions. Pure FPS inference was replaced with explicitly normalized CFR sampling and recorded source frame maps.
+- Wheel/sdist build, six-artifact inventory, archive paths/private-media/configured-secret checks and checksums passed. A fresh Python 3.11 environment installed the wheel and loaded the default natural pattern, effect catalog and source-frame mapping outside the checkout.
+- Real dance exports confirm full decode, tracked-region/title rejection, PCM preservation for picture-only effects, and retime frame/sample durations. Rubber Band 4.0.0 used R3; the retime hold interior decoded to silence. No actual music or pose model is bundled in the release.
+- Human full visual/listening acceptance, editable FCP retime, speech-session word protection, a new FCP GUI round-trip, live TikTok OAuth/API readback and platform playback remain unverified or unsupported as documented. No YouTube/TikTok post is part of this release. The requested pre-upload user confirmation remains required.
+
+Raw evidence is under ignored `output/implementation-maya/`: `alpha6-full-suite.log`, `alpha6-artifact-audit.json`, `alpha6-clean-install.log`, `alpha6-clean-smoke.json`, `retime-mapping-tests.log` and render-specific evidence. GitHub CI/publication readback is recorded after it actually runs; the local checks above do not imply remote publication or CI success.
+
+## Historical alpha.4 verification
 
 Version `0.1.0a4` is distributed as the `v0.1.0-alpha.4` prerelease. The owner authorized merging and releasing it with the verification boundaries below. Publishing the alpha does not mark the remaining quality checks as passed.
 

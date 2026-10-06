@@ -26,6 +26,8 @@ def map_output(mapping, start, end=None):
     total = float(mapping['duration'])
     if end < start or end > total + 1e-6:
         raise ValueError('Feedback time is outside this render')
+    if mapping.get('edit_basis') == 'visual':
+        return _map_visual(mapping, start, end)
     rows, boundaries, cursor = [], [], 0.0
     spans = mapping['keep']
     identities = mapping.get('sequence_ids', [f'span-{i + 1}' for i in range(len(spans))])
@@ -50,4 +52,42 @@ def map_output(mapping, start, end=None):
         cursor = last
     if not rows:
         raise ValueError('No source span corresponds to feedback time')
+    return {'output_start': start, 'output_end': end, 'source_spans': rows, 'boundaries': boundaries}
+
+
+def _map_visual(mapping, start, end):
+    from fractions import Fraction
+    sequence = mapping.get('sequence')
+    if not isinstance(sequence, list) or not sequence:
+        raise ValueError('Visual mapping requires actual source sequence')
+    rows, boundaries, seen, cursor = [], [], set(), 0.0
+    previous = None
+    for index, segment in enumerate(sequence):
+        ident = segment.get('id')
+        if not isinstance(ident, str) or not ident or ident in seen:
+            raise ValueError('Invalid visual mapping IDs')
+        seen.add(ident)
+        a, b, lo, hi = [float(Fraction(str(segment[key]).removesuffix('s'))) for key in
+                         ('source_start', 'source_end', 'output_start', 'output_end')]
+        if any(not isfinite(v) for v in (a, b, lo, hi)) or a < 0 or b <= a or hi <= lo or abs(lo - cursor) > 1e-6:
+            raise ValueError('Invalid visual source/output ranges')
+        if not segment.get('asset_id') or not segment.get('source_sha256') or not segment.get('source_path'):
+            raise ValueError('Visual mapping must identify each source')
+        if previous is not None and abs(start - lo) < 1e-6:
+            boundaries.append({'output_time': lo, 'left_sequence_id': previous['id'],
+                               'right_sequence_id': ident, 'left_asset_id': previous['asset_id'],
+                               'right_asset_id': segment['asset_id']})
+        first, last = max(start, lo), min(end, hi)
+        point = start == end and (lo <= start < hi or index == len(sequence) - 1 and abs(start - hi) < 1e-6)
+        if last > first or point:
+            if point:
+                first = last = start
+            scale = (b - a) / (hi - lo)
+            rows.append({'sequence_id': ident, 'asset_id': segment['asset_id'],
+                         'source_path': segment['source_path'], 'source_sha256': segment['source_sha256'],
+                         'output_start': first, 'output_end': last,
+                         'source_start': a + (first - lo) * scale, 'source_end': a + (last - lo) * scale})
+        cursor, previous = hi, segment
+    if abs(cursor - float(mapping['duration'])) > 1e-6 or not rows:
+        raise ValueError('Visual mapping does not cover this output')
     return {'output_start': start, 'output_end': end, 'source_spans': rows, 'boundaries': boundaries}

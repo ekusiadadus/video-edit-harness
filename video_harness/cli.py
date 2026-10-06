@@ -14,6 +14,11 @@ LEGACY_TONES=['clean_natural','soft_warm','subtle_cinema']
 def parser():
  p=argparse.ArgumentParser(description='Use-case × style video editing harness');p.add_argument('--version',action='version',version=__version__);s=p.add_subparsers(dest='cmd',required=True)
  s.add_parser('session',help='Durable transcript-backed editing session; use session --help')
+ s.add_parser('production',help='Editing patterns and local asset rights; use production --help')
+ s.add_parser('tiktok-api',help='Official TikTok OAuth and read-only Display API; use tiktok-api --help')
+ s.add_parser('effects-catalog',help='Versioned controls for parameterized local video effects')
+ s.add_parser('tracking',help='Local subject tracking proposals; use tracking --help')
+ s.add_parser('retime',help='Source-bound speed ramps and holds; use retime --help')
  for name in ['doctor','presets']:s.add_parser(name)
  for name in ['inspect','preview','compare','render','plan','resolve']:
   a=s.add_parser(name);a.add_argument('project',type=Path);a.add_argument('--output',type=Path)
@@ -79,11 +84,26 @@ def candidate_profiles(cfg,args,overrides):
 
 def main():
  import sys
+ if len(sys.argv)>1 and sys.argv[1]=='tracking':
+  from .tracking_cli import main as tracking_main
+  return tracking_main(sys.argv[2:])
+ if len(sys.argv)>1 and sys.argv[1]=='retime':
+  from .retime_cli import main as retime_main
+  return retime_main(sys.argv[2:])
+ if len(sys.argv)>1 and sys.argv[1]=='tiktok-api':
+  from .tiktok_cli import main as tiktok_main
+  return tiktok_main(sys.argv[2:])
+ if len(sys.argv)>1 and sys.argv[1]=='production':
+  from .production_cli import main as production_main
+  return production_main(sys.argv[2:])
  if len(sys.argv)>1 and sys.argv[1]=='session':
   from .workflow_cli import main as session_main
   return session_main(sys.argv[2:])
  p=parser();args=p.parse_args()
  try:
+  if args.cmd=='effects-catalog':
+   from .effect_catalog import catalog as effects_catalog
+   print(json.dumps(effects_catalog(),ensure_ascii=False,indent=2));return
   if args.cmd=='tiktok-export':
    from .vertical import export_vertical
    print(json.dumps(export_vertical(args.source,args.output,args.framing,args.subtitles,args.font),ensure_ascii=False,indent=2));return

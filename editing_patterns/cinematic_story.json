@@ -1,0 +1,1 @@
+{"schema_version":1,"id":"cinematic_story","description":"Music shaped around story sections without moving speech to beats.","defaults":{"intensity":"medium","music":"chapter","sfx":"selected","visual_assets":"own_only","beat_sync":"off","selection":"auto_preview"}}

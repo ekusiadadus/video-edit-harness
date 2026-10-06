@@ -9,7 +9,7 @@ Three MIT community skills: `youtube` for regular videos, `tiktok` for vertical 
 Install Python 3.11+, uv, FFmpeg and ffprobe; for Japanese caption burn-in, provide a CJK font.
 
 ```sh
-git clone --branch v0.1.0-alpha.5 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.6 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 export VIDEO_EDIT_HARNESS_ROOT="$PWD"
@@ -35,13 +35,13 @@ Start a fresh session. Invoke `/video-editing:youtube`, `/video-editing:tiktok` 
 
 ## Verified release archives
 
-Download from the [alpha.5 release](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.5). `RELEASE-MANIFEST.json` lists exactly the current wheel, source archive, three skill ZIPs and plugin ZIP; `SHA256SUMS` covers those artifacts and the manifest. Verify checksums before installing.
+Download from the [alpha.6 release](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.6). `RELEASE-MANIFEST.json` lists exactly the current wheel, source archive, three skill ZIPs and plugin ZIP; `SHA256SUMS` covers those artifacts and the manifest. Verify checksums before installing.
 
-Each `NAME-skill-v0.1.0-alpha.5.zip` extracts as `NAME/` with `SKILL.md`, `agents/openai.yaml` and LICENSE. Copy that directory to your agent's skill directory. ZIPs include no harness or media.
+Each `NAME-skill-v0.1.0-alpha.6.zip` extracts as `NAME/` with `SKILL.md`, `agents/openai.yaml` and LICENSE. Copy that directory to your agent's skill directory. ZIPs include no harness or media.
 
-`video-editing-claude-plugin-v0.1.0-alpha.5.zip` contains a plugin manifest, all three skills and license. Extract it and run `claude --plugin-dir /absolute/path/to/extracted-plugin` for local pinned loading. Plugin-root `CLAUDE.md` is not automatically loaded; the skill directs the agent to the checkout's README and AGENTS.md.
+`video-editing-claude-plugin-v0.1.0-alpha.6.zip` contains a plugin manifest, all three skills and license. Extract it and run `claude --plugin-dir /absolute/path/to/extracted-plugin` for local pinned loading. Plugin-root `CLAUDE.md` is not automatically loaded; the skill directs the agent to the checkout's README and AGENTS.md.
 
-The wheel installs into a virtual environment with `uv pip install /path/to/video_edit_harness-0.1.0a5-py3-none-any.whl`; it includes preset data and the CLI. The skills still use the checkout's templates and instructions. PyPI publication is outside this release.
+The wheel installs into a virtual environment with `uv pip install /path/to/video_edit_harness-0.1.0a6-py3-none-any.whl`; it includes preset data and the CLI. The skills still use the checkout's templates and instructions. PyPI publication is outside this release.
 
 ## First successful run
 

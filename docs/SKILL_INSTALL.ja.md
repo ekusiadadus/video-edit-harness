@@ -9,7 +9,7 @@ MITのコミュニティ版です。通常動画の `youtube`、縦動画の `ti
 Python 3.11以上、uv、FFmpeg、ffprobeを導入し、日本語字幕の焼き込みには日本語/CJKフォントを用意します。
 
 ```sh
-git clone --branch v0.1.0-alpha.5 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.6 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 export VIDEO_EDIT_HARNESS_ROOT="$PWD"
@@ -35,13 +35,13 @@ claude plugin install video-editing@video-edit-harness
 
 ## 配布ZIPと検証
 
-[alpha.5リリース](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.5)から取得します。`RELEASE-MANIFEST.json` は現行のwheel、ソース、3スキルZIP、プラグインZIPだけを列挙し、`SHA256SUMS` はそれらとmanifestを検証します。導入前に照合してください。
+[alpha.5リリース](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.6)から取得します。`RELEASE-MANIFEST.json` は現行のwheel、ソース、3スキルZIP、プラグインZIPだけを列挙し、`SHA256SUMS` はそれらとmanifestを検証します。導入前に照合してください。
 
-`NAME-skill-v0.1.0-alpha.5.zip` は `NAME/` にSKILL.md・agents/openai.yaml・LICENSEを展開します。使用するエージェントのスキルディレクトリにコピーします。ハーネス本体や動画は含みません。
+`NAME-skill-v0.1.0-alpha.6.zip` は `NAME/` にSKILL.md・agents/openai.yaml・LICENSEを展開します。使用するエージェントのスキルディレクトリにコピーします。ハーネス本体や動画は含みません。
 
-`video-editing-claude-plugin-v0.1.0-alpha.5.zip` はmanifest・3スキル・ライセンスを含む固定版です。展開後、`claude --plugin-dir /absolute/path/to/extracted-plugin` で読み込めます。プラグイン直下のCLAUDE.mdは自動読込されず、スキルがハーネスのREADMEとAGENTS.mdを読むよう指示します。
+`video-editing-claude-plugin-v0.1.0-alpha.6.zip` はmanifest・3スキル・ライセンスを含む固定版です。展開後、`claude --plugin-dir /absolute/path/to/extracted-plugin` で読み込めます。プラグイン直下のCLAUDE.mdは自動読込されず、スキルがハーネスのREADMEとAGENTS.mdを読むよう指示します。
 
-wheelは仮想環境に `uv pip install /path/to/video_edit_harness-0.1.0a5-py3-none-any.whl` で導入でき、CLIとプリセットを含みます。スキルはチェックアウトのテンプレートと指示も利用します。PyPIには公開していません。
+wheelは仮想環境に `uv pip install /path/to/video_edit_harness-0.1.0a6-py3-none-any.whl` で導入でき、CLIとプリセットを含みます。スキルはチェックアウトのテンプレートと指示も利用します。PyPIには公開していません。
 
 ## 最初に試す
 

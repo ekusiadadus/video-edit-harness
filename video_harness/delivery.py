@@ -6,10 +6,32 @@ from .common import fingerprint, read, write
 
 
 def bundle(render, brief, target, folder, accepted=False, derivative=None):
-    folder = Path(folder)
+    production = None
+    prepared_fcp = None
+    if render['files'].get('production'):
+        reference = render['files']['production']
+        if fingerprint(reference['path']) != reference:
+            raise ValueError('Production evidence changed before delivery')
+        production = read(reference['path'])
+        if production.get('policy', {}).get('content_id_check') == 'pending_local_review':
+            raise ValueError('Local review only: resolve Content ID checks before distribution delivery')
+        from .production import verify_production
+        verify_production(production)
+        if target == 'fcp':
+            from .delivery_production import preflight
+            prepared_fcp = preflight(render, production)
+    audio_allowed = True
+    if production:
+        try:
+            verify_production(production, 'mixed_audio_handoff')
+        except ValueError:
+            audio_allowed = False
+    folder = Path(folder).resolve()
     folder.mkdir(parents=True, exist_ok=False)
     files = {}
     for label in ('video', 'audio', 'xml', 'subtitles', 'lut', 'mapping', 'plan'):
+        if production and (label == 'xml' or label == 'audio' and not audio_allowed):
+            continue
         original = Path(render['files'][label]['path'])
         if fingerprint(original) != render['files'][label]:
             raise ValueError('Delivery source changed: ' + label)
@@ -19,6 +41,19 @@ def bundle(render, brief, target, folder, accepted=False, derivative=None):
         if files[label]['sha256'] != render['files'][label]['sha256'] or fingerprint(original) != render['files'][label]:
             raise ValueError('Delivery source changed during copy: ' + label)
     render_path = Path(render['path'])
+    if prepared_fcp:
+        from .delivery_production import copy_dependencies, verify_dependencies
+        files.update(copy_dependencies(prepared_fcp, folder))
+        verify_dependencies(folder)
+    if production:
+        # Export attribution without publishing private catalog/evidence paths.
+        credit_assets = {a['asset_id']: a for a in production.get('source_assets', []) + production['assets']}
+        credits = [{'asset_id': a['asset_id'], 'credit': a['credit'],
+                    'source_url': a['source_url'], 'license_url': a['license_url'],
+                    'rights': a['rights'], 'verified_on': a['verified_on'], 'content_id': a['content_id'],
+                    'sha256': a['sha256']} for a in credit_assets.values()]
+        write(folder / 'credits.json', {'version': 1, 'assets': credits})
+        files['credits'] = fingerprint(folder / 'credits.json')
     for name in ('fcp-delivery.json', 'audio-output-measure.json', 'cache-report.json'):
         if (render_path / name).is_file():
             shutil.copy2(render_path / name, folder / name)
@@ -32,6 +67,23 @@ def bundle(render, brief, target, folder, accepted=False, derivative=None):
         '6. Export FCPXML after manual edits and import it through the supported flat timeline workflow.',
         '7. Record actual GUI/playback/grade/caption/audio checks; XML validation does not perform them.',
     ]
+    if production:
+        instructions = [
+            'This bundle delivers the reviewed MP4 with its final creative additions.',
+            'No editable production FCPXML is included in this delivery mode.',
+            'Publish the attribution in credits.json where the asset license requires it.',
+            'Separated audio is omitted when mixed_audio_handoff is not permitted.',
+            'Do not redistribute raw assets from the local catalog.',
+        ]
+    if prepared_fcp:
+        instructions = [
+            'Import timeline.fcpxml. Media URLs are relative to this file; keep the media folder beside it.',
+            'Mode: ' + prepared_fcp['mode'],
+            'Finished-picture mix mode already includes its grade and overlays. Do not apply look.cube again.'
+            if prepared_fcp['mode'] == 'mix' else 'Editable mode keeps source picture; apply and inspect grade, overlays and final mix.',
+            'Publish the required attribution from credits.json.',
+            'GUI import, playback and re-export checks remain outstanding.',
+        ] + prepared_fcp['evidence']['manual_remaining']
     (folder / 'FCP-INSTRUCTIONS.txt').write_text('\n'.join(instructions) + '\n')
     files['instructions'] = fingerprint(folder / 'FCP-INSTRUCTIONS.txt')
     portrait = None
@@ -55,9 +107,16 @@ def bundle(render, brief, target, folder, accepted=False, derivative=None):
                 'target': target, 'creative_review': 'accepted' if accepted else 'pending',
                 'status': 'needs_manual_checks' if required else 'ready' if accepted and not render['preview'] else 'needs_review',
                 'manual_checks_required': required, 'files': files, 'portrait': portrait,
+                'file_paths': {label: str(Path(ref['path']).relative_to(folder)) for label, ref in files.items()},
                 'fidelity': {'timeline': 'single-source flat ordered cuts', 'lut': 'separate_manual_FCP_application',
                              'captions': 'separate_SRT_import', 'spatial_masks': 'manual',
                              'audio': 'MP4 normalized; FCP mix requires its own final check'}}
+    if prepared_fcp:
+        manifest['fidelity'] = {'mode': prepared_fcp['mode'],
+                                'timeline': 'production layers with bundled relative media references',
+                                'picture': 'finished graded picture' if prepared_fcp['mode'] == 'mix' else 'original picture plus editable cues',
+                                'audio': 'final PCM replacement' if prepared_fcp['mode'] == 'mix' else 'editable gains; ducking and final mix require review',
+                                'manual_remaining': prepared_fcp['evidence']['manual_remaining']}
     write(folder / 'delivery.json', manifest)
     return folder / 'delivery.json'
 
@@ -84,10 +143,13 @@ def verify_completion(folder):
     if completion.get('portrait') != manifest.get('portrait') or completion.get('portrait_video_sha256') != (
             manifest.get('portrait') or {}).get('video_sha256'):
         raise ValueError('Completion portrait does not match delivery')
-    for ref in manifest['files'].values():
-        name = Path(ref['path']).name
+    for label, ref in manifest['files'].items():
+        name = manifest.get('file_paths', {}).get(label, Path(ref['path']).name)
         if listed.get(name) != ref['sha256']:
             raise ValueError('Delivery manifest file changed: ' + name)
+    if manifest['files'].get('fcp_dependencies'):
+        from .delivery_production import verify_dependencies
+        verify_dependencies(folder)
     def proof(key):
         relative = completion['evidence'].get(key)
         if not isinstance(relative, str) or relative not in listed or not relative.startswith('evidence/'):

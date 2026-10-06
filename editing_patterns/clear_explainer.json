@@ -1,0 +1,1 @@
+{"schema_version":1,"id":"clear_explainer","description":"Speech-first explanation with optional chapter accents.","defaults":{"intensity":"low","music":"off","sfx":"selected","visual_assets":"own_only","beat_sync":"off","selection":"auto_preview"}}

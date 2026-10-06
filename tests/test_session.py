@@ -47,7 +47,7 @@ class SessionFixture:
         self.propose()
         return self.session.approve('codex', 'Agent selected this sequence for a synthetic fixture')
 
-    def render(self, preview=False):
+    def render(self, preview=False, candidate_id=None):
         def fake_render(cfg, plan, out, is_preview):
             out.mkdir()
             payloads = {'video.mp4': b'synthetic encoded video', 'audio-only.mp3': b'synthetic audio',
@@ -64,7 +64,7 @@ class SessionFixture:
                 'artifacts': {name: fingerprint(out / name)['sha256']
                               for name in (*payloads, 'plan.json', 'frame-mapping.json')}})
         with patch('video_harness.editing.render_edit', side_effect=fake_render):
-            return self.session.render(preview=preview, actor='codex')
+            return self.session.render(preview=preview, actor='codex', candidate_id=candidate_id)
 
 
 class SessionTests(unittest.TestCase):

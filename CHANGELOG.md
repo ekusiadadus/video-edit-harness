@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.0-alpha.6 — 2026-10-06
+
+- Added opt-in editing patterns, licensed asset records, music/SFX mixing, beat proposals, multi-source visual EDL, immutable session candidates and comparison pages.
+- Added parameterized zoom/color effects, measured title cards and real two-input comparisons; natural editing remains the default and pop presets omit the decorative cyan frame.
+- Added local OpenCV/MediaPipe tracking, source-bound tracked zoom and framewise protected-region checks. Lost frames and stale source/track references fail closed.
+- Added source-bound ramp/hold rendering with Rubber Band R3 audio, remapped captions, visual-session retime candidates and baked FCP handoff. Editable FCP retime and speech-session word protection remain unsupported.
+- Added portable production dependencies, rights-aware FCP handoff and read-only TikTok OAuth/API tooling. Live OAuth, platform music/effects and posting are separate capabilities; no posting is performed by default.
+- Updated README, three skills, installation guidance and optional dependencies. Full human listening/visual acceptance, FCP GUI round-trip and platform playback are not established by the automated suite.
+
 ## v0.1.0-alpha.5 — 2026-10-06
 
 - Documented per-video storage, source preservation, JSON briefs, durable sessions, revision prompts and FCP library/event/project organization in both READMEs.

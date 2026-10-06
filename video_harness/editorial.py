@@ -33,6 +33,12 @@ def make_brief(cfg, data=None):
         raise ValueError('Brief goals require unique IDs and nonempty text')
     if len(set(brief['must_keep_word_ids'])) != len(brief['must_keep_word_ids']):
         raise ValueError('Duplicate must-keep word ID')
+    if 'editing_pattern' in cfg or 'editing_pattern' in supplied:
+        from .production import frozen_pattern, freeze_pattern
+        brief['editing_pattern'] = frozen_pattern(freeze_pattern({**cfg, **supplied}, refresh='editing_pattern' in supplied))
+    if 'asset_policy' in cfg or 'asset_policy' in supplied:
+        from .patterns import resolve_asset_policy
+        brief['asset_policy'] = resolve_asset_policy({**cfg, **supplied})
     return brief
 
 

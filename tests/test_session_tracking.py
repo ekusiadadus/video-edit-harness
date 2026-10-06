@@ -1,0 +1,54 @@
+"""A synthetic pose/box fixture is not a human tracking review."""
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from tests import test_visual_editing as fixture_helpers
+from video_harness.common import write,read,fingerprint
+from video_harness.session import Session
+
+
+class SessionTrackingTests(unittest.TestCase):
+    def test_actual_effect_stage_survives_candidate_render_and_remains_unadopted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);cfg,plan=fixture_helpers.VisualEditingTests().fixture(root,source_audio=False)
+            cfg['edit_basis']='visual';cfg['editing_pattern']={'id':'playful_short','music':'off','sfx':'off','beat_sync':'off','visual_assets':'own_only'}
+            project=root/'project.json';write(project,cfg)
+            session=Session.start(project,root/'session')
+            session.propose_visual(plan,'codex');session.approve('codex','Synthetic frame selection')
+            base=session.render(preview=False);initial=session._load()['project']
+            observed=session.tracking_source(base['id'])
+            self.assertEqual(Path(observed['source']['path']).name,'visual-base.mp4')
+            def synthetic_track(source,box,output,**kwargs):
+                ref=fingerprint(source)
+                rows=[{'frame':i,'box':box,'state':'manual','quality':{'feature_count':10}} for i in range(kwargs['start_frame'],kwargs['end_frame'])]
+                doc={'version':1,'algorithm':'lk-affine-v1','source':ref,'fps':'10','start_frame':kwargs['start_frame'],'end_frame_exclusive':kwargs['end_frame'],'rows':rows,'review_required':True}
+                write(output,doc);return doc
+            with patch('video_harness.tracking.track_video',side_effect=synthetic_track):
+                proposed=session.propose_tracking(base['id'],[.1,.1,.5,.7],0,8,'codex','Synthetic box test',algorithm='lk')
+            self.assertFalse(proposed['adopted'])
+            self.assertEqual(session._load()['project'],initial)
+            rendered=session.render(preview=False,candidate_id=proposed['candidate']['id'])
+            evidence=read(Path(rendered['path'])/'effects-evidence.json')
+            self.assertEqual(evidence['tracking_inputs'][0]['source_sha256'],observed['source']['sha256'])
+            self.assertEqual(evidence['frame_count'],8)
+            checks=evidence['composition']['checks']
+            self.assertEqual(checks[0]['frames_checked'],8)
+            self.assertEqual(checks[0]['status'],'no_detected_conflict')
+            self.assertEqual(session._load()['project'],initial)
+
+    def test_natural_direction_rejects_tracking_before_analysis(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);cfg,plan=fixture_helpers.VisualEditingTests().fixture(root,source_audio=False)
+            cfg['edit_basis']='visual';project=root/'project.json';write(project,cfg)
+            session=Session.start(project,root/'session')
+            session.propose_visual(plan,'codex');session.approve('codex','Synthetic frame selection')
+            base=session.render(preview=False)
+            with patch('video_harness.tracking.track_video') as track, self.assertRaisesRegex(ValueError,'natural/off'):
+                session.propose_tracking(base['id'],[.1,.1,.5,.7],0,8,'codex','Rejected synthetic proposal')
+            track.assert_not_called()
+
+
+if __name__=='__main__':
+    unittest.main()

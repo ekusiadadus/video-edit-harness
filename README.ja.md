@@ -2,6 +2,23 @@
 
 [English](README.md) | 日本語
 
+alpha.6の編集パターン実装では、自然な編集を既定にBGM・効果音・補助素材・音ハメを指定できます。[操作ガイド](docs/EDITING_PATTERNS_USAGE.ja.md)、[実装計画](docs/EDITING_PATTERNS_PLAN_2026.ja.md)、[検証状況](docs/EDITING_PATTERNS_IMPLEMENTATION_STATUS.ja.md)を参照してください。生成素材の試験と、人による視聴・試聴やFCP GUI往復の確認は別の証拠です。
+
+エフェクトの局所修正は `session effects`、対応パラメーターの確認は `effects-catalog` を使用します。滑らかな手動アンカーズーム・彩度演出と、同期再生・音声切替付き比較ページを追加中です。[効果の指定方法](docs/VIDEO_EFFECTS.ja.md)と[高度な編集の実装計画](docs/ADVANCED_EDITING_MAYA_PLAN_2026.ja.md)を参照してください。
+
+固定領域と追跡した人物・字幕領域の保護には `composition_guides`、ローカル追跡には `tracking track`／`tracking validate` を使用します。`session track-effect` は観察した区間の追跡ズームと、文字の重なり・ズーム見切れの検査を未採用候補にします。[追跡と配置検査](docs/TRACKING.ja.md)にOpenCV・MediaPipeの選択と制限を記載しています。`retime prepare`／`retime render` で変速・静止保持、音声伸縮、字幕時刻の移行を単独のMP4へ描画できます。[時間変更の操作と制限](docs/RETIME.ja.md)を参照してください。visualセッションの未採用候補と変速済み映像のFCP受け渡しに対応します。FCPで編集できる時間変更と発話セッションへの統合は未対応です。
+
+変速はまず素材を連結した段階の映像を確認し、観察したフレーム範囲で未採用候補を作ります。
+
+```sh
+uv run --no-sync video-harness session retime-source SESSION RENDER_ID
+uv run --no-sync video-harness session retime SESSION RENDER_ID --request-file request.json --actor codex --note '観察した動作の見せ場を強調する'
+uv run --no-sync video-harness session render SESSION --candidate-id CANDIDATE_ID --full
+```
+
+必要なextraとRubber Bandの準備、requestの形は [RETIME.ja.md](docs/RETIME.ja.md) を参照してください。古い明示cue・エフェクト・保護領域は候補内で失効し、採用中の編集は変わりません。追加BGMは新しい尺へ配置します。FCPには変速済み映像を渡し、編集可能な時間変更や発話セッションの変速は未対応です。
+
+
 **Codex・Claude Codeでローカルの話す動画を編集するハーネスとスキルです。** 不要な間の短縮、場面に合う色、聞きやすい音声、字幕、Final Cut Proへの受け渡しを扱います。内容と仕上がりを確認しながら、素材のハッシュ、修正履歴、納品時の証拠を一緒に管理できます。
 
 [![日本語の編集前後デモ](docs/demo/ja/youtube-preview.gif)](https://github.com/ekusiadadus/video-edit-harness/releases/download/v0.1.0-alpha.4/youtube-demo-ja.mp4)
@@ -25,7 +42,7 @@
 Python 3.11以上、[uv](https://docs.astral.sh/uv/)、FFmpeg、ffprobeが必要です。macOS・Linuxに対応し、Final Cut Proでの仕上げにはmacOSが必要です。Linuxで日本語字幕を焼き込む場合は日本語/CJKフォントを用意してください。
 
 ```sh
-git clone --branch v0.1.0-alpha.5 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.6 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 export VIDEO_EDIT_HARNESS_ROOT="$PWD"
@@ -176,7 +193,7 @@ Claude単体では `$youtube` を `/youtube`、プラグインでは `/video-edi
 
 ## 対応範囲と検証
 
-**アルファ版：** 単一素材の平坦なタイムラインが対象です。通常の動画は原素材の縦横比を保持し、9:16版は余白付きfitを標準とします。center cropは確認して明示指定します。自動顔追跡、Bロール構成、プラットフォームへの投稿はありません。Apple Log LUTはRec.709変換を含むため、FCPのCamera LUTとの二重変換を避けます。HDR/HLG・Apple Log 2には別の対応変換が必要です。
+**アルファ版：** 発話編集の平坦なタイムラインと、登録素材を使うvisual EDLに対応します。通常の動画は原素材の縦横比を保持し、9:16版は余白付きfitを標準とします。center cropは確認して明示指定します。自動顔識別・自動Bロール構成・プラットフォームへの投稿はありません。観察した枠を使う追跡は別途レビューが必要です。Apple Log LUTはRec.709変換を含むため、FCPのCamera LUTとの二重変換を避けます。HDR/HLG・Apple Log 2には別の対応変換が必要です。
 
 FCPXMLはカット時刻と素材リンクを渡します。LUT・字幕・空間マスク・FCP最終音声ミックスは別途適用と確認が必要です。XML/DTD、ハッシュ、全編デコード、フレーム対応の検証と、人の試聴・映像確認、実際のFCP取り込み、投稿先での再生を区別します。合成デモや自動チェックは実写の品質を保証しません。[リリース検証と未確認事項](docs/RELEASE_VALIDATION.md)。
 
@@ -185,4 +202,8 @@ make test
 uv run video-harness verify /path/to/final.mp4 --output output/final-check
 ```
 
-[リリースとチェックサム](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.5) · [貢献方法](CONTRIBUTING.md) · [MITライセンス](LICENSE)。ソース、wheel、3つの単体スキルZIP、ClaudeプラグインZIPを配布します。PyPIへの公開は行っていません。
+[リリースとチェックサム](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.6) · [貢献方法](CONTRIBUTING.md) · [MITライセンス](LICENSE)。ソース、wheel、3つの単体スキルZIP、ClaudeプラグインZIPを配布します。PyPIへの公開は行っていません。
+
+映像効果の指定は [VIDEO_EFFECTS.ja.md](docs/VIDEO_EFFECTS.ja.md) を参照。控えめ／ポップのプリセットと、時刻・強度を指定するイベントを区別し、実レンダーで検証します。
+
+TikTok公式APIの接続設定・OAuth・本人のプロフィールと公開動画一覧の読み取りは [接続ガイド](docs/TIKTOK_API.ja.md) を参照してください。これは作業ツリーの追加機能です。投稿、音源ダウンロード、流行ランキングの取得は含みません。実アカウントとの疎通はOAuth後に別途確認します。

@@ -1,0 +1,1 @@
+{"schema_version":1,"id":"natural","description":"Natural speech and ambience with no added assets or beat sync.","defaults":{"intensity":"off","music":"off","sfx":"off","visual_assets":"off","beat_sync":"off","selection":"manual"}}

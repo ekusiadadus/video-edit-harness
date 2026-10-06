@@ -110,6 +110,8 @@ class Session:
         from .editorial import make_brief
         actor_name(actor)
         cfg = project(project_path)
+        from .production import freeze_pattern
+        cfg = freeze_pattern(cfg)
         brief = make_brief(cfg, brief_data or {})
         source = fingerprint(cfg['source'])
         inherited_permission = cfg.get('cloud_permission')
@@ -134,7 +136,7 @@ class Session:
         write(folder / 'artifacts/brief-0000.json', brief)
         session = cls(folder)
         state = {'version': 1, 'id': uuid.uuid4().hex, 'created_at': now(), 'generation': 0,
-                 'phase': 'needs_transcript', 'source': source,
+                 'phase': 'needs_visual_plan' if cfg.get('edit_basis') == 'visual' else 'needs_transcript', 'source': source,
                  'project': fingerprint(folder / 'artifacts/project-0000.json'),
                  'brief': fingerprint(folder / 'artifacts/brief-0000.json'), 'transcript': None,
                  'plan': None, 'renders': [], 'feedback': [], 'reviews': [], 'deliveries': [],
@@ -205,11 +207,31 @@ class Session:
         for key in ('project', 'brief', 'transcript', 'plan', 'packed', 'completion'):
             if state.get(key):
                 check_ref(state[key])
+        for candidate in state.get('candidates', []):
+            for key in ('project', 'plan', 'brief'):
+                check_ref(candidate[key])
+            for key in ('transcript', 'packed'):
+                if candidate.get(key):
+                    check_ref(candidate[key])
+            if candidate.get('direction'):
+                check_ref(candidate['direction'])
+        for comparison in state.get('candidate_comparisons', []):
+            check_ref(comparison['artifact'])
+            if comparison.get('evidence'):
+                check_ref(comparison['evidence'])
+        for proposal in state.get('beat_proposals', []):
+            check_ref(proposal)
+        for finishing in state.get('native_finishing', []):
+            check_ref(finishing['artifact'])
+        for imported in state.get('production_imports', []):
+            for key in ('xml', 'report', 'candidate_changes'):
+                if imported.get(key):
+                    check_ref(imported[key])
         if state.get('transcript'):
             from .transcript import load_transcript
             load_transcript(state['transcript']['path'])
         if state.get('plan'):
-            validate_plan(read(state['plan']['path']), verify_source=deep)
+            self._validate_edit_plan(read(state['plan']['path']), read(state['project']['path']), deep)
         for collection in ('feedback', 'reviews', 'deliveries'):
             for item in state[collection]:
                 check_ref(item['artifact'])
@@ -231,6 +253,19 @@ class Session:
                 self._verify_render(render)
 
     @staticmethod
+    def _validate_edit_plan(plan, cfg, deep=True):
+        if plan.get('version') == 4:
+            from .visual import validate_visual_edl
+            from .assets import validate_asset
+            from .patterns import resolve_asset_policy
+            policy = resolve_asset_policy(cfg)
+            assets = {a['asset_id']: a for a in cfg.get('assets', [])}
+            for segment in plan['sequence']:
+                validate_asset(assets[segment['asset_id']], policy)
+            return validate_visual_edl(plan, assets, verify_sources=deep)
+        return validate_plan(plan, verify_source=deep)
+
+    @staticmethod
     def _verify_render(render):
         check_ref(render['plan'])
         check_ref(render['project'])
@@ -238,6 +273,9 @@ class Session:
             check_ref(render['brief'])
         for ref in render['files'].values():
             check_ref(ref)
+        if render['files'].get('production'):
+            from .production import verify_production
+            verify_production(read(render['files']['production']['path']))
         result = read(render['files']['result']['path'])
         if result.get('technical_status') != 'pass':
             raise ValueError('Render is not technically verified')
@@ -266,7 +304,9 @@ class Session:
             next_action = ('Process identity is unavailable; wait for the owner to finish or retry resume after its PID exits.'
                            if not state['operation'].get('process_birth') else
                            'Resume the interrupted operation or wait for its process to finish.')
-        elif not state['transcript']:
+        elif read(state['project']['path']).get('edit_basis') == 'visual' and not state['plan']:
+            next_action = 'Inspect source frames and propose a visual plan with actual asset IDs and shot ranges.'
+        elif not state['transcript'] and read(state['project']['path']).get('edit_basis') != 'visual':
             permission = state.get('cloud_permission') or {}
             next_action = ('Attach a verified transcript; cloud transcription is denied for this source.'
                            if permission.get('policy') == 'deny' else
@@ -397,6 +437,14 @@ class Session:
         from .feedback import seconds
         state = self._load()
         self._verify(state, deep=False)
+        cfg = read(state['project']['path'])
+        if cfg.get('edit_basis') == 'visual':
+            if words:
+                raise ValueError('Visual editing has no transcript word IDs')
+            return {'edit_basis': 'visual', 'source': state['source'],
+                    'assets': [{k: a.get(k) for k in ('asset_id', 'path', 'sha256', 'kind')} for a in cfg.get('assets', [])],
+                    'plan': read(state['plan']['path']) if state.get('plan') else None,
+                    'brief': read(state['brief']['path']), 'transcript': None}
         if not state.get('packed'):
             raise ValueError('Attach a transcript first')
         packed = read(state['packed']['path'])
@@ -452,6 +500,93 @@ class Session:
             self._save(state, 'plan_proposed', actor)
         return state['plan']
 
+    def propose_visual(self, edl, actor='codex'):
+        """Create a frame-grounded plan; no transcript or fabricated word IDs."""
+        actor_name(actor)
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            cfg = read(state['project']['path'])
+            if cfg.get('edit_basis') != 'visual':
+                raise ValueError('Start the project with edit_basis visual')
+            proposed = deepcopy(edl)
+            proposed.update(version=4, edit_basis='visual', status='proposed')
+            proposed.pop('review', None)
+            normalized = self._validate_edit_plan(proposed, cfg)
+            state['plan'] = self._artifact('visual-plan', normalized)
+            state['phase'] = 'needs_selection'
+            self._save(state, 'visual_plan_proposed', actor)
+        return state['plan']
+
+    def propose_beats(self, rid, spec, actor, note):
+        """Map exact music evidence and propose cuts; never select the proposal."""
+        from .beats import map_beats
+        from .beat_editing import suggest_beat_revision, annotate_speech_beats
+        require_note(note)
+        actor_name(actor)
+        allowed = {'asset_id', 'beat_map', 'allowed_intervals', 'protected_intervals',
+                   'max_shift', 'min_hold'}
+        if not isinstance(spec, dict) or set(spec) - allowed:
+            raise ValueError('Invalid beat proposal settings')
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            render = self._find_render(state, rid)
+            self._verify_render(render)
+            if render['plan'] != state['plan'] or render['project'] != state['project']:
+                raise ValueError('Beat proposal requires a current plan and project render')
+            if not render['files'].get('production'):
+                raise ValueError('Render has no music production evidence')
+            production = read(render['files']['production']['path'])
+            if production['pattern']['beat_sync'] == 'off':
+                raise ValueError('Enable beat sync explicitly before proposing cuts')
+            mapping = read(render['files']['mapping']['path'])
+            if production['mapping_sha256'] != digest(mapping):
+                raise ValueError('Production mapping changed')
+            assets = production['assets']
+            asset = next((a for a in assets if a['asset_id'] == spec.get('asset_id')
+                          and a['kind'] == 'music'), None)
+            beat_map = spec.get('beat_map')
+            if asset is None or not isinstance(beat_map, dict) or beat_map.get('source_sha256') != asset['sha256']:
+                raise ValueError('Beat evidence must match the exact selected music SHA')
+            if beat_map.get('source_bytes') is not None and beat_map['source_bytes'] != asset['bytes']:
+                raise ValueError('Beat source byte count differs')
+            cues = [c for c in production['cues'] if c.get('asset_id') == asset['asset_id']
+                    and c['role'] == 'music']
+            if not cues:
+                raise ValueError('Selected music has no output cues')
+            mapped = map_beats(beat_map, cues, mapping['fps'], spec.get('protected_intervals', []))
+            plan = read(state['plan']['path'])
+            if plan['version'] != 4:
+                evidence = annotate_speech_beats(plan, mapped)
+                proposed = None
+            else:
+                cfg = read(state['project']['path'])
+                proposed, evidence = suggest_beat_revision(plan, mapping, mapped, cfg['assets'],
+                    spec.get('max_shift', '1/5'), spec.get('min_hold', '1/2'),
+                    spec.get('allowed_intervals', []), actor, note)
+            evidence.update(render_id=rid, video_sha256=render['files']['video']['sha256'],
+                            source_beat_map=deepcopy(beat_map), mapped_beats=mapped,
+                            actor=actor, reason=note)
+            report = self._artifact('beat-proposal', evidence)
+            if proposed is not None:
+                proposed['parent_plan'] = state['plan']
+                proposed['beat_proposal'] = report
+                state['plan'] = self._artifact('plan', proposed)
+                # Output timing changes invalidate explicit cue placement. Keep
+                # the old immutable project for reproducibility, then replan.
+                if cfg.pop('cue_plan', None) is not None:
+                    state['project'] = self._artifact('project', cfg)
+                state['phase'] = 'needs_selection'
+            state.setdefault('beat_proposals', []).append(report)
+            self._save(state, 'beat_cuts_proposed' if proposed else 'speech_beats_annotated',
+                       actor, {'report': report, 'render_id': rid, 'note': note})
+        changed = proposed is not None and any(c['original_frame'] != c['suggested_frame']
+                                              for c in evidence['cuts'])
+        return {'plan': state['plan'], 'report': report, 'timing_changed': changed}
+
     def approve(self, actor, note):
         from .editorial import approve_story
         require_note(note)
@@ -462,14 +597,17 @@ class Session:
             if not state['plan']:
                 raise ValueError('Propose a plan first')
             plan = read(state['plan']['path'])
-            if plan['version'] == 3:
+            if plan['version'] == 4:
+                from .visual import approve_visual_edl
+                updated = approve_visual_edl(plan, actor=actor, reason=note, review_basis='source_inspection')
+            elif plan['version'] == 3:
                 updated = approve_story(plan, actor, note)
             else:
                 updated = deepcopy(plan)
                 updated.update(status='reviewed_selection', review={'actor': actor_name(actor), 'note': note})
             previous = state['plan']
             updated['parent_plan'] = previous
-            validate_plan(updated, verify_source=True)
+            self._validate_edit_plan(updated, read(state['project']['path']))
             state['plan'] = self._artifact('plan', updated)
             for feedback in state['feedback']:
                 if feedback['status'] == 'addressed' and feedback.get('addressed_by') == previous:
@@ -490,7 +628,13 @@ class Session:
             if feedback_id and not any(f['id'] == feedback_id and f['status'] == 'pending' for f in state['feedback']):
                 raise ValueError('Select pending feedback')
             plan = read(state['plan']['path'])
-            if plan['version'] == 3:
+            if plan['version'] == 4:
+                from .visual import revise_visual_edl
+                if not isinstance(operations, list) or len(operations) != 1 or set(operations[0]) != {'op', 'sequence'} or operations[0]['op'] != 'replace_sequence':
+                    raise ValueError('Visual revision requires one explicit replace_sequence operation')
+                updated = revise_visual_edl(plan, operations[0]['sequence'], actor=actor, reason=note)
+                updated = self._validate_edit_plan(updated, read(state['project']['path']))
+            elif plan['version'] == 3:
                 updated = revise_story(plan, operations, actor, note)
             else:
                 updated = revise_pause_plan(plan, operations, actor, note)
@@ -508,7 +652,8 @@ class Session:
         from .regions import region_filter
         require_note(note)
         allowed = {'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
-                   'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root'}
+                   'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime'}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError('Only color/audio/render project settings can change here')
         with self._lock():
@@ -517,6 +662,16 @@ class Session:
             self._verify(state)
             cfg = read(state['project']['path'])
             cfg.update(deepcopy(changes))
+            if changes.get('editing_pattern',{}).get('id')=='natural' and changes.get('retime'):
+                raise ValueError('Explicit retime conflicts with natural/off')
+            if changes.get('editing_pattern', {}).get('id') == 'natural' and 'video_effects' not in changes:
+                cfg.pop('video_effects', None)
+                cfg.pop('retime', None)
+            from .production import freeze_pattern
+            cfg = freeze_pattern(cfg, refresh='editing_pattern' in changes)
+            from .patterns import resolve_pattern, resolve_asset_policy
+            resolve_pattern(cfg)
+            resolve_asset_policy(cfg)
             if cfg['input_color'] not in ('apple_log', 'rec709'):
                 raise ValueError('Unsupported input color')
             resolve(cfg)
@@ -526,26 +681,279 @@ class Session:
             self._save(state, 'project_revised', actor, {'note': note, 'keys': sorted(changes)})
         return state['project']
 
-    def render(self, preview=True, actor='codex'):
+    def create_candidate(self, changes, actor, note, *, direction_resolution=None, expected_project=None, base_render_id=None):
+        """Snapshot a comparison direction without changing adopted inputs."""
+        from .patterns import resolve_pattern, resolve_asset_policy
+        from .profiles import resolve
+        from .regions import region_filter
+        require_note(note)
+        actor_name(actor)
+        allowed = {'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
+                   'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime'}
+        if not isinstance(changes, dict) or set(changes) - allowed:
+            raise ValueError('Candidate changes must be render settings only')
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            if expected_project is not None and state['project'] != expected_project:
+                raise ValueError('Project changed while proposing editing direction')
+            if not state['plan'] or read(state['plan']['path']).get('status') != 'reviewed_selection':
+                raise ValueError('Select the source edit plan before creating comparison candidates')
+            cfg = read(state['project']['path'])
+            if base_render_id is not None:
+                base = self._find_render(state, base_render_id)
+                self._verify_render(base)
+                if base['plan'] != state['plan'] or base['brief'] != state['brief']:
+                    raise ValueError('Effect revision requires the current edit plan and brief')
+                cfg = read(base['project']['path'])
+            cfg.update(deepcopy(changes))
+            if changes.get('editing_pattern',{}).get('id')=='natural' and changes.get('retime'):
+                raise ValueError('Explicit retime conflicts with natural/off')
+            if changes.get('editing_pattern', {}).get('id') == 'natural' and 'video_effects' not in changes:
+                cfg.pop('video_effects', None)
+                cfg.pop('retime', None)
+            from .production import freeze_pattern, frozen_pattern
+            if direction_resolution is not None:
+                resolved_changes = direction_resolution.get('project_changes')
+                if not isinstance(resolved_changes, dict) or set(resolved_changes) != {'editing_pattern', '_editing_pattern_snapshot'}:
+                    raise ValueError('Invalid direction resolution')
+                cfg.update(deepcopy(resolved_changes))
+                if cfg['editing_pattern']['id'] == 'natural':
+                    cfg.pop('video_effects', None)
+                    cfg.pop('retime', None)
+                cfg = freeze_pattern(cfg)
+            else:
+                cfg = freeze_pattern(cfg, refresh='editing_pattern' in changes)
+            if cfg['input_color'] not in ('apple_log', 'rec709'):
+                raise ValueError('Unsupported input color')
+            resolve(cfg)
+            region_filter(cfg)
+            pattern = frozen_pattern(cfg)
+            resolve_asset_policy(cfg)
+            item = {'id': uuid.uuid4().hex[:12], 'project': self._artifact('candidate-project', cfg),
+                    'plan': deepcopy(state['plan']), 'brief': deepcopy(state['brief']),
+                    'transcript': deepcopy(state.get('transcript')), 'packed': deepcopy(state.get('packed')),
+                    'pattern': pattern, 'actor': actor, 'note': note, 'created_at': now()}
+            if direction_resolution is not None:
+                item['direction'] = self._artifact('direction-resolution', direction_resolution)
+            state.setdefault('candidates', []).append(item)
+            self._save(state, 'candidate_created', actor, {'candidate_id': item['id'], 'note': note})
+        return item
+
+    def retime_source(self, render_id):
+        state=self._load();self._verify(state)
+        render=self._find_render(state,render_id);self._verify_render(render)
+        if read(render['project']['path']).get('edit_basis')!='visual':
+            raise ValueError('Speech retime requires word-bound protection integration; visual only')
+        folder=Path(render['path']);mapping=folder/'pre-retime-mapping.json'
+        if not mapping.exists():mapping=Path(render['files']['mapping']['path'])
+        return {'render_id':render_id,'source':fingerprint(folder/'visual-base.mp4'),
+                'mapping':fingerprint(mapping),'stage':'pre_retime_visual_assembly','review_required':True}
+
+    def propose_retime(self, render_id, request, actor, note):
+        from .retime import prepare_retime
+        from .render_cache import digest
+        from .production import frozen_pattern
+        require_note(note);actor_name(actor)
+        state=self._load();self._idle(state);self._verify(state)
+        render=self._find_render(state,render_id);self._verify_render(render)
+        cfg=read(render['project']['path']);pattern=frozen_pattern(cfg)
+        if pattern['id']=='natural' or pattern['intensity']=='off':raise ValueError('Retime conflicts with natural/off')
+        basis=self.retime_source(render_id)
+        proposal=prepare_retime(basis['source']['path'],request,actor,note)
+        setting={'version':1,'proposal':proposal,'input_mapping_sha256':digest(read(basis['mapping']['path']))}
+        invalidated=[key for key in ('cue_plan','video_effects','composition_guides') if cfg.get(key)]
+        candidate=self.create_candidate({'retime':setting,'cue_plan':None,'video_effects':None,'composition_guides':[]},
+                                         actor,note,expected_project=state['project'],base_render_id=render_id)
+        return {'candidate':candidate,'basis':basis,'invalidated_timeline_settings':invalidated,
+                'adopted':False,'review_required':True}
+
+    def tracking_source(self, render_id):
+        """Find the actual retained picture at the effect stage, not the final grade."""
+        state=self._load();self._verify(state)
+        render=self._find_render(state,render_id);self._verify_render(render)
+        cfg=read(render['project']['path']);folder=Path(render['path'])
+        if cfg.get('edit_basis')=='visual':
+            source=folder/'visual-overlays.mp4'
+            if not source.is_file():
+                source=folder/'visual-retimed.mp4'
+            if not source.is_file():
+                source=folder/'visual-base.mp4'
+        else:
+            source=folder/'before-effects.mp4'
+            if not source.is_file():
+                source=Path(render['files']['video']['path'])
+        if not source.is_file():
+            raise ValueError('Retained pre-effects picture is missing')
+        return {'render_id':render_id,'source':fingerprint(source),
+                'mapping':deepcopy(render['files']['mapping']),
+                'stage':'pre_effects','review_required':True}
+
+    def propose_tracking(self, render_id, box, first_frame, end_frame, actor, note,
+                         *, algorithm='csrt', model_path=None, max_scale=1.12,
+                         strength=.65, corrections=None):
+        """Track observed picture and propose a source-bound unadopted zoom."""
+        from fractions import Fraction
+        from .tracking import track_video,validate_track
+        from .production import frozen_pattern
+        require_note(note);actor_name(actor)
+        state=self._load();self._idle(state);self._verify(state)
+        render=self._find_render(state,render_id);self._verify_render(render)
+        pattern=frozen_pattern(read(render['project']['path']))
+        if pattern['id']=='natural' or pattern['intensity']=='off':
+            raise ValueError('Tracking effect conflicts with natural/off; choose an enabled comparison direction')
+        source=self.tracking_source(render_id)
+        mapping=read(source['mapping']['path']);rate=Fraction(mapping['fps'])
+        track_path=self.root/'artifacts'/('track-'+uuid.uuid4().hex[:12]+'.json')
+        track_video(source['source']['path'],box,track_path,start_frame=first_frame,end_frame=end_frame,
+                    corrections=corrections,algorithm=algorithm,model_path=model_path,actor=actor,reason=note)
+        validate_track(track_path,source=source['source']['path'],first_frame=first_frame,end_frame=end_frame)
+        event={'id':'track-'+uuid.uuid4().hex[:12],'type':'tracked_zoom',
+               'output_start':str(Fraction(first_frame,1)/rate),'output_end':str(Fraction(end_frame,1)/rate),
+               'strength':strength,'reason':note,
+               'parameters':{'track_path':str(track_path),'max_scale':max_scale}}
+        from .video_effects import revise_effects
+        from .composition import resolve_guides
+        cfg=read(render['project']['path'])
+        effects=revise_effects(cfg.get('video_effects'),mapping,[{'action':'add','event':event}],cfg.get('assets',[]))
+        guides=list(cfg.get('composition_guides',[]))+[
+            {'id':event['id']+'-subject','kind':'subject','track_path':str(track_path),
+             'output_start':event['output_start'],'output_end':event['output_end'],
+             'reason':note}]
+        resolved=resolve_guides(guides,mapping)
+        candidate=self.create_candidate({'video_effects':effects,'composition_guides':resolved['guides']},
+                                        actor,note,expected_project=state['project'],base_render_id=render_id)
+        return {'candidate':candidate,'tracking':fingerprint(track_path),'basis':source,
+                'adopted':False,'review_required':True}
+
+    def propose_effects(self, render_id, operations, actor, note):
+        """Revise an observed render's effects as an unadopted candidate."""
+        from .video_effects import revise_effects
+        state = self._load()
+        self._verify(state)
+        render = self._find_render(state, render_id)
+        self._verify_render(render)
+        cfg = read(render['project']['path'])
+        mapping = read(render['files']['mapping']['path'])
+        effects = revise_effects(cfg.get('video_effects'), mapping, operations, cfg.get('assets', []))
+        return self.create_candidate({'video_effects': effects}, actor, note,
+                                     expected_project=state['project'], base_render_id=render_id)
+
+    def propose_direction(self, request, actor, note, *, preference=None, trend=None):
+        """Create reviewable candidates from explicit direction; never adopt them."""
+        from .direction import resolve_direction
+        from .patterns import _VALUES
+        require_note(note)
+        actor_name(actor)
+        state = self._load()
+        self._verify(state)
+        resolved = resolve_direction(read(state['project']['path']), request=request,
+                                     preference=preference, trend=trend)
+        variants = resolved['candidates'] or [{'pattern_snapshot': resolved['pattern_snapshot']}]
+        candidates = []
+        for variant in variants:
+            proposal = deepcopy(resolved)
+            snapshot = variant['pattern_snapshot']
+            proposal['project_changes'] = {
+                'editing_pattern': {key: snapshot[key] for key in ('schema_version', 'id', *_VALUES)},
+                '_editing_pattern_snapshot': snapshot}
+            proposal['pattern_snapshot'] = snapshot
+            if resolved['candidates']:
+                proposal['candidate_kind'] = variant['kind']
+            candidates.append(self.create_candidate({}, actor, note, direction_resolution=proposal,
+                                                     expected_project=state['project']))
+        return {'candidates': candidates, 'requires_adoption': True, 'requires_review': True}
+
+    @staticmethod
+    def _find_candidate(state, candidate_id):
+        candidate = next((c for c in state.get('candidates', []) if c['id'] == candidate_id), None)
+        if candidate is None:
+            raise ValueError('Unknown candidate ID')
+        return candidate
+
+    def adopt_candidate(self, candidate_id, actor, note):
+        """Adopt the exact snapshot; this never creates a perceptual review."""
+        require_note(note)
+        actor_name(actor)
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            candidate = self._find_candidate(state, candidate_id)
+            if not any(r.get('candidate_id') == candidate_id for r in state['renders']):
+                raise ValueError('Render the comparison candidate before adoption')
+            parent = {k: deepcopy(state.get(k)) for k in ('project', 'plan', 'brief', 'transcript', 'packed')}
+            for key in ('project', 'plan', 'brief', 'transcript', 'packed'):
+                state[key] = deepcopy(candidate[key])
+            state['adopted_candidate_id'] = candidate_id
+            state['phase'] = 'needs_render'
+            self._save(state, 'candidate_adopted', actor,
+                       {'candidate_id': candidate_id, 'note': note, 'parent': parent,
+                        'review_status': 'adoption_does_not_approve_full_render'})
+        return candidate
+
+    def compare_candidates(self, render_ids):
+        """A sealed local comparison page; creating it has no adoption effect."""
+        if not isinstance(render_ids, list) or not 2 <= len(render_ids) <= 4 or len(set(render_ids)) != len(render_ids):
+            raise ValueError('Compare two to four distinct renders (up to three additions plus natural)')
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            renders = [self._find_render(state, rid) for rid in render_ids]
+            if len({r['plan']['sha256'] for r in renders}) != 1 or len({r['brief']['sha256'] for r in renders}) != 1:
+                raise ValueError('Compare candidates of the same edit plan and brief')
+            from .comparison import comparison_evidence
+            for render in renders:
+                self._verify_render(render)
+            evidence = comparison_evidence(renders, state['source'])
+            rows = []
+            for render in renders:
+                label = read(render['project']['path']).get('editing_pattern', {}).get('id', 'natural')
+                video = Path(render['files']['video']['path']).as_uri()
+                rows.append({'label': f'{label} / {render["id"]}', 'video': video,
+                             'render_id': render['id'], 'sha256': render['files']['video']['sha256']})
+            folder = self.root / 'comparisons'
+            folder.mkdir(exist_ok=True)
+            target = folder / (uuid.uuid4().hex[:12] + '.html')
+            from .comparison import comparison_page
+            target.write_text(comparison_page(rows), encoding='utf-8')
+            evidence_ref = self._artifact('comparison-evidence', evidence)
+            item = {'render_ids': render_ids, 'artifact': fingerprint(target), 'evidence': evidence_ref}
+            state.setdefault('candidate_comparisons', []).append(item)
+            self._save(state, 'candidates_compared', 'automation', item)
+        return item
+
+    def render(self, preview=True, actor='codex', candidate_id=None):
         from .editing import render_edit
         with self._lock():
             state = self._load()
             self._idle(state)
             self._verify(state)
-            if not state['plan'] or read(state['plan']['path']).get('status') != 'reviewed_selection':
+            inputs = self._find_candidate(state, candidate_id) if candidate_id else state
+            if not inputs['plan'] or read(inputs['plan']['path']).get('status') != 'reviewed_selection':
                 raise ValueError('Explicitly select the current plan before rendering')
             rid = uuid.uuid4().hex[:12]
             out = self.root / 'renders' / rid
             operation = {'kind': 'render', 'id': rid, 'path': str(out), 'pid': os.getpid(),
-                         'preview': preview, 'plan': state['plan'], 'project': state['project'], 'brief': state['brief'], 'started_at': now(),
+                         'preview': preview, 'plan': inputs['plan'], 'project': inputs['project'], 'brief': inputs['brief'], 'started_at': now(),
                          'process_birth': process_birth(os.getpid())}
+            if candidate_id:
+                operation['candidate_id'] = candidate_id
             operation['process_identity_status'] = 'known' if operation['process_birth'] else 'unknown'
             state['operation'] = operation
             state['phase'] = 'rendering'
             self._save(state, 'render_started', actor, {'render_id': rid})
         begun = time.monotonic()
         try:
-            render_edit(read(operation['project']['path']), read(operation['plan']['path']), out, preview)
+            plan_data = read(operation['plan']['path'])
+            if plan_data.get('version') == 4:
+                from .visual_editing import render_visual_edit
+                render_visual_edit(read(operation['project']['path']), plan_data, out, preview)
+            else:
+                render_edit(read(operation['project']['path']), plan_data, out, preview)
         except BaseException as exc:
             with self._lock():
                 state = self._load()
@@ -572,10 +980,25 @@ class Session:
                  [('result', 'result.json'), ('video', 'video.mp4'), ('audio', 'audio-only.mp3'),
                   ('mapping', 'frame-mapping.json'), ('plan', 'plan.json'), ('xml', 'timeline.fcpxml'),
                   ('subtitles', 'subtitles.srt'), ('lut', 'look.cube')]}
+        if (folder / 'production.json').is_file():
+            files['production'] = fingerprint(folder / 'production.json')
+        if (folder / 'effects-evidence.json').is_file():
+            files['effects'] = fingerprint(folder / 'effects-evidence.json')
+        if (folder / 'fcp-production.json').is_file():
+            files['fcp_production'] = fingerprint(folder / 'fcp-production.json')
+        if (folder / 'production-timeline.fcpxml').is_file():
+            files['xml'] = fingerprint(folder / 'production-timeline.fcpxml')
+        if (folder / 'final-mix.wav').is_file():
+            files['final_mix'] = fingerprint(folder / 'final-mix.wav')
+        if (folder / 'finished-picture.mp4').is_file():
+            files['finished_picture'] = fingerprint(folder / 'finished-picture.mp4')
         item = {key: operation[key] for key in ('id', 'path', 'preview', 'plan', 'project', 'started_at')}
         item.update(files=files, brief=operation.get('brief', state['brief']), elapsed_seconds=operation.get('elapsed_seconds'), registered_at=now())
+        if operation.get('candidate_id'):
+            item['candidate_id'] = operation['candidate_id']
         self._verify_render(item)
-        if item['plan'] != state['plan'] or item['project'] != state['project']:
+        inputs = self._find_candidate(state, operation['candidate_id']) if operation.get('candidate_id') else state
+        if any(item[key] != inputs[key] for key in ('plan', 'project', 'brief')):
             raise ValueError('Interrupted render does not match current session inputs')
         state['renders'].append(item)
         return item
@@ -665,22 +1088,53 @@ class Session:
             self._verify_render(render)
             if report.get('render_sha256') != render['files']['video']['sha256']:
                 raise ValueError('Review must name the exact rendered video SHA256')
+            plan = read(render['files']['plan']['path'])
+            visual = plan.get('version') == 4
+            checks = list(CHECKS)
+            if visual:
+                checks = ['meaning', 'pacing', 'cut_boundaries', 'color']
+                mapping = read(render['files']['mapping']['path'])
+                if mapping.get('has_source_audio', False):
+                    checks.append('audio_only')
+                if Path(render['files']['subtitles']['path']).stat().st_size:
+                    checks.append('captions')
+            production = read(render['files']['production']['path']) if render['files'].get('production') else None
+            if production:
+                from .production import verify_production
+                verify_production(production)
+                if production['assets'] or production.get('source_assets'):
+                    checks.append('asset_rights')
+                if any(c['role'] in ('music', 'sfx') for c in production['cues']):
+                    checks.append('music_fit')
+                    if 'audio_only' not in checks:
+                        checks.append('audio_only')
+                if any(c['role'] in ('image', 'video', 'title') for c in production['cues']):
+                    checks.append('asset_context')
+                if production['pattern']['beat_sync'] != 'off':
+                    checks.append('beat_sync')
+                if production.get('effects', {}).get('events'):
+                    checks.append('video_effects')
             entries = report.get('checks')
-            if not isinstance(entries, list) or len(entries) != len(CHECKS) or {e.get('id') for e in entries} != set(CHECKS):
-                raise ValueError('Review needs each check exactly once: ' + ', '.join(CHECKS))
+            if not isinstance(entries, list) or len(entries) != len(checks) or {e.get('id') for e in entries} != set(checks):
+                raise ValueError('Review needs each applicable check exactly once: ' + ', '.join(checks))
             for entry in entries:
                 require_note(entry.get('note'))
                 if entry.get('status') not in ('pass', 'fail', 'pending') or entry.get('basis') not in ('listening', 'visual', 'text', 'signal', 'synthetic'):
                     raise ValueError('Invalid review status or observation basis')
                 expected = {'meaning': {'text', 'listening'}, 'pacing': {'listening'},
                             'audio_only': {'listening'}, 'cut_boundaries': {'listening'},
-                            'captions': {'text', 'visual'}, 'color': {'visual'}}
+                            'captions': {'text', 'visual'}, 'color': {'visual'},
+                            'music_fit': {'listening'}, 'asset_context': {'visual'},
+                            'asset_rights': {'text'}, 'beat_sync': {'visual'},
+                            'video_effects': {'visual'}}
+                if visual:
+                    expected.update(meaning={'visual'}, pacing={'visual'}, cut_boundaries={'visual'})
                 if entry['status'] == 'pass' and entry['basis'] != 'synthetic' and entry['basis'] not in expected[entry['id']]:
                     raise ValueError('Acceptance requires appropriate observation; audio/pacing need listening and color needs visual review')
                 if entry['basis'] == 'synthetic' and read(render['project']['path']).get('evidence_kind') != 'synthetic':
                     raise ValueError('Synthetic observations are only for explicitly synthetic fixtures')
             plan = read(render['files']['plan']['path'])
-            junction_ids = ([item['id'] for item in plan['sequence'][:-1]] if plan.get('version') == 3
+            junction_ids = ([item['id'] for item in plan['sequence'][:-1]] if plan.get('version') in (3, 4)
                             else [item['id'] for item in plan['cuts']])
             boundary_pass = next(e for e in entries if e['id'] == 'cut_boundaries')['status'] == 'pass'
             coverage = report.get('junction_coverage')
@@ -788,6 +1242,27 @@ class Session:
         render = self._find_render(state, rid)
         return inspect_render(render, self.root / 'inspections' / uuid.uuid4().hex[:12], start, duration)
 
+    def native_finish(self, rid, request, actor, note):
+        """Record a TikTok finishing proposal without uploading media."""
+        from .native_finishing import plan_native_finishing
+        require_note(note)
+        actor_name(actor)
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            render = self._find_render(state, rid)
+            self._verify_render(render)
+            if render['preview']:
+                raise ValueError('Native finishing needs a full base render')
+            production = read(render['files']['production']['path']) if 'production' in render['files'] else {'cues': []}
+            value = plan_native_finishing(render['files']['video'], read(render['files']['mapping']['path']), production, request)
+            item = {'render_id': rid, 'actor': actor, 'note': note,
+                    'artifact': self._artifact('native-finishing', value)}
+            state.setdefault('native_finishing', []).append(item)
+            self._save(state, 'native_finishing_proposed', actor, item)
+        return item
+
     def audition_junctions(self, rid, offset=0, limit=24, ids=None):
         from .editing import audition
         state = self._load()
@@ -850,6 +1325,99 @@ document.getElementById('save').onclick=()=>{const time=Number(document.getEleme
             current = self._load()
             self._save(current, 'handoff_written', actor, {'path': str(path)})
         return path
+
+    def import_production_fcp(self, render_id, xml_path, actor, note):
+        """Keep a returned layered XML as an explicit, unadopted proposal."""
+        from .production_import import import_production_xml
+        from .production_fcp import resolve_media_path
+        from .render_cache import digest as render_digest
+        import xml.etree.ElementTree as ET
+
+        actor_name(actor)
+        note = require_note(note)
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            render = self._find_render(state, render_id)
+            self._verify_render(render)
+            if (render['plan'] != state['plan'] or render['project'] != state['project']
+                    or render.get('brief') != state['brief']):
+                raise ValueError('Production import requires an exact current plan, project and brief render')
+            if render['preview']:
+                raise ValueError('Production import requires the current full render')
+            files = render['files']
+            if not all(key in files for key in ('production', 'fcp_production', 'xml', 'mapping', 'video')):
+                raise ValueError('Render lacks a production FCP handoff and sealed mapping')
+            for key in ('production', 'fcp_production', 'xml', 'mapping', 'video'):
+                check_ref(files[key])
+            handoff = read(files['fcp_production']['path'])
+            if handoff.get('mode') not in {'mix', 'editable'}:
+                raise ValueError('Render has no importable production XML mode')
+            if not isinstance(handoff.get('xml'), str) or not handoff['xml']:
+                raise ValueError('Production handoff XML reference is missing')
+            if Path(handoff['xml']).resolve() != Path(files['xml']['path']).resolve():
+                raise ValueError('Production handoff XML differs from sealed render XML')
+            production = read(files['production']['path'])
+            if production.get('mapping_sha256') != render_digest(read(files['mapping']['path'])):
+                raise ValueError('Production cue plan is stale against the sealed frame mapping')
+            original = Path(xml_path).expanduser().resolve(strict=True)
+            if original.is_dir():
+                if original.suffix != '.fcpxmld':
+                    raise ValueError('Returned XML directory must be an .fcpxmld bundle')
+                original = (original / 'Info.fcpxml').resolve(strict=True)
+            identity = fingerprint(original)
+            report = import_production_xml(files['xml']['path'], original, production, actor, note)
+            if fingerprint(original) != identity:
+                raise ValueError('Returned FCPXML changed during import')
+            kept = self.root / 'artifacts' / ('fcp-production-returned-' + uuid.uuid4().hex[:12] + '.fcpxml')
+            shutil.copy2(original, kept)
+            kept_ref = fingerprint(kept)
+            if kept_ref['sha256'] != identity['sha256']:
+                raise ValueError('Returned FCPXML copy differs from inspected bytes')
+            # Preserve the original location of media referenced by a portable
+            # relative XML. The XML copy is exact but may not carry raw media.
+            media = []
+            try:
+                tree = ET.parse(original)
+                for rep in tree.findall('.//resources/asset/media-rep'):
+                    path = resolve_media_path(rep.get('src', ''), original)
+                    media.append(fingerprint(path))
+            except (ValueError, OSError, ET.ParseError, KeyError):
+                # A rejected malformed XML still has a retained byte-for-byte
+                # copy and the importer's explicit rejection reason.
+                media = []
+            report.update(render_id=render_id, render_sha256=files['video']['sha256'],
+                          reference_xml=files['xml'], returned_xml=kept_ref,
+                          original_returned_xml=identity, media_evidence=media,
+                          adopted=False, review_status='not_reviewed')
+            report_ref = self._artifact('fcp-production-import', report)
+            changes_ref = None
+            if report['status'] == 'review_required' and report.get('cue_plan') is not None:
+                changes_ref = self._artifact('fcp-production-candidate-changes',
+                                             {'cue_plan': report['cue_plan']})
+            item = {'id': uuid.uuid4().hex[:12], 'render_id': render_id,
+                    'render_sha256': files['video']['sha256'], 'xml': kept_ref,
+                    'report': report_ref, 'candidate_changes': changes_ref,
+                    'status': report['status'], 'actor': actor, 'note': note,
+                    'created_at': now()}
+            state.setdefault('production_imports', []).append(item)
+            self._save(state, 'production_fcp_import_recorded', actor,
+                       {'import_id': item['id'], 'render_id': render_id,
+                        'status': item['status'], 'report': report_ref,
+                        'candidate_changes': changes_ref,
+                        'adopted': False})
+        next_steps = []
+        if changes_ref:
+            next_steps = [
+                {'action': 'candidate', 'changes_file': changes_ref['path'],
+                 'note': 'Create an immutable comparison candidate from the imported cue proposal.'},
+                {'action': 'render', 'candidate_id': '<candidate ID>', 'full': True},
+                {'action': 'review', 'render_id': '<new render ID>', 'basis': 'exact new render SHA'},
+                {'action': 'adopt-candidate', 'candidate_id': '<candidate ID>',
+                 'note': 'Explicitly select the verified candidate; adoption is not human review.'},
+            ]
+        return {**item, 'next_steps': next_steps}
 
     def import_fcp(self, xml_path, actor, note):
         from .fcp_import import import_fcpxml

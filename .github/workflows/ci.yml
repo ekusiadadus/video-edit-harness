@@ -26,12 +26,13 @@ jobs:
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
       - name: FFmpeg (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg rubberband-cli libsndfile1
       - name: FFmpeg (macOS)
         if: runner.os == 'macOS'
-        run: brew install ffmpeg
-      - run: uv sync --locked
-      - run: uv run python -m unittest discover -s tests -v
+        run: brew install ffmpeg rubberband
+      - run: uv sync --locked --extra tracking --extra pose-tracking --extra beat-analysis --extra retime-audio
+      - run: uv run --no-sync python -m unittest discover -s tests -v
       - run: uv build
       - run: uv run python scripts/package_release.py --output dist
-      - run: uv run python scripts/smoke_wheel.py dist/video_edit_harness-0.1.0a5-py3-none-any.whl
+      - run: uv run --no-sync python scripts/verify_release_artifacts.py dist --output release-audit.json
+      - run: uv run --no-sync python scripts/smoke_wheel.py dist/video_edit_harness-*-py3-none-any.whl

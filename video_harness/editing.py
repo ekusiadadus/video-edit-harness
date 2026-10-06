@@ -124,6 +124,8 @@ def _concat_file(path, files):
 
 def render_edit(cfg, plan, out, preview=True):
     """Render exact XML ranges; AAC and loudness normalization happen after assembly."""
+    if cfg.get('retime'):
+        raise ValueError('Speech-session retime needs word-bound protection integration; use visual retime candidates')
     source_probe = probe(cfg['source'])
     source_audio = stream_bounds(source_probe, 'audio')
     source_video = stream_bounds(source_probe, 'video')
@@ -209,6 +211,12 @@ def render_edit(cfg, plan, out, preview=True):
         _concat_file(out / 'video.ffconcat', videos)
         _concat_file(out / 'audio.ffconcat', audio)
         total = sum(float(end - start) for start, end in ranges)
+        from .production import resolve_production, mix_key, production_sources
+        production = resolve_production(cfg, read(out / 'frame-mapping.json'))
+        audio_cues = [c for c in production['cues'] if c['role'] in ('music', 'sfx')]
+        visual_cues = [c for c in production['cues'] if c['role'] not in ('music', 'sfx')]
+        if production['cues'] or production.get('effects', {}).get('events'):
+            write(out / 'production.json', production)
         mixed = out / 'mix.m4a'
         def build_mix(artifact, log):
             joined = artifact.parent / 'assembled.wav'
@@ -216,22 +224,43 @@ def render_edit(cfg, plan, out, preview=True):
             _concat_file(concat, audio)
             run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-f', 'concat', '-safe', '0', '-i',
                  str(concat), '-c:a', 'pcm_s16le', str(joined)], artifact.parent / 'assemble-audio.log')
-            af = loudness_filter(effective, str(joined), 0, total, artifact.parent)
-            run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-i', str(joined), '-af', af,
+            mix_input = joined
+            if audio_cues:
+                from .audio_mix import render_mix
+                mix_input = artifact.parent / 'production-mix.wav'
+                mix_evidence = render_mix(joined, audio_cues, production_sources(production),
+                                          mix_input, total, effective['audio'])
+                write(artifact.parent / 'production-mix.json', mix_evidence)
+            af = loudness_filter(effective, str(mix_input), 0, total, artifact.parent)
+            run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-i', str(mix_input), '-af', af,
                  '-c:a', 'aac', '-b:a', '384k', '-ar', '48000', str(artifact)], log)
             with log.open('a') as evidence:
                 for name in ('assemble-audio.log', 'audio-measure.log'):
                     path = artifact.parent / name
                     if path.exists():
                         evidence.write('\n' + name + '\n' + path.read_text())
-        mix_event = cache.get('mix', {**common_key, 'pcm': audio_keys,
-            'audio': effective['audio'], 'duration': total}, '.m4a', mixed, build_mix,
+        mix_settings = {**common_key, 'pcm': audio_keys,
+                        'audio': effective['audio'], 'duration': total}
+        if audio_cues:
+            mix_settings['production'] = mix_key(production)
+        mix_event = cache.get('mix', mix_settings, '.m4a', mixed, build_mix,
             out / 'mix.log')
         final = out / 'video.mp4'
         run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-f', 'concat', '-safe', '0', '-i',
              str(out / 'video.ffconcat'), '-i', str(mixed), '-map', '0:v:0', '-map', '1:a:0',
              '-c:v', 'copy', '-c:a', 'copy',
              '-map_metadata', '-1', '-t', str(total), '-movflags', '+faststart', str(final)], out / 'render.log')
+        if visual_cues:
+            from .visual import render_overlays
+            base = out / 'base-video.mp4'
+            final.rename(base)
+            write(out / 'overlay-evidence.json', render_overlays(
+                base, visual_cues, production_sources(production), final, total, preview=preview))
+        if production.get('effects', {}).get('events'):
+            from .video_effects import render_effects
+            base = out / 'before-effects.mp4'
+            final.rename(base)
+            write(out / 'effects-evidence.json', render_effects(base, production['effects'], final, production['assets'], production.get('composition')))
         verify(final, out, total, True, (0, total))
         run(['ffmpeg', '-v', 'error', '-n', '-i', str(final), '-vn', '-c:a', 'libmp3lame',
              '-b:a', '192k', str(out / 'audio-only.mp3')], out / 'audio-only.log')
@@ -248,6 +277,9 @@ def render_edit(cfg, plan, out, preview=True):
             if float(actual['input_tp']) > effective['audio']['true_peak_db'] + .3:
                 warnings.append('True peak exceeds target +0.3dB tolerance')
         write(out / 'audio-output-measure.json', {'measured': actual, 'targets': effective['audio'], 'warnings': warnings})
+        if production['cues'] or production.get('effects', {}).get('events'):
+            from .production import prepare_fcp_handoff
+            prepare_fcp_handoff(cfg, production, out)
         cache_report = cache.report()
         cache_report.update({'elapsed_seconds': round(time.monotonic() - started, 3),
             'estimated_capacity_bytes': estimated, 'video_keys': video_keys,

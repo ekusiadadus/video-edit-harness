@@ -1,6 +1,6 @@
 [project]
 name = "video-edit-harness"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "Transcript-led video editing, grading and FCPXML harness for Codex and Claude Code"
 readme = "README.md"
 license = "MIT"
@@ -15,6 +15,18 @@ video-harness = "video_harness.cli:main"
 [project.optional-dependencies]
 transcription-cloud = [
     "openai>=2,<3",
+]
+beat-analysis = [
+    "librosa>=0.11,<0.12",
+]
+retime-audio = [
+    "librosa>=0.11,<0.12",
+]
+tracking = [
+    "opencv-contrib-python>=4.12,<5",
+]
+pose-tracking = [
+    "mediapipe>=0.10.32,<0.11",
 ]
 [build-system]
 requires = ["hatchling"]
@@ -31,7 +43,9 @@ Issues = "https://github.com/ekusiadadus/video-edit-harness/issues"
 "use_cases" = "video_harness/data/use_cases"
 "styles" = "video_harness/data/styles"
 "tones" = "video_harness/data/tones"
+"editing_patterns" = "video_harness/data/editing_patterns"
+"trend_profiles" = "video_harness/data/trend_profiles"
 
 [tool.hatch.build.targets.sdist]
 exclude = ["/output/**", "/baselines/**", "/media/**", "/sessions/**", "/cache/**", "/dist/**", "/build/**", "/release-assets/**", "/.venv/**"]
-include = ["video_harness/*.py", "use_cases/*.json", "styles/*.json", "tones/*.json", "projects/*.template.json", "examples/*.json", "tests/*.py", "scripts/*.py", "docs/*.md", ".agents/skills/video-editing/**", ".agents/skills/tiktok/**", ".agents/skills/youtube/**", ".claude/skills/video-editing", ".claude/skills/tiktok", ".claude/skills/youtube", ".claude-plugin/*.json", "README.md", "README.ja.md", "docs/demo/**", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "AGENTS.md", "CLAUDE.md", "Makefile", "pyproject.toml", "uv.lock", ".env.example"]
+include = ["video_harness/*.py", "use_cases/*.json", "styles/*.json", "tones/*.json", "editing_patterns/*.json", "trend_profiles/*.json", "projects/*.template.json", "examples/*.json", "tests/*.py", "scripts/*.py", "docs/*.md", ".agents/skills/video-editing/**", ".agents/skills/tiktok/**", ".agents/skills/youtube/**", ".claude/skills/video-editing", ".claude/skills/tiktok", ".claude/skills/youtube", ".claude-plugin/*.json", "README.md", "README.ja.md", "docs/demo/**", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "AGENTS.md", "CLAUDE.md", "Makefile", "pyproject.toml", "uv.lock", ".env.example"]

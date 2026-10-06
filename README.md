@@ -1,5 +1,7 @@
 # Video Edit Harness
 
+Alpha.6 supports an opt-in production workflow for registered music, sound effects, visual assets and beat proposals. Natural editing remains the default. See the [Japanese usage guide](docs/EDITING_PATTERNS_USAGE.ja.md), [implementation plan](docs/EDITING_PATTERNS_PLAN_2026.ja.md) and [verification status](docs/EDITING_PATTERNS_IMPLEMENTATION_STATUS.ja.md). Synthetic tests do not establish human review or an FCP GUI round trip.
+
 English | [日本語](README.ja.md)
 
 Turn local spoken footage into coherent edits with **Codex or Claude Code**: shorter unnecessary pauses, scene-appropriate color, clear audio, matching captions and an editable Final Cut Pro timeline. You choose the story and review the result; the harness keeps source hashes, revisions and delivery evidence together.
@@ -25,7 +27,7 @@ Add your brief, for example: “Keep the explanation coherent, shorten unnecessa
 Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), FFmpeg and ffprobe. macOS or Linux; finishing in Final Cut Pro requires macOS. Install a Japanese/CJK font when burning Japanese captions on Linux.
 
 ```sh
-git clone --branch v0.1.0-alpha.5 https://github.com/ekusiadadus/video-edit-harness.git
+git clone --branch v0.1.0-alpha.6 https://github.com/ekusiadadus/video-edit-harness.git
 cd video-edit-harness
 uv sync --locked
 export VIDEO_EDIT_HARNESS_ROOT="$PWD"
@@ -123,7 +125,7 @@ Cloud transcription uses **OpenAI, then Azure OpenAI**, only for the source and 
 
 ## Scope and verification
 
-**Alpha:** single-source, flat ordered timelines. Original video aspect is preserved; 9:16 derivatives use fit/padding by default and explicit center crop when reviewed. No automatic face tracking, B-roll assembly or platform posting. Apple Log LUTs include conversion to Rec.709; disable a second FCP Camera LUT. HDR/HLG and Apple Log 2 require another supported transform.
+**Alpha:** flat speech timelines and registered multi-source visual EDL. Original video aspect is preserved; 9:16 derivatives use fit/padding by default and explicit center crop when reviewed. No automatic face identity, B-roll assembly or platform posting. Manually seeded tracking requires review. Apple Log LUTs include conversion to Rec.709; disable a second FCP Camera LUT. HDR/HLG and Apple Log 2 require another supported transform.
 
 FCPXML exports cut timing and media links. LUTs, captions, spatial masks and the final FCP audio mix need separate application and review. XML/DTD validation, hashes, full decode and frame mapping prove technical properties; they do not prove natural speech, attractive grading, actual FCP import or platform playback. The synthetic demo and automated checks do not establish real-footage quality. [Release verification and remaining checks](docs/RELEASE_VALIDATION.md).
 
@@ -132,4 +134,20 @@ make test
 uv run video-harness verify /path/to/final.mp4 --output output/final-check
 ```
 
-[Release and checksums](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.5) · [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE). Source archive, wheel, three standalone skill ZIPs and a Claude plugin ZIP are provided; this release is not published to PyPI.
+[Release and checksums](https://github.com/ekusiadadus/video-edit-harness/releases/tag/v0.1.0-alpha.6) · [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE). Source archive, wheel, three standalone skill ZIPs and a Claude plugin ZIP are provided; this release is not published to PyPI.
+
+For visual retime candidates, inspect the assembled source stage and provide observed frame ranges:
+
+```sh
+uv run --no-sync video-harness session retime-source SESSION RENDER_ID
+uv run --no-sync video-harness session retime SESSION RENDER_ID --request-file request.json --actor codex --note 'Emphasize the observed movement'
+uv run --no-sync video-harness session render SESSION --candidate-id CANDIDATE_ID --full
+```
+
+Install the relevant optional extras and Rubber Band first; see [retime instructions](docs/RETIME.ja.md). The candidate invalidates old explicit cues/effects/guides and leaves the adopted edit unchanged. Added music is placed on the new timeline. `mix` / `video_only` FCP handoff preserves baked timing; editable retime and speech-session retime remain unsupported.
+
+Requested video effects are described in [VIDEO_EFFECTS.ja.md](docs/VIDEO_EFFECTS.ja.md): restrained/pop presets and explicit timeline-bound events, verified in the rendered media.
+
+Declared `composition_guides` guard supported title/zoom placement in fixed regions or framewise tracked boxes. Local OpenCV tracking and optional MediaPipe torso detection are available through `tracking track` and `tracking validate`. `session track-effect` proposes an unadopted tracking-driven zoom and tracked subject protection bound to the retained pre-effects picture; see [tracking scope and commands](docs/TRACKING.ja.md). Source-bound `retime prepare` / `retime render` now produce local ramp/hold MP4s with audio stretching and frame-remapped SRT; [scope and commands](docs/RETIME.ja.md). Visual sessions support unadopted retime candidates; finished-picture FCP handoff preserves the baked result. Editable FCP retime and speech-session protection integration remain pending.
+
+See the [TikTok API connection guide](docs/TIKTOK_API.ja.md) for desktop OAuth and read-only access to the authorized account profile and public videos. It does not post videos, download platform music, or retrieve trend rankings. Live connectivity requires separate OAuth and API verification.

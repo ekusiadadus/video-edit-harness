@@ -1,0 +1,1 @@
+{"schema_version":1,"id":"beat_montage","description":"Visual-only cuts may follow selected beats.","defaults":{"intensity":"medium","music":"continuous","sfx":"accent","visual_assets":"own_only","beat_sync":"visual_only","selection":"auto_preview"}}
