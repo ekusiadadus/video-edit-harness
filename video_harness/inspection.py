@@ -29,8 +29,13 @@ def inspect_render(render, folder, start=0, duration=8):
          '-t', str(length), '-vn', '-c:a', 'libmp3lame', '-b:a', '192k',
          str(folder/'listen.mp3')], folder/'listen.log')
     plan = read(render['files']['plan']['path'])
+    audio_spans = None
+    if render['files'].get('audio_cuts'):
+        from .audio_cuts import map_audio_output
+        compiled = read(render['files']['audio_cuts']['path'])['compiled']
+        audio_spans = map_audio_output(compiled, start, end)
     words = []
-    for span in mapped['source_spans']:
+    for span in audio_spans if audio_spans is not None else mapped['source_spans']:
         for word in plan.get('transcript', {}).get('words', []):
             if word['start'] < span['source_end'] and word['end'] > span['source_start']:
                 words.append({**word, 'sequence_id': span['sequence_id']})
@@ -41,5 +46,7 @@ def inspect_render(render, folder, start=0, duration=8):
               'words': words, 'files': files,
               'filmstrip_sample_times': [start + i*length/6 for i in range(6)],
               'review_status': 'pending', 'note': 'Sampled images and waveform are inspection aids; listen to the excerpt and record the observation separately.'}
+    if audio_spans is not None:
+        result['audio_source_spans'] = audio_spans
     write(folder/'inspection.json', result)
     return fingerprint(folder/'inspection.json')

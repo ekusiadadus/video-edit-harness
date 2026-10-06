@@ -662,7 +662,7 @@ class Session:
         require_note(note)
         allowed = {'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
-                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'visual_pipeline_version'}
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'visual_pipeline_version'}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError('Only color/audio/render project settings can change here')
         with self._lock():
@@ -701,7 +701,7 @@ class Session:
         actor_name(actor)
         allowed = {'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
-                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'visual_pipeline_version'}
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'audio_cuts', 'visual_pipeline_version'}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError('Candidate changes must be render settings only')
         with self._lock():
@@ -755,9 +755,24 @@ class Session:
             self._save(state, 'candidate_created', actor, {'candidate_id': item['id'], 'note': note})
         return item
 
+    def propose_audio_cuts(self, render_id, request, actor, note):
+        """Propose observed source-handle audio cuts without adopting the result."""
+        from .audio_cuts import prepare_audio_cuts
+        require_note(note);actor_name(actor)
+        state=self._load();self._idle(state);self._verify(state)
+        render=self._find_render(state,render_id);self._verify_render(render)
+        cfg=read(render['project']['path'])
+        setting=prepare_audio_cuts(read(render['files']['mapping']['path']),
+                                  read(render['plan']['path']),cfg,request,actor,note)
+        candidate=self.create_candidate({'audio_cuts':setting},actor,note,
+                        expected_project=state['project'],base_render_id=render_id)
+        return {'candidate':candidate,'adopted':False,'review_required':True}
+
     def retime_source(self, render_id):
         state=self._load();self._verify(state)
         render=self._find_render(state,render_id);self._verify_render(render)
+        if read(render['project']['path']).get('audio_cuts') is not None:
+            raise ValueError('J/L audio cuts and retime require a joint audio-word mapping; this combination is unsupported')
         if read(render['project']['path']).get('edit_basis')!='visual':
             folder=Path(render['path']);source=folder/'speech-base.mov'
             if not source.is_file():
@@ -1128,6 +1143,8 @@ class Session:
             files['production'] = fingerprint(folder / 'production.json')
         if (folder / 'effects-evidence.json').is_file():
             files['effects'] = fingerprint(folder / 'effects-evidence.json')
+        if (folder / 'audio-cuts.json').is_file():
+            files['audio_cuts'] = fingerprint(folder / 'audio-cuts.json')
         if (folder / 'fcp-production.json').is_file():
             files['fcp_production'] = fingerprint(folder / 'fcp-production.json')
         if (folder / 'production-timeline.fcpxml').is_file():
@@ -1261,6 +1278,8 @@ class Session:
                     checks.append('beat_sync')
                 if production.get('effects', {}).get('events'):
                     checks.append('video_effects')
+            if render['files'].get('audio_cuts'):
+                checks.append('audio_cuts')
             entries = report.get('checks')
             if not isinstance(entries, list) or len(entries) != len(checks) or {e.get('id') for e in entries} != set(checks):
                 raise ValueError('Review needs each applicable check exactly once: ' + ', '.join(checks))
@@ -1268,7 +1287,7 @@ class Session:
                 require_note(entry.get('note'))
                 if entry.get('status') not in ('pass', 'fail', 'pending') or entry.get('basis') not in ('listening', 'visual', 'text', 'signal', 'synthetic'):
                     raise ValueError('Invalid review status or observation basis')
-                expected = {'meaning': {'text', 'listening'}, 'pacing': {'listening'},
+                expected = {'audio_cuts': {'listening'}, 'meaning': {'text', 'listening'}, 'pacing': {'listening'},
                             'audio_only': {'listening'}, 'cut_boundaries': {'listening'},
                             'captions': {'text', 'visual'}, 'color': {'visual'},
                             'music_fit': {'listening'}, 'asset_context': {'visual'},

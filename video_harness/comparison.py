@@ -73,7 +73,7 @@ message('修正メモを保存しました。ハーネスで反映後、生成�
 
 FIXED_SETTINGS = ('input_color', 'white_balance_gains', 'use_case', 'style',
                   'style_intensity', 'adjustments', 'audio', 'review_regions',
-                  'region_corrections', 'composition_guides', 'visual_pipeline_version')
+                  'region_corrections', 'composition_guides', 'visual_pipeline_version', 'audio_cuts')
 
 
 def _timing_page(rows, mode='timing'):
@@ -111,6 +111,9 @@ def _timing_page(rows, mode='timing'):
             details += (f'<p>追加した音: {sum(c.get("role") in ("music", "sfx") for c in cues)} 箇所、'
                         f'追加した映像・文字: {sum(c.get("role") not in ("music", "sfx") for c in cues)} 箇所、'
                         f'エフェクト: {len(additions.get("rendered_effects", []))} 箇所</p>')
+            if additions.get('audio_cuts'):
+                details += '<p>J/Lカット: ' + html.escape('; '.join(
+                    f'{event["kind"]}: {event["reason"]}' for event in additions['audio_cuts'])) + '</p>'
         if mode == 'structure':
             details += '<h3>素材の順序・範囲</h3><ol>' + ''.join(
                 '<li>' + html.escape(_structure_label(span)) + '</li>'
@@ -275,7 +278,8 @@ def _timing_evidence(renders, source, *, mode='timing'):
                  'visual_sources': {key: registry[key]['sha256'] for key in sorted(required_sources)},
                  'original_mapping_sha256': digest(original),
                  'settings': {key: deepcopy(cfg.get(key, 1 if key == 'visual_pipeline_version' else None))
-                              for key in FIXED_SETTINGS if key != 'composition_guides'},
+                              for key in FIXED_SETTINGS if key != 'composition_guides'
+                              and not (mode == 'structure' and key == 'audio_cuts')},
                  'preview': render.get('preview')}
         if mode == 'structure':
             fixed.pop('original_mapping_sha256')
@@ -297,6 +301,7 @@ def _timing_evidence(renders, source, *, mode='timing'):
                      'original_duration_seconds': float(Fraction(base_frames, 1) / fps),
                      'retime_operations': deepcopy(operations or []),
                      'production_changes': {'editing_pattern': pattern['id'],
+                                            'audio_cuts': deepcopy((cfg.get('audio_cuts') or {}).get('request',{}).get('events',[])),
                                             'cue_plan': deepcopy(cfg.get('cue_plan')),
                                             'video_effects': deepcopy(cfg.get('video_effects')),
                                             'rendered_cues': deepcopy(production.get('cues', [])),

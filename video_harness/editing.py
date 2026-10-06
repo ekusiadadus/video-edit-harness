@@ -98,7 +98,7 @@ def export_edit(cfg, plan, out):
     write(out / 'fcp-delivery.json', {
         'timing': 'FCPXML and preview share frame-aligned source ranges',
         'color': 'FCPXML references original media; apply look.cube manually and disable Camera LUT for Apple Log',
-        'audio': 'FCPXML retains natural source audio; per-span fades and normalized mix in video.mp4 require separate FCP work',
+        'audio': ('Source-cut FCPXML is a pre-J/L reference; use baked mix for selected audio handles' if cfg.get('audio_cuts') is not None else 'FCPXML retains natural source audio; per-span fades and normalized mix in video.mp4 require separate FCP work'),
         'subtitles': 'Import subtitles.srt separately',
         'spatial_corrections': cfg.get('region_corrections', []),
         'spatial_note': 'Fixed spatial corrections require manual FCP masks; cube LUT contains global grade only',
@@ -124,6 +124,11 @@ def _concat_file(path, files):
 
 def render_edit(cfg, plan, out, preview=True):
     """Render exact XML ranges; AAC and loudness normalization happen after assembly."""
+    has_audio_cuts = cfg.get('audio_cuts') is not None
+    if has_audio_cuts and cfg.get('retime'):
+        raise ValueError('J/L audio cuts and retime require a joint audio-word mapping; this combination is unsupported')
+    if has_audio_cuts and cfg.get('fcp_handoff') == 'editable':
+        raise ValueError('J/L audio cuts require baked mix/video_only handoff; editable FCP audio cuts are unsupported')
     source_probe = probe(cfg['source'])
     source_audio = stream_bounds(source_probe, 'audio')
     source_video = stream_bounds(source_probe, 'video')
@@ -226,6 +231,15 @@ def render_edit(cfg, plan, out, preview=True):
         run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-f', 'concat', '-safe', '0',
              '-i', str(out/'audio.ffconcat'), '-c:a', 'pcm_s16le', str(assembled)],
             out/'speech-assemble-audio.log')
+        if has_audio_cuts:
+            from .audio_cuts import verify_audio_cuts, render_audio_cuts, captions_srt
+            compiled = verify_audio_cuts(read(out/'frame-mapping.json'), plan, effective, cfg['audio_cuts'])
+            original = out/'speech-original.wav'
+            assembled.rename(original)
+            audio_evidence = render_audio_cuts(original, compiled, assembled)
+            write(out/'audio-cuts.json', {'setting':cfg['audio_cuts'], 'compiled':compiled, 'render':audio_evidence})
+            shutil.copyfile(out/'subtitles.srt', out/'subtitles-before-audio-cuts.srt')
+            (out/'subtitles.srt').write_text(captions_srt(compiled), encoding='utf-8')
         run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-f', 'concat', '-safe', '0',
              '-i', str(out/'speech-video.ffconcat'), '-i', str(assembled), '-map', '0:v:0',
              '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'pcm_s16le', '-map_metadata', '-1',
@@ -270,7 +284,7 @@ def render_edit(cfg, plan, out, preview=True):
         mixed = out / 'mix.m4a'
         def build_mix(artifact, log):
             joined = artifact.parent / 'assembled.wav'
-            if retimed is not None:
+            if retimed is not None or has_audio_cuts:
                 shutil.copyfile(assembled, joined)
             else:
                 concat = artifact.parent / 'audio.ffconcat'
@@ -287,7 +301,7 @@ def render_edit(cfg, plan, out, preview=True):
             af = loudness_filter(effective, str(mix_input), 0, total, artifact.parent)
             run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-i', str(mix_input), '-af', af,
                  '-c:a', 'aac', '-b:a', '384k', '-ar', '48000',
-                 *(['-movie_timescale','48000'] if retimed is not None else []), str(artifact)], log)
+                 *(['-movie_timescale','48000'] if retimed is not None or has_audio_cuts else []), str(artifact)], log)
             with log.open('a') as evidence:
                 for name in ('assemble-audio.log', 'audio-measure.log'):
                     path = artifact.parent / name
@@ -297,6 +311,8 @@ def render_edit(cfg, plan, out, preview=True):
                         'audio': effective['audio'], 'duration': total}
         if retimed is not None:
             mix_settings['retime'] = {'setting':cfg['retime'], 'pcm_sha256':fingerprint(assembled)['sha256']}
+        if has_audio_cuts:
+            mix_settings['audio_cuts'] = {'setting':cfg['audio_cuts'], 'pcm_sha256':fingerprint(assembled)['sha256']}
         if audio_cues:
             mix_settings['production'] = mix_key(production)
         mix_event = cache.get('mix', mix_settings, '.m4a', mixed, build_mix,
@@ -310,7 +326,7 @@ def render_edit(cfg, plan, out, preview=True):
              '-i', str(mixed), '-map', '0:v:0', '-map', '1:a:0',
              *picture_codec, '-c:a', 'copy',
              '-map_metadata', '-1', '-t', str(total),
-             *(['-movie_timescale','48000'] if retimed is not None else []),
+             *(['-movie_timescale','48000'] if retimed is not None or has_audio_cuts else []),
              '-movflags', '+faststart', str(final)], out / 'render.log')
         if visual_cues:
             from .visual import render_overlays
@@ -318,13 +334,13 @@ def render_edit(cfg, plan, out, preview=True):
             final.rename(base)
             write(out / 'overlay-evidence.json', render_overlays(
                 base, visual_cues, production_sources(production), final, total, preview=preview,
-                preserve_audio_end=retimed is not None))
+                preserve_audio_end=retimed is not None or has_audio_cuts))
         if production.get('effects', {}).get('events'):
             from .video_effects import render_effects
             base = out / 'before-effects.mp4'
             final.rename(base)
             write(out / 'effects-evidence.json', render_effects(base, production['effects'], final,
-                production['assets'], production.get('composition'), preserve_audio_end=retimed is not None))
+                production['assets'], production.get('composition'), preserve_audio_end=retimed is not None or has_audio_cuts))
         verify(final, out, total, True, (0, total))
         run(['ffmpeg', '-v', 'error', '-n', '-i', str(final), '-vn', '-c:a', 'libmp3lame',
              '-b:a', '192k', str(out / 'audio-only.mp3')], out / 'audio-only.log')
@@ -341,7 +357,7 @@ def render_edit(cfg, plan, out, preview=True):
             if float(actual['input_tp']) > effective['audio']['true_peak_db'] + .3:
                 warnings.append('True peak exceeds target +0.3dB tolerance')
         write(out / 'audio-output-measure.json', {'measured': actual, 'targets': effective['audio'], 'warnings': warnings})
-        if production['cues'] or production.get('effects', {}).get('events') or cfg.get('retime'):
+        if production['cues'] or production.get('effects', {}).get('events') or cfg.get('retime') or has_audio_cuts:
             from .production import prepare_fcp_handoff
             prepare_fcp_handoff(cfg, production, out)
         cache_report = cache.report()

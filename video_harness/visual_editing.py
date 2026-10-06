@@ -117,6 +117,11 @@ def render_visual_edit(cfg, plan, out, preview=True):
     normalized sound are established by the reviewed MP4, not this XML.
     """
     pipeline_version=visual_pipeline_version(cfg)
+    has_audio_cuts = cfg.get('audio_cuts') is not None
+    if has_audio_cuts and cfg.get('retime'):
+        raise ValueError('J/L audio cuts and retime require a joint audio-word mapping; this combination is unsupported')
+    if has_audio_cuts and cfg.get('fcp_handoff') == 'editable':
+        raise ValueError('J/L audio cuts require baked mix/video_only handoff; editable FCP audio cuts are unsupported')
     if cfg.get('input_color') not in {'rec709', 'apple_log'}:
         raise ValueError('Visual edit needs explicit rec709 or apple_log input color')
     records = cfg.get('assets')
@@ -237,6 +242,15 @@ def render_visual_edit(cfg, plan, out, preview=True):
         run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-i', str(environment_input), '-vn',
              '-af', f'aresample=48000:async=1:first_pts=0,apad=whole_dur={base["duration"]},atrim=duration={base["duration"]},asetpts=N/SR/TB',
              '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le', str(speech)], out / 'environment.log')
+        if has_audio_cuts:
+            from .audio_cuts import verify_audio_cuts, render_audio_cuts, captions_srt
+            compiled = verify_audio_cuts(mapping, normalized, effective, cfg['audio_cuts'])
+            original = out/'environment-original.wav'
+            speech.rename(original)
+            audio_evidence = render_audio_cuts(original, compiled, speech)
+            write(out/'audio-cuts.json', {'setting':cfg['audio_cuts'], 'compiled':compiled, 'render':audio_evidence})
+            subtitle_text = captions_srt(compiled)
+            (out/'subtitles.srt').write_text(subtitle_text, encoding='utf-8')
         audio_source = speech
         if audio_cues:
             audio_source = out / 'creative-mix.wav'
@@ -252,7 +266,7 @@ def render_visual_edit(cfg, plan, out, preview=True):
              '-af', audio_filter, '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
              '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '384k', '-ar', '48000',
              '-map_metadata', '-1', '-t', str(base['duration']),
-             *(['-movie_timescale','48000'] if effective.get('retime') else []), '-movflags', '+faststart',
+             *(['-movie_timescale','48000'] if effective.get('retime') or has_audio_cuts else []), '-movflags', '+faststart',
              str(out / 'video.mp4')], out / 'render.log')
         verify(out / 'video.mp4', out, base['duration'], True, (0, base['duration']))
         run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-i', str(out / 'video.mp4'),
@@ -260,7 +274,7 @@ def render_visual_edit(cfg, plan, out, preview=True):
         run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(out / 'audio-only.mp3'),
              '-f', 'null', '-'], out / 'audio-only-decode.log')
         (out / 'fcp-delivery.json').write_text(json.dumps({
-            'timeline': 'Baked retimed picture/audio; original-cut-reference.fcpxml is pre-retime only' if effective.get('retime') else 'Original source video and environment audio only',
+            'timeline': 'Baked retimed picture/audio; original-cut-reference.fcpxml is pre-retime only' if effective.get('retime') else ('Source-cut XML is a pre-J/L reference; baked mix contains selected audio handles' if has_audio_cuts else 'Original source video and environment audio only'),
             'creative_additions': 'MP4 reference; separate FCP recreation required',
             'color': 'Apply look.cube to original source-cut XML only; baked MP4 picture is already graded',
             'visual_pipeline_version':pipeline_version, 'subtitles': 'No transcript or captions generated',
