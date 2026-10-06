@@ -28,7 +28,7 @@ def _mask_array(mask, shape, threshold):
         return None
     if not np.isfinite(data).all() or np.any((data < 0) | (data > 1)):
         return None
-    return np.asarray(data >= threshold, dtype=np.uint8)
+    return np.where(data >= threshold, 255, 0).astype(np.uint8)
 
 
 def segment_frames_pose(frames, initial_box, model_path, fps, corrections=None,
@@ -110,6 +110,10 @@ def segment_frames_pose(frames, initial_box, model_path, fps, corrections=None,
                         candidates,
                         seed_box=corrections.get(index, initial) if manual else None,
                         previous=previous)
+                    if selected is not None:
+                        chosen_mask = binary[selected['pose_index']]
+                        if not np.any(chosen_mask == 255) or not np.any(chosen_mask == 0):
+                            reason = 'empty_or_full_segmentation_mask'
             if reason is not None:
                 previous = None
                 rows.append({'frame': index, 'state': 'lost', 'box': None,

@@ -22,7 +22,11 @@ def pose(cx, visibility=.99, presence=.99):
 
 class Mask:
     def __init__(self, value, shape=(8, 8)):
-        self.value = np.full(shape, value, dtype=np.float32) if np.isscalar(value) else value
+        if np.isscalar(value):
+            self.value = np.zeros(shape, dtype=np.float32)
+            self.value[:, :shape[1] // 2, ...] = value
+        else:
+            self.value = value
 
     def numpy_view(self):
         return self.value
@@ -88,7 +92,7 @@ class SemanticMaskTests(TestCase):
             result([pose(.27), pose(.73)], [Mask(.8), Mask(.2)])])
         self.assertEqual([row['state'] for row in rows], ['manual', 'tracked'])
         self.assertEqual([row['quality']['pose_index'] for row in rows], [1, 0])
-        self.assertTrue(all(np.all(row['mask'] == 1) for row in rows))
+        self.assertTrue(all(set(np.unique(row['mask'])) == {0, 255} for row in rows))
         self.assertEqual(fake.timestamps, [0, 33])
         self.assertTrue(fake.options['output_segmentation_masks'])
         self.assertEqual(fake.options['num_poses'], 6)
@@ -98,7 +102,7 @@ class SemanticMaskTests(TestCase):
         rows, _ = self.run_masks([
             result([pose(.25, visibility=.1), pose(.25)], [Mask(.1), Mask(.9)])])
         self.assertEqual(rows[0]['quality']['pose_index'], 1)
-        self.assertTrue(np.all(rows[0]['mask'] == 1))
+        self.assertEqual(set(np.unique(rows[0]['mask'])), {0, 255})
 
     def test_ambiguous_loss_sticks_until_manual_correction(self):
         rows, _ = self.run_masks([
@@ -132,10 +136,26 @@ class SemanticMaskTests(TestCase):
         self.assertEqual(rows[0]['quality']['reason'], 'missing_or_mismatched_segmentation_masks')
 
     def test_singleton_channel_and_threshold(self):
-        rows, _ = self.run_masks([result([pose(.25)], [Mask(.6, (8, 8, 1))])], threshold=.7)
+        rows, _ = self.run_masks([result([pose(.25)], [Mask(.6, (8, 8, 1))])], threshold=.5)
         self.assertEqual(rows[0]['mask'].shape, (8, 8))
         self.assertEqual(rows[0]['mask'].dtype, np.uint8)
-        self.assertFalse(rows[0]['mask'].any())
+        self.assertEqual(set(np.unique(rows[0]['mask'])), {0, 255})
+        rows, _ = self.run_masks([result([pose(.25)], [Mask(.6, (8, 8, 1))])], threshold=.7)
+        self.assertEqual(rows[0]['quality']['reason'], 'empty_or_full_segmentation_mask')
+
+    def test_empty_or_full_selected_mask_loses_identity_until_correction(self):
+        for value in (0., 1.):
+            with self.subTest(value=value):
+                rows, _ = self.run_masks([
+                    result([pose(.25)], [Mask(np.full((8, 8), value, dtype=np.float32))]),
+                    result([pose(.25)], [Mask(.9)]),
+                    result([pose(.25)], [Mask(.9)])],
+                    corrections={2: [.22, .44, .29, .56]})
+                self.assertEqual([row['state'] for row in rows], ['lost', 'lost', 'manual'])
+                self.assertEqual(rows[0]['quality']['reason'], 'empty_or_full_segmentation_mask')
+                self.assertEqual(rows[1]['quality']['reason'], 'awaiting_manual_correction')
+                self.assertIsNone(rows[0]['mask'])
+                self.assertEqual(set(np.unique(rows[2]['mask'])), {0, 255})
 
     def test_input_guards(self):
         for threshold in (0, 1, float('nan'), True, '0.5'):
