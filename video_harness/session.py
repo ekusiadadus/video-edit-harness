@@ -761,7 +761,8 @@ class Session:
             from .speech_protection import derive_speech_protection
             info=_probe(source,count=True);video=_stream(info,'video')
             rate=_verified_rate(source,video,int(video['nb_read_frames']))
-            mapping=folder/'frame-mapping.json'
+            mapping=folder/'pre-retime-mapping.json'
+            if not mapping.exists():mapping=folder/'frame-mapping.json'
             protection=derive_speech_protection(read(render['plan']['path']),read(mapping),
                                                fps=str(rate),frame_count=int(video['nb_read_frames']))
             return {'render_id':render_id,'source':fingerprint(source),
@@ -781,11 +782,17 @@ class Session:
         render=self._find_render(state,render_id);self._verify_render(render)
         cfg=read(render['project']['path']);pattern=frozen_pattern(cfg)
         if pattern['id']=='natural' or pattern['intensity']=='off':raise ValueError('Retime conflicts with natural/off')
-        if cfg.get('edit_basis') != 'visual':
-            raise ValueError('Speech retime rendering is not integrated yet; retime-source exposes protected word frames only')
         basis=self.retime_source(render_id)
-        proposal=prepare_retime(basis['source']['path'],request,actor,note)
-        setting={'version':1,'proposal':proposal,'input_mapping_sha256':digest(read(basis['mapping']['path']))}
+        if cfg.get('edit_basis') != 'visual':
+            assembly=read(Path(render['path'])/'speech-assembly.json')
+            if assembly.get('picture_dimensions_scope') != 'full_resolution':
+                raise ValueError('Speech retime requires a full-resolution retained assembly; render the selected plan again')
+            from .speech_retime import prepare_speech_retime
+            setting=prepare_speech_retime(basis['source']['path'],read(render['plan']['path']),
+                        read(basis['mapping']['path']),request,actor,note)
+        else:
+            proposal=prepare_retime(basis['source']['path'],request,actor,note)
+            setting={'version':1,'proposal':proposal,'input_mapping_sha256':digest(read(basis['mapping']['path']))}
         invalidated=[key for key in ('cue_plan','video_effects','composition_guides') if cfg.get(key)]
         candidate=self.create_candidate({'retime':setting,'cue_plan':None,'video_effects':None,'composition_guides':[]},
                                          actor,note,expected_project=state['project'],base_render_id=render_id)

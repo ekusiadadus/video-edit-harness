@@ -4,6 +4,8 @@ import subprocess
 import json
 import tempfile
 import unittest
+import shutil
+from importlib.util import find_spec
 
 from video_harness.common import fingerprint, read, write
 from video_harness.edl import build_plan
@@ -47,10 +49,53 @@ class SpeechRetimeSourceTests(unittest.TestCase):
             self.assertEqual(audio['sample_rate'],'48000')
             def pcm(path):
                 return subprocess.check_output(['ffmpeg','-v','error','-i',str(path),
-                                                '-map','0:a:0','-f','s16le','-'])
+                                                '-map','0:a:0','-ac','2','-ar','48000','-f','s16le','-'])
             self.assertEqual(pcm(basis['source']['path']),pcm(Path(rendered['path'])/'speech-base.wav'))
-            with self.assertRaisesRegex(ValueError,'not integrated'):
-                session.propose_retime(rendered['id'],{'operations':[]},'automation','No unsupported candidate')
+            operation={'id':'hold','kind':'freeze','source_frame':20,'output_frames':6,'reason':'Synthetic hold'}
+            with self.assertRaisesRegex(ValueError,'observed nonspoken'):
+                session.propose_retime(rendered['id'],{'operations':[operation]},'automation','Ungated interval')
+            with self.assertRaisesRegex(ValueError,'retained word'):
+                session.propose_retime(rendered['id'],{'operations':[operation],
+                    'nonspoken_intervals':[{'first_frame':6,'end_frame_exclusive':21,'reason':'Incorrect observation'}]},
+                    'automation','Reject words inside nonspoken observation')
+            proposal=session.propose_retime(rendered['id'],{'operations':[operation],
+                'nonspoken_intervals':[{'first_frame':20,'end_frame_exclusive':21,'reason':'Synthetic nonspoken frame'}]},
+                'automation','Synthetic fixture timing only')
+            candidate=proposal['candidate']
+            self.assertFalse(proposal['adopted'])
+            full=session.render(preview=False,actor='automation',candidate_id=candidate['id'])
+            preview=session.render(preview=True,actor='automation',candidate_id=candidate['id'])
+            for item in (full,preview):
+                folder=Path(item['path']);mapping=read(folder/'frame-mapping.json')
+                self.assertEqual(mapping['frame_count'],66)
+                self.assertEqual(mapping['duration'],2.2)
+                self.assertEqual(mapping['retime']['frames'][42]['source_frame'],36)
+                self.assertIn('00:00:01,400', (folder/'subtitles.srt').read_text())
+                original=pcm(folder/'speech-base.wav');changed=pcm(folder/'speech-retimed.wav')
+                # Stereo s16 PCM, 1600 samples per frame; both retained words remain exact.
+                stride=1600*4
+                self.assertEqual(changed[6*stride:15*stride],original[6*stride:15*stride])
+                self.assertEqual(changed[42*stride:51*stride],original[36*stride:45*stride])
+                self.assertEqual(read(folder/'speech-assembly.json')['source']['sha256'],basis['source']['sha256'])
+                self.assertTrue((folder/'original-cut-reference.fcpxml').is_file())
+                self.assertTrue((folder/'production-timeline.fcpxml').is_file())
+                self.assertEqual(session.retime_source(item['id'])['word_protection']['frame_count'],60)
+                from video_harness.feedback import map_output
+                point=map_output(mapping,1.4)
+                self.assertEqual(point['frame_correspondence'][0]['source_frame'],36)
+                self.assertAlmostEqual(point['source_spans'][0]['source_start'],1.2)
+            if shutil.which('rubberband') and find_spec('soundfile'):
+                ramp={'id':'fast','kind':'ramp','source_first_frame':22,'source_end_frame_exclusive':30,
+                      'speed_start':2,'speed_end':2,'reason':'Synthetic nonspoken movement'}
+                fast=session.propose_retime(rendered['id'],{'operations':[ramp],
+                    'nonspoken_intervals':[{'first_frame':22,'end_frame_exclusive':30,'reason':'Synthetic nonspoken frames'}]},
+                    'automation','Synthetic speed candidate')
+                result=session.render(preview=False,actor='automation',candidate_id=fast['candidate']['id'])
+                folder=Path(result['path']);mapping=read(folder/'frame-mapping.json')
+                self.assertEqual(mapping['frame_count'],56)
+                self.assertEqual(mapping['retime']['frames'][32]['source_frame'],36)
+                self.assertEqual(pcm(folder/'speech-retimed.wav')[32*stride:41*stride],
+                                 pcm(folder/'speech-base.wav')[36*stride:45*stride])
             self.assertEqual(session._load()['project'],initial)
             with Path(basis['source']['path']).open('ab') as stream:
                 stream.write(b'tampered')

@@ -26,6 +26,8 @@ def map_output(mapping, start, end=None):
     total = float(mapping['duration'])
     if end < start or end > total + 1e-6:
         raise ValueError('Feedback time is outside this render')
+    if mapping.get('retime') and mapping.get('edit_basis') != 'visual':
+        return _map_speech_retime(mapping, start, end)
     if mapping.get('edit_basis') == 'visual':
         return _map_visual(mapping, start, end)
     rows, boundaries, cursor = [], [], 0.0
@@ -53,6 +55,45 @@ def map_output(mapping, start, end=None):
     if not rows:
         raise ValueError('No source span corresponds to feedback time')
     return {'output_start': start, 'output_end': end, 'source_spans': rows, 'boundaries': boundaries}
+
+
+def _map_speech_retime(mapping, start, end):
+    """Inspect discrete source frames without assuming a linear retimed timeline."""
+    from fractions import Fraction
+    from math import floor, ceil
+    rate = Fraction(mapping['fps'])
+    frames = mapping['retime']['frames']
+    if len(frames) != mapping['frame_count'] or not frames:
+        raise ValueError('Invalid retimed frame correspondence')
+    if not 0 <= start <= float(mapping['duration']):
+        raise ValueError('Feedback time is outside this render')
+    first = min(floor(Fraction(str(start))*rate), len(frames)-1)
+    last = first+1 if start == end else min(ceil(Fraction(str(end))*rate), len(frames))
+    groups = []
+    for index in range(first,last):
+        frame = frames[index]
+        if frame['output_frame'] != index:
+            raise ValueError('Invalid retimed output frame index')
+        if (not groups or groups[-1][-1]['source_span_id'] != frame['source_span_id'] or
+                frame['source_frame'] - groups[-1][-1]['source_frame'] not in (0,1)):
+            groups.append([])
+        groups[-1].append(frame)
+    rows=[]
+    for group in groups:
+        a,b=group[0],group[-1]
+        rows.append({'sequence_id':a['source_span_id'],
+                     'output_start':max(start,float(Fraction(a['output_frame'],1)/rate)),
+                     'output_end':min(end,float(Fraction(b['output_frame']+1,1)/rate)),
+                     'source_start':float(Fraction(a['source_frame'],1)/rate),
+                     'source_end':float(Fraction(b['source_frame']+(0 if start==end else 1),1)/rate)})
+    boundaries=[]
+    for row in mapping.get('sequence',[])[1:]:
+        position=float(Fraction(row['output_first_frame'],1)/rate)
+        if abs(start-position)<1e-6:
+            boundaries.append({'output_time':position,'right_sequence_id':row['id']})
+    return {'output_start':start,'output_end':end,'source_spans':rows,
+            'boundaries':boundaries,'frame_correspondence':frames[first:last],
+            'source_time_scope':'discrete observed frame coverage'}
 
 
 def _map_visual(mapping, start, end):

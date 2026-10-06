@@ -6,7 +6,7 @@ alpha.6の編集パターン実装では、自然な編集を既定にBGM・効�
 
 エフェクトの局所修正は `session effects`、対応パラメーターの確認は `effects-catalog` を使用します。滑らかな手動アンカーズーム・彩度演出と、同期再生・音声切替付き比較ページを追加中です。[効果の指定方法](docs/VIDEO_EFFECTS.ja.md)と[高度な編集の実装計画](docs/ADVANCED_EDITING_MAYA_PLAN_2026.ja.md)を参照してください。
 
-固定領域と追跡した人物・字幕領域の保護には `composition_guides`、ローカル追跡には `tracking track`／`tracking validate` を使用します。`session track-effect` は観察した区間の追跡ズームと、文字の重なり・ズーム見切れの検査を未採用候補にします。[追跡と配置検査](docs/TRACKING.ja.md)にOpenCV・MediaPipeの選択と制限を記載しています。`retime prepare`／`retime render` で変速・静止保持、音声伸縮、字幕時刻の移行を単独のMP4へ描画できます。[時間変更の操作と制限](docs/RETIME.ja.md)を参照してください。visualセッションの未採用候補と変速済み映像のFCP受け渡しに対応します。FCPで編集できる時間変更と発話セッションへの統合は未対応です。
+固定領域と追跡した人物・字幕領域の保護には `composition_guides`、ローカル追跡には `tracking track`／`tracking validate` を使用します。`session track-effect` は観察した区間の追跡ズームと、文字の重なり・ズーム見切れの検査を未採用候補にします。[追跡と配置検査](docs/TRACKING.ja.md)にOpenCV・MediaPipeの選択と制限を記載しています。`retime prepare`／`retime render` で変速・静止保持、音声伸縮、字幕時刻の移行を単独のMP4へ描画できます。[時間変更の操作と制限](docs/RETIME.ja.md)を参照してください。visualセッションの未採用候補と変速済み映像のFCP受け渡しに対応します。FCPで編集できる時間変更は未対応です。開発版の発話セッションでは、単語保護と観察済みの非発話区間を伴う候補を描画できます。
 
 alpha.6後の開発版には、観察した位置へ短い文字を追従させる `tracked_title` を追加しています。`session track-effect --effect tracked_title --title-parameters-file label.json` で未採用候補を作れます。公開済みalpha.6には未収録です。[使い方と制限](docs/TRACKING.ja.md#追従ラベルを提案するalpha6後の作業ツリー)を確認してください。
 
@@ -20,7 +20,7 @@ uv run --no-sync video-harness session retime SESSION RENDER_ID --request-file r
 uv run --no-sync video-harness session render SESSION --candidate-id CANDIDATE_ID --full
 ```
 
-必要なextraとRubber Bandの準備、requestの形は [RETIME.ja.md](docs/RETIME.ja.md) を参照してください。古い明示cue・エフェクト・保護領域は候補内で失効し、採用中の編集は変わりません。追加BGMは新しい尺へ配置します。FCPには変速済み映像を渡し、編集可能な時間変更や発話セッションの変速は未対応です。
+必要なextraとRubber Bandの準備、requestの形は [RETIME.ja.md](docs/RETIME.ja.md) を参照してください。古い明示cue・エフェクト・保護領域は候補内で失効し、採用中の編集は変わりません。追加BGMは新しい尺へ配置します。FCPには変速済み映像を渡し、編集可能な時間変更は未対応です。開発版の発話セッションでは `nonspoken_intervals` の観察指定が必要です。
 
 
 **Codex・Claude Codeでローカルの話す動画を編集するハーネスとスキルです。** 不要な間の短縮、場面に合う色、聞きやすい音声、字幕、Final Cut Proへの受け渡しを扱います。内容と仕上がりを確認しながら、素材のハッシュ、修正履歴、納品時の証拠を一緒に管理できます。
@@ -214,4 +214,4 @@ TikTok公式APIの接続設定・OAuth・本人のプロフィールと公開動
 
 alpha.6後の開発版では、日本語・英語のタイトルを実フォント幅で折り返せます。数値と単位や指定した語句を保護し、収まらない文は修正理由を返します。 [設定と制限 / Controls and limits](docs/VIDEO_EFFECTS.ja.md)。公開済みalpha.6には未収録です。
 
-発話セッションでは `session retime-source` で連結済み映像と単語の保護区間を確認できます。発話の変速描画への接続は未完了です。 [Scope / 操作と制限](docs/RETIME.ja.md)
+発話セッションでは `session retime-source` で連結済み映像と単語の保護区間を確認できます。開発版では `nonspoken_intervals` を指定して未採用候補を描画し、字幕・元フレーム対応を移行できます。PCMの後に追加音と正規化を適用します。 [Scope / 操作と制限](docs/RETIME.ja.md)

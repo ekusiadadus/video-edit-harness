@@ -34,12 +34,32 @@ Rubber Bandコマンドが使えるローカル環境が必要です。インス
 
 入力は回転を焼き込んだ正方形ピクセルのRec.709映像が前提です。HDRや表示回転付き素材は拒否します。Apple Log素材は明示的にRec.709へ変換してから使います。既存の成果物は上書きしません。入力・提案の変更、VFR、範囲外参照は拒否し、全映像・音声をデコードして尺・fps・フレーム数を検査します。
 
-visualセッションでは `session retime-source SESSION RENDER_ID` で連結した元段階を確認し、`session retime SESSION RENDER_ID --request-file request.json --actor codex --note REASON` で未採用候補を作れます。原素材までのフレーム対応を保存し、変速後にBGM・効果音を配置します。古い明示cue／エフェクト／保護領域は候補内で失効し、採用中の状態は変更しません。追跡は変速済みの実入力へ再解析します。FCPのmix/video_onlyは焼き込んだ変速を保持し、元カット参考XMLは変速前として別に残します。FCPで編集できる時間変更、発話セッションの単語保護への統合、既存の追跡・cue・字幕ファイルの自動移行は未接続です。古い対応表や追跡データを新しい動画へ流用せず、再解析・再配置します。技術検査は人の見た目・試聴レビューや投稿先再生の代わりになりません。
+visualセッションでは `session retime-source SESSION RENDER_ID` で連結した元段階を確認し、`session retime SESSION RENDER_ID --request-file request.json --actor codex --note REASON` で未採用候補を作れます。原素材までのフレーム対応を保存し、変速後にBGM・効果音を配置します。古い明示cue／エフェクト／保護領域は候補内で失効し、採用中の状態は変更しません。追跡は変速済みの実入力へ再解析します。FCPのmix/video_onlyは焼き込んだ変速を保持し、元カット参考XMLは変速前として別に残します。FCPで編集できる時間変更、既存の追跡・cueファイルの自動移行は未接続です。発話セッションは下記の開発版経路を使用します。古い対応表や追跡データを新しい動画へ流用せず、再解析・再配置します。技術検査は人の見た目・試聴レビューや投稿先再生の代わりになりません。
 
-## 発話区間の確認（alpha.6後の開発版・描画接続は未完了）
+## 発話を保護する時間変更（alpha.6後の開発版）
 
 新しく描画した発話セッションでも `session retime-source SESSION RENDER_ID` で、追加BGM・効果・音量正規化の前の `speech-base.mov` を確認できます。選択済みのカット・色調整・音声フェードは反映済みです。元の素材と字幕・計画は保持し、映像は再圧縮せず連結した段階を別途保存します。追加の保存容量が必要です。以前のrenderにこの段階がない場合は、選択済み計画を新しく描画してください。
 
 返り値の `word_protection` は、実際の選択済み書き起こしとフレーム対応に結び付きます。`protected_intervals` は発話に触れるフレームの `[開始,終了)`、`word_occurrences` は元のword ID、出現番号、時刻、フレームを保持します。字幕表示用の丸めた時刻ではなく元の単語時刻を使い、切り出し・並べ替え・繰り返しも扱います。元の素材・計画・書き起こし・対応表のSHAを確認できます。
 
-これは発話の候補描画に接続するための準備機能です。`session retime` による発話動画の速度変更はまだ拒否します。単語のない区間が無音／非発話であるとは推測しません。書き起こしの漏れや元の時刻精度、自然な聞こえ方は別途確認が必要です。ローカルASRや追加のクラウド送信は行いません。公開済みalpha.6には未収録です。
+`session retime` は、必須の単語保護と観察済みの非発話区間に結び付けた未採用候補を作成します。単語のない区間が無音／非発話であるとは推測しません。書き起こしの漏れや元の時刻精度、自然な聞こえ方は別途確認が必要です。ローカルASRや追加のクラウド送信は行いません。公開済みalpha.6には未収録です。
+
+
+発話requestには `nonspoken_intervals` を指定します。下記は構造例であり、番号は実際の `speech-base.mov` の観察結果に置き換えてください。操作対象のすべてのフレームが観察区間に含まれ、必須の単語保護に触れない必要があります。任意の `protected_intervals` は保護を追加します。字幕は計画の実単語から生成するため、requestで `captions` は指定しません。
+
+```json
+{
+  "operations":[{"id":"pause-hold","kind":"freeze","source_frame":20,"output_frames":6,"reason":"観察した非発話の結果を読み取る時間"}],
+  "nonspoken_intervals":[{"first_frame":20,"end_frame_exclusive":21,"reason":"該当区間を試聴して非発話と確認"}]
+}
+```
+
+```sh
+uv run --no-sync video-harness session retime-source SESSION RENDER_ID
+uv run --no-sync video-harness session retime SESSION RENDER_ID --request-file speech-request.json --actor codex --note '観察した非発話区間の時間変更候補'
+uv run --no-sync video-harness session render SESSION --candidate-id CANDIDATE_ID --full
+```
+
+発話の連結段階はプレビューでもフル解像度で保持します。新しい候補の描画時に素材・計画・単語保護・対応表を再検証し、変更されていれば拒否します。旧renderの低解像度の連結段階は再描画が必要です。変速後の `speech-retimed.wav` をPCMのまま追加音・正規化へ渡し、最終MP4ではAACへ符号化します。未変更の保護発話は、この正規化・追加音・最終符号化前のPCMで保持します。freezeには無音が挿入されます。
+
+`pre-retime-mapping.json` と `original-cut-reference.fcpxml` に元の対応とカットを残します。新しい対応表は出力フレーム→連結段階→元素材の関係を持ち、字幕と検査時刻を移行します。追加音・効果は新しい尺で生成します。FCPのmix受け渡しは完成映像と最終音声を渡し、編集可能な速度変更は生成しません。候補作成・描画・技術検査は採用や人の全編視聴／試聴を意味しません。

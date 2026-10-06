@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import wave
 
@@ -82,9 +83,12 @@ def _read_frame(pipe, size):
     return bytes(data)
 
 
-def render_retime(source, proposal, output):
+def render_retime(source, proposal, output, *, pcm_output=None):
     source=Path(source).resolve(strict=True);target=Path(output).resolve()
     if source==target or target.exists():raise ValueError('Retime output must be a new file')
+    retained_pcm=Path(pcm_output).resolve() if pcm_output is not None else None
+    if retained_pcm is not None and (retained_pcm.exists() or retained_pcm in (source,target)):
+        raise ValueError('Retimed PCM output must be a separate new file')
     if not isinstance(proposal,dict) or set(proposal)!={'version','source','request','mapping','captions','actor','reason','review_required','adopted'} or proposal['version']!=1:
         raise ValueError('Use a source-bound retime proposal')
     if proposal['review_required'] is not True or proposal['adopted'] is not False:raise ValueError('Retime proposal must remain unadopted')
@@ -99,7 +103,7 @@ def render_retime(source, proposal, output):
     target.parent.mkdir(parents=True,exist_ok=True)
     log=target.with_suffix('.retime.log');encoder=decoder=None
     if log.exists():raise ValueError('Retime log already exists; use a new revision basename')
-    selected_hash=hashlib.sha256()
+    selected_hash=hashlib.sha256();pcm_created=False
     try:
         with tempfile.TemporaryDirectory(prefix='retime-',dir=target.parent) as temp, log.open('w') as stream:
             # PCM preparation uses the same source timeline as the picture.
@@ -123,7 +127,8 @@ def render_retime(source, proposal, output):
             encoder_command=['ffmpeg','-v','error','-nostdin','-n','-threads','1','-f','rawvideo','-pix_fmt','rgb24',
                              '-s',f'{width}x{height}','-r',str(rate),'-i','pipe:0','-i',str(audio),
                              '-map','0:v:0','-map','1:a:0','-c:v','libx264','-preset','fast','-crf','18',
-                             '-vf','scale=out_color_matrix=bt709','-pix_fmt','yuv420p',
+                             '-vf','scale=out_color_matrix=bt709,format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709',
+                             '-pix_fmt','yuv420p',
                              '-colorspace','bt709','-color_trc','bt709','-color_primaries','bt709',
                              '-c:a','aac','-b:a','384k','-t',str(float(Fraction(count,1)/rate)),
                              '-movflags','+faststart',str(target)]
@@ -147,6 +152,11 @@ def render_retime(source, proposal, output):
                 raise ValueError('Retimed audio duration differs from output timeline')
             subprocess.run(['ffmpeg','-v','error','-xerror','-i',str(target),'-f','null','-'],stderr=stream,check=True)
             if fingerprint(source)!=input_ref:raise ValueError('Source changed during retime render')
+            if retained_pcm is not None:
+                retained_pcm.parent.mkdir(parents=True,exist_ok=True)
+                with retained_pcm.open('xb') as destination, audio.open('rb') as original:
+                    pcm_created=True
+                    shutil.copyfileobj(original,destination)
     except Exception:
         for process in (decoder,encoder):
             if process is not None:
@@ -155,9 +165,11 @@ def render_retime(source, proposal, output):
                 for pipe in (process.stdout,process.stdin):
                     if pipe is not None:pipe.close()
         target.unlink(missing_ok=True)
+        if pcm_created:retained_pcm.unlink(missing_ok=True)
         raise
     return {'version':1,'source':proposal['source'],'actual_input':input_ref,'output':fingerprint(target),'mapping':mapping,
             'captions':proposal['captions'],'audio':audio_evidence,
+            **({'retained_pcm':fingerprint(retained_pcm)} if retained_pcm is not None else {}),
             'selected_rgb_sha256':selected_hash.hexdigest(),'actor':proposal['actor'],'reason':proposal['reason'],
             'picture_sampling':{'method':'source_frame_duplication_or_drop_no_interpolation',
                                 'distinct_source_frames':len(set(mapping['frame_map'])),

@@ -9,6 +9,15 @@ from video_harness.cues import plan_cues, validate_cues
 
 
 class CueTests(unittest.TestCase):
+    def test_frame_duration_float_is_valid_but_excess_string_precision_is_rejected(self):
+        result = plan_cues({'id':'natural'}, [], {'duration':56/30})
+        self.assertEqual(result['cues'], [])
+        from video_harness.cues import _seconds
+        from fractions import Fraction
+        self.assertEqual(_seconds(56/30, 'duration'), Fraction(28,15))
+        with self.assertRaisesRegex(ValueError,'invalid duration'):
+            _seconds('1.00000000001', 'duration')
+
     def test_music_cue_uses_context_rank_instead_of_asset_id(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)

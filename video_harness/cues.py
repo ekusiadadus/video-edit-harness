@@ -19,6 +19,10 @@ FIELDS = {"id", "asset_id", "role", "output_start", "output_end", "source_start"
 def _seconds(value, name):
     try:
         result = Fraction(str(value))
+        # Frame-aligned JSON durations may be floats (e.g. 56/30 seconds).
+        # Recover their rational value while preserving strict string precision.
+        if isinstance(value, float) and math.isfinite(value):
+            result = result.limit_denominator(1000000000)
     except (TypeError, ValueError, ZeroDivisionError) as exc:
         raise ValueError(f"invalid {name}") from exc
     if result.denominator > 1000000000 or not math.isfinite(float(result)):
@@ -164,8 +168,7 @@ def plan_cues(pattern, assets, mapping, duration=None, fps=None, *,
         return measured
 
     def moment(value, label):
-        value = str(value)
-        return _seconds(value[:-1] if value.endswith('s') else value, label)
+        return _seconds(value[:-1] if isinstance(value,str) and value.endswith('s') else value, label)
 
     # Chapter/section starts must come from the rendered mapping. Every row is
     # checked against the output duration; shot cuts without an explicit section

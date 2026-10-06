@@ -79,7 +79,7 @@ def export_edit(cfg, plan, out):
     aligned = frame_ranges(out / 'timeline.fcpxml')
     mapping = {
         'source': plan['source'], 'keep': [[float(s), float(e)] for s, e in aligned],
-        'duration': sum(float(e - s) for s, e in aligned), 'xml': result,
+        'duration': sum(float(e - s) for s, e in aligned), 'xml': {**result, 'output':'timeline.fcpxml'},
         'note': 'Subtitles and preview use the same frame-aligned source ranges as FCPXML.'}
     if ordered:
         elapsed = 0.0
@@ -124,8 +124,6 @@ def _concat_file(path, files):
 
 def render_edit(cfg, plan, out, preview=True):
     """Render exact XML ranges; AAC and loudness normalization happen after assembly."""
-    if cfg.get('retime'):
-        raise ValueError('Speech-session retime needs word-bound protection integration; use visual retime candidates')
     source_probe = probe(cfg['source'])
     source_audio = stream_bounds(source_probe, 'audio')
     source_video = stream_bounds(source_probe, 'video')
@@ -139,7 +137,7 @@ def render_edit(cfg, plan, out, preview=True):
     if plan.get('version') == 3 and plan.get('status') != 'reviewed_selection':
         raise ValueError('V3 render requires reviewed_selection')
     duration = derive_edit(plan)['duration']
-    estimated = duration * (3_000_000 if preview else 6_000_000) + 256 * 1024 ** 2
+    estimated = duration * 6_000_000 + 256 * 1024 ** 2
     disk = out.parent
     while not disk.exists():
         disk = disk.parent
@@ -163,7 +161,7 @@ def render_edit(cfg, plan, out, preview=True):
                        'preview': preview}
         work = out / 'segments'
         work.mkdir()
-        videos, audio, video_keys, audio_keys = [], [], [], []
+        videos, full_videos, audio, video_keys, audio_keys = [], [], [], [], []
         for i, (start, end) in enumerate(ranges):
             length = float(end - start)
             video = work / f'{i:04d}.mov'
@@ -205,11 +203,22 @@ def render_edit(cfg, plan, out, preview=True):
                 if abs(pcm_length - length) > .03:
                     raise ValueError('PCM segment does not preserve the selected timeline duration')
             videos.append(video)
+            full_video = video
+            if preview:
+                full_video = work / f'{i:04d}-full.mov'
+                cache.get('video', {**common_key, 'interval': interval,
+                          'style': {**video_style, 'preview': False}}, '.mov', full_video,
+                    lambda artifact, log: run(common() + ['-map', '0:v:0', '-an', '-filter_threads', '4', '-vf',
+                        _video_filter(effective, lut, False), '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                        '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-map_metadata', '-1',
+                        '-metadata:s:v:0', 'rotate=0', str(artifact)], log), work / f'{i:04d}-full-video.log')
+            full_videos.append(full_video)
             audio.append(wav)
             video_keys.append(video_event['key'])
             audio_keys.append(audio_event['key'])
         _concat_file(out / 'video.ffconcat', videos)
         _concat_file(out / 'audio.ffconcat', audio)
+        _concat_file(out / 'speech-video.ffconcat', full_videos)
         total = sum(float(end - start) for start, end in ranges)
         # Retain the selected, graded picture and per-span PCM before production
         # cues or loudness normalization. Copying picture adds no encode pass.
@@ -218,16 +227,40 @@ def render_edit(cfg, plan, out, preview=True):
              '-i', str(out/'audio.ffconcat'), '-c:a', 'pcm_s16le', str(assembled)],
             out/'speech-assemble-audio.log')
         run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-f', 'concat', '-safe', '0',
-             '-i', str(out/'video.ffconcat'), '-i', str(assembled), '-map', '0:v:0',
+             '-i', str(out/'speech-video.ffconcat'), '-i', str(assembled), '-map', '0:v:0',
              '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'pcm_s16le', '-map_metadata', '-1',
              '-t', str(total), str(out/'speech-base.mov')], out/'speech-assemble.log')
-        write(out/'speech-assembly.json', {'version':1,
+        assembly_evidence = {'version':2, 'picture_dimensions_scope':'full_resolution',
               'source':fingerprint(out/'speech-base.mov'),
               'mapping':fingerprint(out/'frame-mapping.json'),
               'plan':fingerprint(out/'plan.json'), 'stage':'pre_production_speech_assembly',
               'picture':'frame-aligned cuts with baked grade; copied from retained segments',
               'audio':'48 kHz per-span PCM and selected fades; before normalization or added assets',
-              'review_required':True})
+              'review_required':True}
+        retimed = None
+        if cfg.get('retime'):
+            from .production import frozen_pattern
+            from .speech_retime import verify_speech_setting, remap_speech_mapping, remapped_subtitles
+            from .retime import render_retime
+            pattern = frozen_pattern(cfg)
+            if pattern['id'] == 'natural' or pattern['intensity'] == 'off':
+                raise ValueError('Retime conflicts with natural/off')
+            original_mapping = read(out/'frame-mapping.json')
+            setting = verify_speech_setting(out/'speech-base.mov', plan, original_mapping, cfg['retime'])
+            (out/'frame-mapping.json').rename(out/'pre-retime-mapping.json')
+            assembly_evidence['mapping'] = fingerprint(out/'pre-retime-mapping.json')
+            (out/'timeline.fcpxml').rename(out/'original-cut-reference.fcpxml')
+            retimed = out/'speech-retimed.mp4'
+            assembled = out/'speech-retimed.wav'
+            write(out/'retime-evidence.json', render_retime(out/'speech-base.mov',
+                  setting['proposal'], retimed, pcm_output=assembled))
+            write(out/'frame-mapping.json', remap_speech_mapping(original_mapping, setting['proposal']['mapping']))
+            (out/'subtitles.srt').write_text(remapped_subtitles(setting), encoding='utf-8')
+            total = float(Fraction(setting['proposal']['mapping']['output_frame_count'], 1) /
+                          Fraction(setting['proposal']['mapping']['fps']))
+            export_timeline(retimed, probe(retimed), [(0, total)], out/'timeline.fcpxml',
+                            cfg.get('name', 'Retimed Speech Edit'))
+        write(out/'speech-assembly.json', assembly_evidence)
         from .production import resolve_production, mix_key, production_sources
         production = resolve_production(cfg, read(out / 'frame-mapping.json'))
         audio_cues = [c for c in production['cues'] if c['role'] in ('music', 'sfx')]
@@ -237,10 +270,13 @@ def render_edit(cfg, plan, out, preview=True):
         mixed = out / 'mix.m4a'
         def build_mix(artifact, log):
             joined = artifact.parent / 'assembled.wav'
-            concat = artifact.parent / 'audio.ffconcat'
-            _concat_file(concat, audio)
-            run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-f', 'concat', '-safe', '0', '-i',
-                 str(concat), '-c:a', 'pcm_s16le', str(joined)], artifact.parent / 'assemble-audio.log')
+            if retimed is not None:
+                shutil.copyfile(assembled, joined)
+            else:
+                concat = artifact.parent / 'audio.ffconcat'
+                _concat_file(concat, audio)
+                run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-f', 'concat', '-safe', '0', '-i',
+                     str(concat), '-c:a', 'pcm_s16le', str(joined)], artifact.parent / 'assemble-audio.log')
             mix_input = joined
             if audio_cues:
                 from .audio_mix import render_mix
@@ -258,14 +294,20 @@ def render_edit(cfg, plan, out, preview=True):
                         evidence.write('\n' + name + '\n' + path.read_text())
         mix_settings = {**common_key, 'pcm': audio_keys,
                         'audio': effective['audio'], 'duration': total}
+        if retimed is not None:
+            mix_settings['retime'] = {'setting':cfg['retime'], 'pcm_sha256':fingerprint(assembled)['sha256']}
         if audio_cues:
             mix_settings['production'] = mix_key(production)
         mix_event = cache.get('mix', mix_settings, '.m4a', mixed, build_mix,
             out / 'mix.log')
         final = out / 'video.mp4'
-        run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-f', 'concat', '-safe', '0', '-i',
-             str(out / 'video.ffconcat'), '-i', str(mixed), '-map', '0:v:0', '-map', '1:a:0',
-             '-c:v', 'copy', '-c:a', 'copy',
+        picture_input = ['-i', str(retimed)] if retimed is not None else ['-f', 'concat', '-safe', '0', '-i', str(out/'video.ffconcat')]
+        picture_codec = (['-vf', 'scale=-2:720',
+                          '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p']
+                         if retimed is not None and preview else ['-c:v', 'copy'])
+        run(['ffmpeg', '-hide_banner', '-nostdin', '-n', *picture_input,
+             '-i', str(mixed), '-map', '0:v:0', '-map', '1:a:0',
+             *picture_codec, '-c:a', 'copy',
              '-map_metadata', '-1', '-t', str(total), '-movflags', '+faststart', str(final)], out / 'render.log')
         if visual_cues:
             from .visual import render_overlays
@@ -294,7 +336,7 @@ def render_edit(cfg, plan, out, preview=True):
             if float(actual['input_tp']) > effective['audio']['true_peak_db'] + .3:
                 warnings.append('True peak exceeds target +0.3dB tolerance')
         write(out / 'audio-output-measure.json', {'measured': actual, 'targets': effective['audio'], 'warnings': warnings})
-        if production['cues'] or production.get('effects', {}).get('events'):
+        if production['cues'] or production.get('effects', {}).get('events') or cfg.get('retime'):
             from .production import prepare_fcp_handoff
             prepare_fcp_handoff(cfg, production, out)
         cache_report = cache.report()
