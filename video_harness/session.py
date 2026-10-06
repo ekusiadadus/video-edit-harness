@@ -219,6 +219,8 @@ class Session:
                     check_ref(candidate[key])
             if candidate.get('direction'):
                 check_ref(candidate['direction'])
+            if candidate.get('comparison_selection'):
+                check_ref(candidate['comparison_selection'])
         for comparison in state.get('candidate_comparisons', []):
             check_ref(comparison['artifact'])
             if comparison.get('evidence'):
@@ -275,6 +277,9 @@ class Session:
         check_ref(render['project'])
         if render.get('brief'):
             check_ref(render['brief'])
+        for key in ('transcript', 'packed'):
+            if render.get(key):
+                check_ref(render[key])
         for ref in render['files'].values():
             check_ref(ref)
         if render['files'].get('production'):
@@ -938,6 +943,66 @@ class Session:
             raise ValueError('Unknown candidate ID')
         return candidate
 
+    def candidate_from_selection(self, selection, actor, note):
+        """Restore a render's exact input snapshot as an unadopted candidate."""
+        require_note(note)
+        actor_name(actor)
+        fields = {'version','kind','render_id','render_sha256','output_time','note','adopted','final_review'}
+        if (not isinstance(selection, dict) or set(selection) != fields
+                or type(selection['version']) is not int or selection['version'] != 1
+                or selection['kind'] != 'comparison_selection_proposal'
+                or not isinstance(selection['render_id'], str)
+                or not isinstance(selection['render_sha256'], str)
+                or not isinstance(selection['note'], str)
+                or selection['adopted'] is not False or selection['final_review'] is not False
+                or type(selection['output_time']) not in (int, float)):
+            raise ValueError('Invalid comparison selection proposal')
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            render = self._find_render(state, selection['render_id'])
+            self._verify_render(render)
+            if selection['render_sha256'] != render['files']['video']['sha256']:
+                raise ValueError('Comparison selection targets a different video SHA')
+            if render['brief']['sha256'] != state['brief']['sha256']:
+                raise ValueError('Comparison selection belongs to a different current brief')
+            from .feedback import map_output
+            mapped = map_output(read(render['files']['mapping']['path']), selection['output_time'])
+            cfg = read(render['project']['path'])
+            plan = read(render['plan']['path'])
+            if fingerprint(cfg['source'])['sha256'] != state['source']['sha256']:
+                raise ValueError('Comparison selection source differs from session source')
+            self._validate_edit_plan(plan, cfg)
+            transcript = deepcopy(render.get('transcript'))
+            legacy_transcript = None
+            if 'transcript' not in render and plan.get('version') != 4:
+                legacy_transcript = plan.get('transcript')
+                if not isinstance(legacy_transcript, dict):
+                    raise ValueError('Selected legacy speech render has no retained transcript')
+            from .production import frozen_pattern
+            pattern = frozen_pattern(cfg)
+            packed = deepcopy(render.get('packed'))
+            if legacy_transcript is not None:
+                from .editorial import pack_transcript
+                from .transcript import save_transcript
+                packed_data = pack_transcript(legacy_transcript, read(render['brief']['path']))
+                folder = self.root / 'artifacts' / ('selection-transcript-' + uuid.uuid4().hex[:12])
+                transcript = fingerprint(save_transcript(folder, legacy_transcript))
+                packed = self._artifact('selection-packed', packed_data)
+            item = {'id': uuid.uuid4().hex[:12], 'project': deepcopy(render['project']),
+                    'plan': deepcopy(render['plan']), 'brief': deepcopy(render['brief']),
+                    'transcript': transcript, 'packed': packed,
+                    'pattern': pattern, 'actor': actor, 'note': note, 'created_at': now(),
+                    'comparison_selection': self._artifact('comparison-selection', selection),
+                    'selected_render_id': render['id'], 'selected_video_sha256': selection['render_sha256'],
+                    'selection_position': mapped}
+            state.setdefault('candidates', []).append(item)
+            self._save(state, 'comparison_selection_proposed', actor,
+                       {'candidate_id': item['id'], 'render_id': render['id'], 'note': note,
+                        'review_status': 'requires_render_adoption_and_exact_render_review'})
+        return item
+
     def adopt_candidate(self, candidate_id, actor, note):
         """Adopt the exact snapshot; this never creates a perceptual review."""
         require_note(note)
@@ -1017,6 +1082,7 @@ class Session:
             out = self.root / 'renders' / rid
             operation = {'kind': 'render', 'id': rid, 'path': str(out), 'pid': os.getpid(),
                          'preview': preview, 'plan': inputs['plan'], 'project': inputs['project'], 'brief': inputs['brief'], 'started_at': now(),
+                         'transcript': deepcopy(inputs.get('transcript')), 'packed': deepcopy(inputs.get('packed')),
                          'process_birth': process_birth(os.getpid())}
             if candidate_id:
                 operation['candidate_id'] = candidate_id
@@ -1072,6 +1138,9 @@ class Session:
             files['finished_picture'] = fingerprint(folder / 'finished-picture.mp4')
         item = {key: operation[key] for key in ('id', 'path', 'preview', 'plan', 'project', 'started_at')}
         item.update(files=files, brief=operation.get('brief', state['brief']), elapsed_seconds=operation.get('elapsed_seconds'), registered_at=now())
+        for key in ('transcript', 'packed'):
+            if key in operation:
+                item[key] = deepcopy(operation[key])
         if operation.get('candidate_id'):
             item['candidate_id'] = operation['candidate_id']
         self._verify_render(item)

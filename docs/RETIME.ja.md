@@ -74,3 +74,13 @@ uv run --no-sync video-harness session render SESSION --candidate-id CANDIDATE_I
 結果先出し版と時系列版など、別の計画を比べる場合は `session compare-candidates SESSION FIRST_RENDER SECOND_RENDER --mode structure` を使います。同じbrief・登録済みの素材群・色・基本音声設定・出力fps・プレビュー条件が必要です。各案の元の素材範囲と順序、計画に記録した理由、長さ、実際に加えた音・効果を表示します。自然版に対する範囲の追加／除去は同じ範囲の反復も数え、単なる並べ替えと素材の省略を区別します。範囲の変更は自動で良い編集と評価しません。
 
 各動画を個別に全編再生します。同じ出力時刻が同じ内容を指すとは扱いません。速度変更がある案は変速前の範囲と速度変更／停止を別に記録します。変速していない自然版を含めてください。選択メモは動画SHAとその案の再生時刻に結び付いた提案であり、計画の採用・人の承認・投稿を行いません。従来の `effects`／`timing` モードで別計画を比較する制約は変わりません。
+
+保存した `comparison-selection.json` は、次のコマンドで未採用候補へ戻せます。現在の計画に古い色や効果だけを適用せず、選んだrenderの計画と設定を一緒に保持します。動画SHA・brief・素材・選択時刻が一致しない場合は拒否します。
+
+```sh
+uv run --no-sync video-harness session select-comparison SESSION --data-file comparison-selection.json --actor codex --note '比較した構成を再確認する候補'
+uv run --no-sync video-harness session render SESSION --candidate-id CANDIDATE_ID --full
+uv run --no-sync video-harness session adopt-candidate SESSION CANDIDATE_ID --actor codex --note '再描画した構成を選択'
+```
+
+採用後も正確な全編出力のレビューが必要です。元の案に戻したい場合も、そのrenderの選択メモから候補を作ります。新しいrenderは書き起こしとcontextの入力参照も保存します。旧renderに入力参照がない発話編集は、保持済み計画に埋め込まれた実書き起こしから復元し、contextは実単語と同じbriefから自動で再生成します。単語時刻を作り直したり、人の承認を引き継いだりはしません。公開済みalpha.6には未収録です。

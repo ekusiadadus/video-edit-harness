@@ -22,7 +22,7 @@ SESSION_ACTIONS = ('start', 'status', 'cloud-policy', 'transcribe', 'transcript'
                    'package', 'finish', 'resume', 'handoff', 'revise', 'review',
                    'register-vertical', 'review-vertical', 'audition-junctions',
                    'inspect', 'delivery-check', 'candidate', 'adopt-candidate',
-                   'compare-candidates', 'effects', 'direction', 'native-finish',
+                   'compare-candidates', 'select-comparison', 'effects', 'direction', 'native-finish',
                    'tracking-source', 'track-effect',
                    'retime-source', 'retime',
                    'visual-plan', 'propose-beats', 'import-production-fcp')
