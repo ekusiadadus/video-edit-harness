@@ -316,12 +316,14 @@ def render_edit(cfg, plan, out, preview=True):
             base = out / 'base-video.mp4'
             final.rename(base)
             write(out / 'overlay-evidence.json', render_overlays(
-                base, visual_cues, production_sources(production), final, total, preview=preview))
+                base, visual_cues, production_sources(production), final, total, preview=preview,
+                preserve_audio_end=retimed is not None))
         if production.get('effects', {}).get('events'):
             from .video_effects import render_effects
             base = out / 'before-effects.mp4'
             final.rename(base)
-            write(out / 'effects-evidence.json', render_effects(base, production['effects'], final, production['assets'], production.get('composition')))
+            write(out / 'effects-evidence.json', render_effects(base, production['effects'], final,
+                production['assets'], production.get('composition'), preserve_audio_end=retimed is not None))
         verify(final, out, total, True, (0, total))
         run(['ffmpeg', '-v', 'error', '-n', '-i', str(final), '-vn', '-c:a', 'libmp3lame',
              '-b:a', '192k', str(out / 'audio-only.mp3')], out / 'audio-only.log')

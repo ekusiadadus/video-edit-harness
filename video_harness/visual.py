@@ -37,6 +37,7 @@ def _video_info(path):
     return {"fps": rate, "duration": duration, "frame_count": int(frame_count) if frame_count not in (None, "N/A") else None,
             "width": int(video["width"]),
             "height": int(video["height"]),
+            "rec709_tags": (video.get('color_primaries'),video.get('color_transfer'),video.get('color_space')) == ('bt709','bt709','bt709'),
             "has_audio": any(s["codec_type"] == "audio" for s in info["streams"])}
 
 
@@ -243,8 +244,11 @@ def _title_image(text, path, width, height):
     image.save(path)
 
 
-def render_overlays(input_video, cues, assets, output, duration, preview=False):
+def render_overlays(input_video, cues, assets, output, duration, preview=False, *, preserve_audio_end=False):
     """Burn local picture/title overlays while keeping existing audio untouched."""
+    if type(preserve_audio_end) is not bool:
+        raise ValueError("preserve_audio_end must be boolean")
+    timing_options = ["-movie_timescale", "48000"] if preserve_audio_end else []
     input_video = Path(input_video)
     output = Path(output)
     if not input_video.is_file() or output.exists():
@@ -289,19 +293,22 @@ def render_overlays(input_video, cues, assets, output, duration, preview=False):
                             f"[0:v][layer]overlay=x=(W-w)/2:y={y}:"
                             f"enable='between(t,{cue['output_start']},{cue['output_end']})':"
                             "eof_action=pass:shortest=0[v]")
+            if info['rec709_tags']:
+                filter_graph += ';[v]setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[retained_rec709]'
+            picture_label = '[retained_rec709]' if info['rec709_tags'] else '[v]'
             target = root / f"overlay-{index}.mp4"
             _ffmpeg(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(current),
-                     *overlay_input, "-filter_complex", filter_graph, "-map", "[v]",
+                     *overlay_input, "-filter_complex", filter_graph, "-map", picture_label,
                      "-map", "0:a?", "-c:v", "libx264", "-preset", "ultrafast" if preview else "medium",
                      "-crf", "23" if preview else "18", "-pix_fmt", "yuv420p", "-c:a", "copy",
-                     "-t", str(duration), str(target)])
+                     "-t", str(duration), *timing_options, str(target)])
             current = target
         if cues:
             _ffmpeg(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(current),
-                     "-map", "0", "-c", "copy", str(output)])
+                     "-map", "0", "-c", "copy", *timing_options, str(output)])
         else:
             _ffmpeg(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(input_video),
-                     "-map", "0", "-c", "copy", str(output)])
+                     "-map", "0", "-c", "copy", *timing_options, str(output)])
     return {"output": str(output), "cues": [cue["id"] for cue in cues],
             "duration": float(duration), "preview": bool(preview),
             "safe_area": "overlays fit central 70 percent width and above lower 25 percent",

@@ -96,6 +96,20 @@ class SpeechRetimeSourceTests(unittest.TestCase):
                 self.assertEqual(mapping['retime']['frames'][32]['source_frame'],36)
                 self.assertEqual(pcm(folder/'speech-retimed.wav')[32*stride:41*stride],
                                  pcm(folder/'speech-base.wav')[36*stride:45*stride])
+                effect=session.propose_effects(result['id'],[{'action':'add','event':{
+                    'id':'focus','type':'smooth_zoom','output_start':'0','output_end':'1',
+                    'strength':.4,'reason':'Synthetic retime finishing test','parameters':{'anchor_x':.5}}}],
+                    'automation','Apply effect after synthetic retime')
+                finished=session.render(preview=False,actor='automation',candidate_id=effect['id'])
+                finished_folder=Path(finished['path'])
+                audio_info=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams',
+                    '-of','json',str(finished_folder/'video.mp4')]))
+                sound=next(s for s in audio_info['streams'] if s['codec_type']=='audio')
+                from fractions import Fraction
+                self.assertEqual(Fraction(sound['duration_ts'])*Fraction(sound['time_base']),Fraction(56,30))
+                self.assertEqual(pcm(folder/'video.mp4'),pcm(finished_folder/'video.mp4'))
+                self.assertEqual(len(pcm(finished_folder/'final-mix.wav')),89600*4)
+                self.assertEqual(pcm(finished_folder/'final-mix.wav'),pcm(finished_folder/'video.mp4')[:89600*4])
             natural=session.create_candidate({'editing_pattern':{'id':'natural'}},'automation','Synthetic timing baseline')
             baseline=session.render(preview=False,actor='automation',candidate_id=natural['id'])
             compared=session.compare_candidates([baseline['id'],full['id']],mode='timing')

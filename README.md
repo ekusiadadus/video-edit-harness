@@ -162,3 +162,5 @@ Post-alpha.6 development retains a pre-production speech assembly and exposes tr
 
 
 Development timing comparisons use `session compare-candidates SESSION NATURAL_RENDER RETIMED_RENDER --mode timing`: inspect independent full-length playback and explicit duration/retime changes for the same selected cuts. Default `effects` retains strict mapping equality and synchronized playback. Comparing reordered or different plans remains outside this mode.
+
+Development retimed visual sessions retain `visual-retimed.wav` for the environment mix, alongside the speech session's retained PCM. Subsequent grading, overlays, effects and final MP4 muxing preserve fractional-frame audio endpoints with a 48 kHz movie timescale. Overlays and effects retain declared Rec.709 tags and copy their input audio. Synthetic decode/sample checks cover these paths; final AAC encoding, human listening and actual FCP playback remain separate checks. These changes are not in published alpha.6.

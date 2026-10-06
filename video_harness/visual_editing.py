@@ -177,7 +177,8 @@ def render_visual_edit(cfg, plan, out, preview=True):
             write(out/'pre-retime-mapping.json',mapping)
             _write_xml(out/'original-cut-reference.fcpxml',normalized,mapping,assets,cfg.get('name','Visual Edit'))
             visual_input=out/'visual-retimed.mp4'
-            evidence=render_retime(out/'visual-base.mp4',setting['proposal'],visual_input)
+            evidence=render_retime(out/'visual-base.mp4',setting['proposal'],visual_input,
+                                   pcm_output=out/'visual-retimed.wav')
             write(out/'retime-evidence.json',evidence)
             mapping=remap_visual_mapping(mapping,evidence['mapping'])
             base={**base,'duration':mapping['duration'],'frame_count':mapping['frame_count']}
@@ -202,7 +203,9 @@ def render_visual_edit(cfg, plan, out, preview=True):
             run(['ffmpeg','-hide_banner','-nostdin','-n','-i',str(visual_input),
                  '-map','0:v:0','-map','0:a:0','-vf',_video_filter(effective,lut,False),
                  '-c:v','libx264','-preset','fast','-crf','18','-pix_fmt','yuv420p',
-                 '-c:a','copy','-map_metadata','-1','-movflags','+faststart',str(graded)],out/'grade.log')
+                 '-c:a','copy','-map_metadata','-1',
+                 *(['-movie_timescale','48000'] if effective.get('retime') else []),
+                 '-movflags','+faststart',str(graded)],out/'grade.log')
             from .video_effects import _probe,_stream,_verified_rate
             observed=_probe(graded,count=True);picture=_stream(observed,'video')
             if not picture or int(picture['nb_read_frames'])!=mapping['frame_count'] or _verified_rate(graded,picture,mapping['frame_count'])!=rate:
@@ -218,17 +221,20 @@ def render_visual_edit(cfg, plan, out, preview=True):
             'preview_scale_stage':'final composed picture' if pipeline_version==2 else 'final grade'})
         if visual_cues:
             rendered = out / 'visual-overlays.mp4'
-            render_overlays(visual_input, visual_cues, production['assets'], rendered, base['duration'], preview)
+            render_overlays(visual_input, visual_cues, production['assets'], rendered, base['duration'], preview,
+                            preserve_audio_end=bool(effective.get('retime')))
             visual_input = rendered
         if production.get('effects', {}).get('events'):
             from .video_effects import render_effects
             rendered = out / 'visual-effects.mp4'
-            write(out / 'effects-evidence.json', render_effects(visual_input, production['effects'], rendered, production['assets'], production.get('composition')))
+            write(out / 'effects-evidence.json', render_effects(visual_input, production['effects'], rendered,
+                production['assets'], production.get('composition'), preserve_audio_end=bool(effective.get('retime'))))
             visual_input = rendered
-        # AAC intermediary is decoded once. Pad/truncate to exact output samples
-        # before ducking and final normalization.
+        # Retimed PCM avoids another intermediate AAC decode. Other timelines
+        # retain the existing decode/pad path before ducking and normalization.
         speech = out / 'environment.wav'
-        run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-i', str(visual_input), '-vn',
+        environment_input = out/'visual-retimed.wav' if effective.get('retime') else visual_input
+        run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-i', str(environment_input), '-vn',
              '-af', f'aresample=48000:async=1:first_pts=0,apad=whole_dur={base["duration"]},atrim=duration={base["duration"]},asetpts=N/SR/TB',
              '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le', str(speech)], out / 'environment.log')
         audio_source = speech
@@ -245,7 +251,8 @@ def render_visual_edit(cfg, plan, out, preview=True):
              _composed_output_filter(preview) if pipeline_version==2 else _video_filter(effective, lut, preview),
              '-af', audio_filter, '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
              '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '384k', '-ar', '48000',
-             '-map_metadata', '-1', '-t', str(base['duration']), '-movflags', '+faststart',
+             '-map_metadata', '-1', '-t', str(base['duration']),
+             *(['-movie_timescale','48000'] if effective.get('retime') else []), '-movflags', '+faststart',
              str(out / 'video.mp4')], out / 'render.log')
         verify(out / 'video.mp4', out, base['duration'], True, (0, base['duration']))
         run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-i', str(out / 'video.mp4'),

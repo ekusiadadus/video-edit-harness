@@ -374,8 +374,10 @@ def _filter_graph(events, width, height, rate):
     return graph, current
 
 
-def render_effects(input, plan, output, assets=None, composition=None):
+def render_effects(input, plan, output, assets=None, composition=None, *, preserve_audio_end=False):
     """Render a sealed effect plan; preserve original audio and frame count."""
+    if type(preserve_audio_end) is not bool:
+        raise ValueError('preserve_audio_end must be boolean')
     source, target = Path(input).resolve(strict=True), Path(output).resolve()
     if source == target or target.exists():
         raise ValueError('Effects output must be a new file distinct from input')
@@ -557,9 +559,13 @@ def render_effects(input, plan, output, assets=None, composition=None):
     if composition is not None:
         from .composition import check_composition
         composition_evidence = check_composition(events, composition, titles, fps=rate)
+    if (video.get('color_primaries'),video.get('color_transfer'),video.get('color_space')) == ('bt709','bt709','bt709'):
+        graph += f';[{label}]setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[retained_rec709]'
+        label = 'retained_rec709'
     command += ['-filter_complex', graph, '-map', f'[{label}]', '-map', '0:a:0',
                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p',
-               '-c:a', 'copy', '-movflags', '+faststart', str(target)]
+               '-c:a', 'copy', *(['-movie_timescale','48000'] if preserve_audio_end else []),
+               '-movflags', '+faststart', str(target)]
     try:
         with log.open('w', encoding='utf-8') as stream:
             stream.write(json.dumps(command) + '\n')
