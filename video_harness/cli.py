@@ -31,7 +31,7 @@ def parser():
   if name in ['preview','render']:a.add_argument('--tone',choices=LEGACY_TONES,help='Legacy v1 tone (compatibility)')
   if name in ['preview','compare']:a.add_argument('--styles',help='Comma-separated style IDs')
   if name=='compare':a.add_argument('--use-cases',required=True,help='Comma-separated use-case IDs')
- a=s.add_parser('tiktok-export',help='Local 1080x1920 derivative of an already graded Rec.709 edit');a.add_argument('source',type=Path);a.add_argument('--output',type=Path,required=True);a.add_argument('--framing',choices=['fit','center_crop'],default='fit');a.add_argument('--subtitles',type=Path);a.add_argument('--font',type=Path)
+ a=s.add_parser('tiktok-export',help='Local 1080x1920 derivative of an already graded Rec.709 edit');a.add_argument('source',type=Path);a.add_argument('--output',type=Path,required=True);a.add_argument('--framing',choices=['fit','center_crop'],default='fit');a.add_argument('--subtitles',type=Path);a.add_argument('--font',type=Path);a.add_argument('--caption-layout',type=Path,help='Opt-in language/protected-phrase JSON for measured caption wrapping')
  a=s.add_parser('inspect-xml');a.add_argument('xml',type=Path);a.add_argument('--output',type=Path)
  a=s.add_parser('export-xml');a.add_argument('plan',type=Path);a.add_argument('output',type=Path);a.add_argument('--name',default='Talk Pacing Review')
  a=s.add_parser('verify');a.add_argument('video',type=Path);a.add_argument('--output',type=Path,required=True)
@@ -114,7 +114,7 @@ def main():
    print(json.dumps(template_catalog(),ensure_ascii=False,indent=2));return
   if args.cmd=='tiktok-export':
    from .vertical import export_vertical
-   print(json.dumps(export_vertical(args.source,args.output,args.framing,args.subtitles,args.font),ensure_ascii=False,indent=2));return
+   print(json.dumps(export_vertical(args.source,args.output,args.framing,args.subtitles,args.font,caption_layout=read(args.caption_layout) if args.caption_layout else None),ensure_ascii=False,indent=2));return
   if args.cmd in ['doctor','presets']:
    result={'use_cases':catalog('use_cases'),'styles':catalog('styles')}
    if args.cmd=='doctor':
@@ -201,5 +201,5 @@ def main():
     path=render(c,lut,out/key,start,duration,is_preview);write(out/key/'resolved.json',r);evaluate(path,c,out/key)
    gallery(out,keys)
   print(out)
- except (ValueError,FileNotFoundError,FileExistsError,subprocess.CalledProcessError) as e:p.exit(2,f'Error: {e}\n')
+ except (ValueError,ImportError,FileNotFoundError,FileExistsError,subprocess.CalledProcessError) as e:p.exit(2,f'Error: {e}\n')
 if __name__=='__main__':main()

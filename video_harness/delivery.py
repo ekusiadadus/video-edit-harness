@@ -104,6 +104,79 @@ def _copy_depth_provenance(render, folder, files):
     files['depth_evidence'] = fingerprint(folder / 'depth-evidence.json')
 
 
+
+def _copy_portrait_caption_layout(derivative, folder, files):
+    """Retain visible caption layout without private paths or unused term lists."""
+    ref = derivative.get('result')
+    if ref is None:
+        return None
+    if fingerprint(ref['path']) != ref:
+        raise ValueError('Portrait result changed before caption delivery')
+    result = read(ref['path'])
+    layout = result.get('caption_layout')
+    if layout is None:
+        return None
+    import math
+    import re
+    if result['video'] != derivative['video']:
+        raise ValueError('Caption layout result differs from portrait output')
+    if (type(layout.get('version')) is not int or layout['version'] != 1
+            or layout.get('language') not in ('ja', 'en')
+            or type(layout.get('max_width')) is not int or layout['max_width'] != 820
+            or type(layout.get('max_lines')) is not int or layout['max_lines'] != 3
+            or not isinstance(layout.get('protected_phrases'), list)):
+        raise ValueError('Invalid portable caption layout')
+    runtime = layout.get('runtime')
+    if not isinstance(runtime, dict):
+        raise ValueError('Invalid portable caption runtime')
+    versions = {key: runtime.get(key) for key in ('regex', 'budoux')}
+    for key, value in versions.items():
+        if value is None and key == 'budoux' and layout['language'] == 'en':
+            continue
+        if not isinstance(value, str) or not re.fullmatch(r'[0-9][A-Za-z0-9.+_-]*', value):
+            raise ValueError('Invalid portable caption runtime version')
+    public_layout = {key: layout[key] for key in ('version', 'language', 'max_width', 'max_lines')}
+    public_layout['runtime'] = versions
+    public_layout['protected_phrase_count'] = len(layout['protected_phrases'])
+    if 'max_codepoints' in layout:
+        if type(layout['max_codepoints']) is not int or layout['max_codepoints'] != 512:
+            raise ValueError('Invalid portable caption size bound')
+        public_layout['max_codepoints'] = 512
+    rows = result.get('caption_lines')
+    if not isinstance(rows, list):
+        raise ValueError('Invalid portable caption lines')
+    visible = []
+    for row in rows:
+        if (not isinstance(row, dict) or not isinstance(row.get('text'), str)
+                or not isinstance(row.get('lines'), list) or not 1 <= len(row['lines']) <= 3
+                or any(not isinstance(line, str) for line in row['lines'])
+                or any(type(row.get(key)) not in (int, float) or not math.isfinite(row[key])
+                       for key in ('start', 'end')) or not 0 <= row['start'] < row['end']):
+            raise ValueError('Invalid portable caption line record')
+        visible.append({key: row[key] for key in ('start', 'end', 'text', 'lines')})
+    def input_sha(ref):
+        if ref is None:
+            return None
+        sha = ref.get('sha256') if isinstance(ref, dict) else None
+        if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{64}', sha):
+            raise ValueError('Invalid portable caption input identity')
+        return sha
+    summary = {'version': 1, 'derivative_id': derivative['id'],
+               'render_sha256': derivative['render_sha256'],
+               'video_sha256': derivative['video']['sha256'],
+               'original_result_sha256': ref['sha256'],
+               'subtitles_sha256': input_sha(result.get('subtitles_source')),
+               'font_sha256': input_sha(result.get('font_source')),
+               'caption_layout': public_layout, 'caption_lines': visible,
+               'scope': 'Rendered text and technical layout; not an independent quality review'}
+    if fingerprint(ref['path']) != ref:
+        raise ValueError('Portrait result changed during caption delivery')
+    path = folder / 'portrait-caption-layout.json'
+    write(path, summary)
+    files['portrait_caption_layout'] = fingerprint(path)
+    return files['portrait_caption_layout']['sha256']
+
+
 def bundle(render, brief, target, folder, accepted=False, derivative=None):
     production = None
     prepared_fcp = None
@@ -202,6 +275,9 @@ def bundle(render, brief, target, folder, accepted=False, derivative=None):
                     'video_sha256': derivative['video']['sha256'], 'framing': derivative['framing'],
                     'subtitles_sha256': (derivative.get('subtitles_source') or {}).get('sha256'),
                     'font_sha256': (derivative.get('font_source') or {}).get('sha256')}
+        caption_proof = _copy_portrait_caption_layout(derivative, folder, files)
+        if caption_proof:
+            portrait['caption_layout_proof_sha256'] = caption_proof
     required = ['fcp_import', 'fcp_playback', 'fcp_grade', 'fcp_captions', 'fcp_mix'] if target == 'fcp' else []
     manifest = {'version': 1, 'render_id': render['id'], 'render_sha256': render['files']['video']['sha256'],
                 'plan': render['plan'], 'project': render['project'], 'brief': brief,
@@ -288,6 +364,17 @@ def verify_completion(folder):
                 or observation.get('delivery_id') != completion['delivery_id']
                 or observation.get('render_sha256') != completion['render_sha256']):
             raise ValueError('Delivery check proof contradicts completion: ' + check)
+    if (manifest.get('portrait') or {}).get('caption_layout_proof_sha256'):
+        ref = manifest['files'].get('portrait_caption_layout')
+        if ref is None or ref['sha256'] != manifest['portrait']['caption_layout_proof_sha256']:
+            raise ValueError('Portrait caption layout proof differs from delivery')
+        caption = read(folder / manifest['file_paths']['portrait_caption_layout'])
+        if (caption['video_sha256'] != completion['portrait_video_sha256']
+                or caption['render_sha256'] != completion['render_sha256']
+                or caption['derivative_id'] != manifest['portrait']['derivative_id']
+                or caption['subtitles_sha256'] != manifest['portrait']['subtitles_sha256']
+                or caption['font_sha256'] != manifest['portrait']['font_sha256']):
+            raise ValueError('Portrait caption proof contradicts completion')
     if manifest.get('portrait'):
         portrait = proof('portrait_review')
         if (not portrait.get('passed') or portrait.get('derivative_id') != manifest['portrait']['derivative_id']

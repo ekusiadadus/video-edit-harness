@@ -1,6 +1,8 @@
 """Local portrait derivatives of already graded Rec.709 edits; no uploads."""
 from pathlib import Path
 import hashlib
+import importlib
+import importlib.metadata
 import math
 import re
 import shutil
@@ -53,32 +55,85 @@ def caption_font(cues, font_path=None):
     return ImageFont.load_default(size=52)
 
 
-def caption_images(cues, font):
+def resolve_caption_layout(setting):
+    """Validate an explicit measured-wrap request and bind optional runtimes."""
+    if (not isinstance(setting, dict) or set(setting) != {'version', 'language', 'protected_phrases'}
+            or type(setting['version']) is not int or setting['version'] != 1
+            or setting['language'] not in ('ja', 'en')
+            or not isinstance(setting['protected_phrases'], list)
+            or any(not isinstance(p, str) or not p or '\n' in p or '\r' in p
+                   for p in setting['protected_phrases'])
+            or len(set(setting['protected_phrases'])) != len(setting['protected_phrases'])):
+        raise ValueError('caption_layout requires version 1, ja/en, and unique nonempty protected phrases')
+    try:
+        importlib.import_module('regex')
+        regex_version = importlib.metadata.version('regex')
+        budoux_version = None
+        if setting['language'] == 'ja':
+            importlib.import_module('budoux')
+            budoux_version = importlib.metadata.version('budoux')
+    except (ImportError, importlib.metadata.PackageNotFoundError) as exc:
+        raise ImportError('Caption layout needs the text-layout extra; install with uv sync --extra text-layout') from exc
+    return {**setting, 'protected_phrases': list(setting['protected_phrases']),
+            'max_width': 820, 'max_lines': 3, 'max_codepoints': 512,
+            'runtime': {'regex': regex_version, 'budoux': budoux_version}}
+
+
+def _caption_ink_measure(measure, font, value):
+    """Include advance, visible overhang and the stroke used by the tile."""
+    left, _, right, _ = measure.textbbox((0, 0), value, font=font, stroke_width=1)
+    bearing = min(left, 0)
+    return max(right, measure.textlength(value, font=font)) - bearing, bearing
+
+
+def _wrapped_caption_lines(text, font, layout, measure):
+    if len(text) > 512:
+        raise ValueError('Caption exceeds 512 Unicode codepoints; split the reviewed cue')
+    from .text_layout import wrap_text
+    lines = wrap_text(text, layout['language'], 820,
+                      lambda value: _caption_ink_measure(measure, font, value)[0],
+                      max_lines=3, protected_phrases=layout['protected_phrases'])
+    if any(_caption_ink_measure(measure, font, line)[0] > 820 for line in lines):
+        raise ValueError('Caption measured line exceeds 820 pixels')
+    return lines
+
+
+def caption_images(cues, font, layout=None, rendered_lines=None):
     # Yield one tile at a time; lengthy transcripts must not retain all images.
     measure = ImageDraw.Draw(Image.new('RGB', (1, 1)))
-    for cue in cues:
-        lines = []
-        for original in cue['text'].splitlines():
-            line = ''
-            for char in original:
-                candidate = line+char
-                if measure.textlength(candidate, font=font) > 820 and line:
-                    lines.append(line); line = char
-                else:
-                    line = candidate
-            if line:
-                lines.append(line)
+    for index, cue in enumerate(cues):
+        if layout is not None:
+            if rendered_lines is not None and index < len(rendered_lines):
+                lines = rendered_lines[index]['lines']
+            else:
+                lines = _wrapped_caption_lines(cue['text'], font, layout, measure)
+            if rendered_lines is not None and index >= len(rendered_lines):
+                rendered_lines.append({'start': cue['start'], 'end': cue['end'],
+                                       'text': cue['text'], 'lines': lines.copy()})
+        else:
+            lines = []
+            for original in cue['text'].splitlines():
+                line = ''
+                for char in original:
+                    candidate = line+char
+                    if measure.textlength(candidate, font=font) > 820 and line:
+                        lines.append(line); line = char
+                    else:
+                        line = candidate
+                if line:
+                    lines.append(line)
         if len(lines) > 3:
             raise ValueError('Caption exceeds three readable lines; split the reviewed cue')
         tile = Image.new('RGBA', (860, 42+72*len(lines)), (0, 0, 0, 0))
         draw = ImageDraw.Draw(tile)
         draw.rounded_rectangle((0, 0, tile.width-1, tile.height-1), radius=18, fill=(8, 12, 20, 224))
         for index, line in enumerate(lines):
-            draw.text((20, 12+72*index), line, font=font, fill='white', stroke_width=1, stroke_fill='black')
+            left = _caption_ink_measure(measure, font, line)[1] if layout is not None else 0
+            draw.text((20-left, 12+72*index), line, font=font, fill='white', stroke_width=1, stroke_fill='black')
         yield cue, tile
 
 
-def export_vertical(source, out, framing='fit', subtitles=None, font=None):
+def export_vertical(source, out, framing='fit', subtitles=None, font=None, *, caption_layout=None):
     source, out = Path(source).expanduser().resolve(), Path(out).expanduser().resolve()
     if framing not in ('fit', 'center_crop'):
         raise ValueError('Framing must be fit or center_crop')
@@ -96,13 +151,20 @@ def export_vertical(source, out, framing='fit', subtitles=None, font=None):
     audio = next((s for s in info['streams'] if s['codec_type']=='audio'), None)
     subtitle_id = fingerprint(subtitles) if subtitles else None
     cues = load_captions(subtitles, duration) if subtitles else []
+    resolved_layout = resolve_caption_layout(caption_layout) if caption_layout is not None else None
     used_font = caption_font(cues, font) if cues else None
     font_path = getattr(used_font, 'path', None)
     font_id = fingerprint(font_path) if isinstance(font_path, (str, Path)) else (
         {'kind': 'pillow_default', 'pillow_version': pillow_version,
          'sha256': hashlib.sha256(bytes(used_font.getmask('The quick brown fox 0123456789'))).hexdigest()}
         if used_font else None)
-    tiles = iter(caption_images(cues, used_font)) if cues else iter(())
+    rendered_lines = None
+    if resolved_layout is not None:
+        measure = ImageDraw.Draw(Image.new('RGB', (1, 1))) if cues else None
+        rendered_lines = [{'start': cue['start'], 'end': cue['end'], 'text': cue['text'],
+                           'lines': _wrapped_caption_lines(cue['text'], used_font, resolved_layout, measure)}
+                          for cue in cues]
+    tiles = iter(caption_images(cues, used_font, resolved_layout, rendered_lines)) if cues else iter(())
     out.mkdir(parents=True, exist_ok=False)
     try:
         verify(source, out/'input-check', require_audio=bool(audio), expected_audio_range=stream_bounds(info,'audio') if audio else None)
@@ -172,6 +234,9 @@ def export_vertical(source, out, framing='fit', subtitles=None, font=None):
                 'technical_status':'pass','perceptual_status':'not_reviewed','platform_playback':'not_checked',
                 'caption_margins':'Working placement only; verify actual TikTok UI. No official safe-zone guarantee.',
                 'fcpxml':'Source-aspect XML is unchanged; portrait framing requires separate FCP application/review.'}
+        if resolved_layout is not None:
+            result['caption_layout'] = resolved_layout
+            result['caption_lines'] = rendered_lines
         write(out/'result.json',result)
         return result
     except BaseException as exc:
