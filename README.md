@@ -200,3 +200,5 @@ Development video loops repeat the selected trim after one CFR conform and prese
 Development temporal effects retain lossless original-stage samples and replay them through a first session retime, preserving trail history, comparison playback and captured stage order through holds and skipped frames. Session verification binds original/remapped layers and picture settings; changed settings require fresh original evidence. See [retime behavior and limits](docs/RETIME.ja.md).
 
 Development image and static-title fades also preserve original RGBA samples through first retime. Holds retain the original alpha; omissions select original frames. Source/image or generated title raster, text, placement, opacity and fade changes require a fresh original render. See [retime scope](docs/RETIME.ja.md); this is not in the published alpha.7.
+
+Local real-dance effects reviews now include natural, restrained text/color, and brief trail/zoom/title variants, plus two separate sound-on before/after MP4s. Same-source timing and decoded PCM were verified; whole-video human viewing/listening and Content ID remain pending. [Comparison conditions](docs/COMPARISON_DEMOS.ja.md).
