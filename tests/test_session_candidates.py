@@ -22,6 +22,18 @@ class SessionCandidateTests(unittest.TestCase):
         self.assertEqual(self.session._load()['project'], original)
         self.assertEqual(self.session._load()['reviews'], [])
 
+    def test_pipeline_changes_do_not_masquerade_as_same_color_effect_comparison(self):
+        natural=self.session.create_candidate({'editing_pattern':{'id':'natural'}},'codex','Baseline')
+        changed=self.session.create_candidate({'editing_pattern':{'id':'gentle_vlog'},
+             'visual_pipeline_version':2},'codex','Explicit pipeline migration')
+        first=self.fixture.render(candidate_id=natural['id'])
+        second=self.fixture.render(candidate_id=changed['id'])
+        with self.assertRaisesRegex(ValueError,'color'):
+            self.session.compare_candidates([first['id'],second['id']])
+        for value in (True,3,'2'):
+            with self.subTest(value=value),self.assertRaisesRegex(ValueError,'visual_pipeline_version'):
+                self.session.create_candidate({'visual_pipeline_version':value},'codex','Invalid migration')
+
     def setUp(self):
         self.fixture = SessionFixture()
         self.addCleanup(self.fixture.close)

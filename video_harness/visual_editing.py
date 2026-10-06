@@ -96,12 +96,27 @@ def _nonzero_pcm(path):
     return False
 
 
+def visual_pipeline_version(cfg):
+    """Unversioned existing projects retain their composed-picture grade."""
+    version=cfg.get('visual_pipeline_version',1)
+    if type(version) is not int or version not in (1,2):
+        raise ValueError('visual_pipeline_version must be 1 or 2')
+    return version
+
+
+def _composed_output_filter(preview):
+    """Scale/tag an already graded composite without another LUT or mask."""
+    return ('scale=-2:720,' if preview else '') + ('format=yuv420p,setsar=1,'
+        'setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=limited')
+
+
 def render_visual_edit(cfg, plan, out, preview=True):
     """Render reviewed v4 source-frame selections and optional licensed additions.
 
     The XML is an original-source cut reference. Creative additions, grade and
     normalized sound are established by the reviewed MP4, not this XML.
     """
+    pipeline_version=visual_pipeline_version(cfg)
     if cfg.get('input_color') not in {'rec709', 'apple_log'}:
         raise ValueError('Visual edit needs explicit rec709 or apple_log input color')
     records = cfg.get('assets')
@@ -180,6 +195,27 @@ def render_visual_edit(cfg, plan, out, preview=True):
         write(out / 'production.json', production)
         audio_cues = [c for c in production['cues'] if c['role'] in {'music', 'sfx'}]
         visual_cues = [c for c in production['cues'] if c['role'] in {'image', 'video', 'title'}]
+        lut = build_lut(effective, None, out / 'look.cube')
+        grade_input=fingerprint(visual_input)
+        if pipeline_version==2:
+            graded=out/'visual-graded.mp4'
+            run(['ffmpeg','-hide_banner','-nostdin','-n','-i',str(visual_input),
+                 '-map','0:v:0','-map','0:a:0','-vf',_video_filter(effective,lut,False),
+                 '-c:v','libx264','-preset','fast','-crf','18','-pix_fmt','yuv420p',
+                 '-c:a','copy','-map_metadata','-1','-movflags','+faststart',str(graded)],out/'grade.log')
+            from .video_effects import _probe,_stream,_verified_rate
+            observed=_probe(graded,count=True);picture=_stream(observed,'video')
+            if not picture or int(picture['nb_read_frames'])!=mapping['frame_count'] or _verified_rate(graded,picture,mapping['frame_count'])!=rate:
+                raise ValueError('Footage grade changed frame count or FPS')
+            visual_input=graded
+        write(out/'visual-pipeline.json',{
+            'version':pipeline_version,'grade_scope':'assembled_footage_before_overlays_and_effects' if pipeline_version==2 else 'composed_picture_after_overlays_and_effects',
+            'grade_input':grade_input,'lut':fingerprint(lut),
+            'graded_picture':fingerprint(visual_input) if pipeline_version==2 else None,
+            'overlay_grade':'not applied' if pipeline_version==2 else 'same final LUT as footage',
+            'effect_scope':'Existing picture effects apply to composed picture; effect titles are inserted afterward',
+            'secondary_color':'Overlay/comparison inputs retain their own colors in pipeline 2; no implicit common LUT',
+            'preview_scale_stage':'final composed picture' if pipeline_version==2 else 'final grade'})
         if visual_cues:
             rendered = out / 'visual-overlays.mp4'
             render_overlays(visual_input, visual_cues, production['assets'], rendered, base['duration'], preview)
@@ -200,13 +236,13 @@ def render_visual_edit(cfg, plan, out, preview=True):
             audio_source = out / 'creative-mix.wav'
             write(out / 'mix-evidence.json', render_mix(speech, audio_cues, production['assets'],
                                                        audio_source, base['duration'], effective['audio']))
-        lut = build_lut(effective, None, out / 'look.cube')
         audio_cfg = deepcopy(effective)
         if not _nonzero_pcm(audio_source):
             audio_cfg['audio']['normalize'] = False
         audio_filter = loudness_filter(audio_cfg, str(audio_source), 0, base['duration'], out)
         run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-i', str(visual_input), '-i', str(audio_source),
-             '-map', '0:v:0', '-map', '1:a:0', '-vf', _video_filter(effective, lut, preview),
+             '-map', '0:v:0', '-map', '1:a:0', '-vf',
+             _composed_output_filter(preview) if pipeline_version==2 else _video_filter(effective, lut, preview),
              '-af', audio_filter, '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
              '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '384k', '-ar', '48000',
              '-map_metadata', '-1', '-t', str(base['duration']), '-movflags', '+faststart',
@@ -219,7 +255,8 @@ def render_visual_edit(cfg, plan, out, preview=True):
         (out / 'fcp-delivery.json').write_text(json.dumps({
             'timeline': 'Baked retimed picture/audio; original-cut-reference.fcpxml is pre-retime only' if effective.get('retime') else 'Original source video and environment audio only',
             'creative_additions': 'MP4 reference; separate FCP recreation required',
-            'color': 'Apply look.cube manually', 'subtitles': 'No transcript or captions generated',
+            'color': 'Apply look.cube to original source-cut XML only; baked MP4 picture is already graded',
+            'visual_pipeline_version':pipeline_version, 'subtitles': 'No transcript or captions generated',
             'silent_audio': 'Synthetic 48 kHz silence for source sections without audio'}))
         from .production import prepare_fcp_handoff
         prepare_fcp_handoff(effective, production, out)

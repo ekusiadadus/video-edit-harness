@@ -65,7 +65,7 @@ message('修正メモを保存しました。ハーネスで反映後、生成�
 
 FIXED_SETTINGS = ('input_color', 'white_balance_gains', 'use_case', 'style',
                   'style_intensity', 'adjustments', 'audio', 'review_regions',
-                  'region_corrections', 'composition_guides')
+                  'region_corrections', 'composition_guides', 'visual_pipeline_version')
 
 
 def comparison_evidence(renders, source):
@@ -84,7 +84,7 @@ def comparison_evidence(renders, source):
         fixed = {'source_sha256': source['sha256'],
                  'visual_sources': {key: registry[key]['sha256'] for key in sorted(source_ids)},
                  'mapping_sha256': digest(mapping),
-                 'settings': {key: deepcopy(cfg.get(key)) for key in FIXED_SETTINGS},
+                 'settings': {key: deepcopy(cfg.get(key,1 if key=='visual_pipeline_version' else None)) for key in FIXED_SETTINGS},
                  'preview': render.get('preview')}
         production = read(render['files']['production']['path']) if 'production' in render['files'] else {}
         rows.append({'render_id': render['id'], 'video_sha256': render['files']['video']['sha256'],

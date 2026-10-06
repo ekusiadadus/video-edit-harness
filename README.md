@@ -14,6 +14,8 @@ This English demo uses an original illustration, synthetic English speech and En
 
 The development checkout after alpha.6 adds `tracked_title`: measured labels follow observed boxes through `session track-effect --effect tracked_title --title-parameters-file label.json`. Lost/stale tracking, clipping and declared-region collision fail; overlapping zoom/split/comparison geometry is unsupported. This addition is absent from the published alpha.6 assets. See [tracking](docs/TRACKING.ja.md).
 
+New visual sessions in the development checkout use `visual_pipeline_version: 2`: grade assembled footage before information overlays, then finish without another LUT. Existing unversioned projects retain pipeline 1. Tracking binds to the actual graded pre-effects stage; migration requires a new candidate and new tracking. See [pipeline and migration](docs/VIDEO_EFFECTS.ja.md). Published alpha.6 does not include this change.
+
 ## Ask for an edit
 
 | Where | Regular YouTube | TikTok / Reels / Shorts |

@@ -19,7 +19,7 @@ class SessionTrackingTests(unittest.TestCase):
             session.propose_visual(plan,'codex');session.approve('codex','Synthetic frame selection')
             base=session.render(preview=False);initial=session._load()['project']
             observed=session.tracking_source(base['id'])
-            self.assertEqual(Path(observed['source']['path']).name,'visual-base.mp4')
+            self.assertEqual(Path(observed['source']['path']).name,'visual-graded.mp4')
             def synthetic_track(source,box,output,**kwargs):
                 ref=fingerprint(source)
                 rows=[{'frame':i,'box':box,'state':'manual','quality':{'feature_count':10}} for i in range(kwargs['start_frame'],kwargs['end_frame'])]
@@ -47,7 +47,7 @@ class SessionTrackingTests(unittest.TestCase):
             session.propose_visual(plan,'codex');session.approve('codex','Synthetic frame selection')
             base=session.render(preview=False);initial=session._load()['project']
             observed=session.tracking_source(base['id'])
-            self.assertEqual(Path(observed['source']['path']).name,'visual-base.mp4')
+            self.assertEqual(Path(observed['source']['path']).name,'visual-graded.mp4')
             def synthetic_track(source,box,output,**kwargs):
                 ref=fingerprint(source)
                 rows=[{'frame':i,'box':box,'state':'manual','quality':{'feature_count':10}} for i in range(kwargs['start_frame'],kwargs['end_frame'])]

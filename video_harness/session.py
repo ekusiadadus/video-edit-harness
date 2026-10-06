@@ -112,6 +112,10 @@ class Session:
         cfg = project(project_path)
         from .production import freeze_pattern
         cfg = freeze_pattern(cfg)
+        if cfg.get('edit_basis')=='visual':
+            from .visual_editing import visual_pipeline_version
+            cfg.setdefault('visual_pipeline_version',2)
+            visual_pipeline_version(cfg)
         brief = make_brief(cfg, brief_data or {})
         source = fingerprint(cfg['source'])
         inherited_permission = cfg.get('cloud_permission')
@@ -653,7 +657,7 @@ class Session:
         require_note(note)
         allowed = {'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
-                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime'}
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'visual_pipeline_version'}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError('Only color/audio/render project settings can change here')
         with self._lock():
@@ -662,6 +666,8 @@ class Session:
             self._verify(state)
             cfg = read(state['project']['path'])
             cfg.update(deepcopy(changes))
+            from .visual_editing import visual_pipeline_version
+            visual_pipeline_version(cfg)
             if changes.get('editing_pattern',{}).get('id')=='natural' and changes.get('retime'):
                 raise ValueError('Explicit retime conflicts with natural/off')
             if changes.get('editing_pattern', {}).get('id') == 'natural' and 'video_effects' not in changes:
@@ -690,7 +696,7 @@ class Session:
         actor_name(actor)
         allowed = {'input_color', 'white_balance_gains', 'use_case', 'style', 'style_intensity',
                    'adjustments', 'audio', 'review_regions', 'region_corrections', 'render_cache_root',
-                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime'}
+                   'editing_pattern', 'asset_policy', 'assets', 'cue_plan', 'fcp_handoff', 'video_effects', 'asset_selection_request', 'composition_guides', 'retime', 'visual_pipeline_version'}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError('Candidate changes must be render settings only')
         with self._lock():
@@ -709,6 +715,8 @@ class Session:
                     raise ValueError('Effect revision requires the current edit plan and brief')
                 cfg = read(base['project']['path'])
             cfg.update(deepcopy(changes))
+            from .visual_editing import visual_pipeline_version
+            visual_pipeline_version(cfg)
             if changes.get('editing_pattern',{}).get('id')=='natural' and changes.get('retime'):
                 raise ValueError('Explicit retime conflicts with natural/off')
             if changes.get('editing_pattern', {}).get('id') == 'natural' and 'video_effects' not in changes:
@@ -777,6 +785,8 @@ class Session:
         cfg=read(render['project']['path']);folder=Path(render['path'])
         if cfg.get('edit_basis')=='visual':
             source=folder/'visual-overlays.mp4'
+            if not source.is_file():
+                source=folder/'visual-graded.mp4'
             if not source.is_file():
                 source=folder/'visual-retimed.mp4'
             if not source.is_file():

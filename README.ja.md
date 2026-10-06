@@ -10,6 +10,8 @@ alpha.6の編集パターン実装では、自然な編集を既定にBGM・効�
 
 alpha.6後の開発版には、観察した位置へ短い文字を追従させる `tracked_title` を追加しています。`session track-effect --effect tracked_title --title-parameters-file label.json` で未採用候補を作れます。公開済みalpha.6には未収録です。[使い方と制限](docs/TRACKING.ja.md#追従ラベルを提案するalpha6後の作業ツリー)を確認してください。
 
+alpha.6後の開発版では、新しいvisualセッションの色調整を画像・文字の合成前に行います。原映像用LUTで文字や画像の色を変えず、既存セッションは従来の処理方式を維持します。[処理方式と移行](docs/VIDEO_EFFECTS.ja.md#素材と文字の色を分けるalpha6後の開発版)を参照してください。
+
 変速はまず素材を連結した段階の映像を確認し、観察したフレーム範囲で未採用候補を作ります。
 
 ```sh

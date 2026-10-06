@@ -25,7 +25,7 @@ class SessionRetimeTests(unittest.TestCase):
             self.assertEqual(mapping['retime']['frames'][4]['source_frame'],6)
             self.assertEqual(mapping['retime']['frames'][5]['source_frame'],6)
             self.assertEqual(mapping['retime']['frames'][6]['source_frame'],6)
-            self.assertEqual(Path(session.tracking_source(rendered['id'])['source']['path']).name,'visual-retimed.mp4')
+            self.assertEqual(Path(session.tracking_source(rendered['id'])['source']['path']).name,'visual-graded.mp4')
             self.assertEqual(session._load()['project'],before)
             self.assertTrue((Path(rendered['path'])/'original-cut-reference.fcpxml').is_file())
 
