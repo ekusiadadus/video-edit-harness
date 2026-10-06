@@ -4,7 +4,7 @@
 
 画像・動画は画面幅の70%、高さの50%を上限に、素材の比率を保って配置します。既存のcenter/top指定とopacityを使い、FFmpegのサイズ丸めとYUV420の座標丸めを反映します。タイトルは従来の画面サイズのラスタ画像と配置を保持します。この配置は字幕・人物との衝突を自動で解消するものではありません。
 
-FCPXMLには実際の素材サイズと静的な空間コンフォーム・変形・透明度を記録します。生成規則は[Appleの変形資料](https://developer.apple.com/documentation/professional-video-applications/adjust-transform)、[空間コンフォーム資料](https://developer.apple.com/documentation/professional-video-applications/adjust-conform)、[透明度資料](https://developer.apple.com/documentation/professional-video-applications/adjust-blend)とインストール済みDTDを参照しています。変形の座標・倍率が実際のFCP表示で期待どおりになるかは、GUIでのインポート・再書き出し・画像比較が必要です。DTD適合やXMLの往復一致だけでは表示一致を証明できません。
+FCPXMLには実際の素材サイズと静的な空間コンフォーム・変形・透明度を記録します。位置は[Appleのアニメーション例](https://developer.apple.com/documentation/professional-video-applications/animation)に示されたプロジェクト高さの百分率を基準にします。生成規則は[Appleの変形資料](https://developer.apple.com/documentation/professional-video-applications/adjust-transform)、[空間コンフォーム資料](https://developer.apple.com/documentation/professional-video-applications/adjust-conform)、[透明度資料](https://developer.apple.com/documentation/professional-video-applications/adjust-blend)とインストール済みDTDを参照しています。変形の座標・倍率が実際のFCP表示で期待どおりになるかは、GUIでのインポート・再書き出し・画像比較が必要です。DTD適合やXMLの往復一致だけでは表示一致を証明できません。
 
 FCPから戻したXMLでは、素材IDや表示名・パスが変わっても映像・画像のSHAと素材サイズ、配置を照合します。タイミングなど既存の対応範囲を超える配置変更・アニメーション・回転・別の合成方法は、黙って落とさず拒否します。未知の場所にある変形ノードも拒否します。元のcue設定から変更して候補を作り直してください。
 

@@ -51,5 +51,55 @@ class RenderCacheTests(unittest.TestCase):
             self.assertEqual(sum(not e['reused'] for e in events), 1)
 
 
+
+    def test_sealed_auxiliary_copy_hit_and_tamper(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'source.mov'; source.write_bytes(b'source')
+            cache = RenderCache(root / 'cache', source, fingerprint(source))
+            def build(artifact, log):
+                artifact.write_bytes(b'mix'); log.write_text('log')
+                (artifact.parent / 'speech.wav').write_bytes(b'speech')
+                folder = artifact.parent / 'gains'; folder.mkdir()
+                (folder / 'manifest.json').write_bytes(b'gain proof')
+            event = cache.get('mix', {'gain_schema': 1}, '.wav', root / 'first.wav', build,
+                              auxiliary_paths=['speech.wav', 'gains'])
+            hit = cache.get('mix', {'gain_schema': 1}, '.wav', root / 'second.wav', build,
+                            auxiliary_paths=['speech.wav', 'gains'])
+            self.assertTrue(hit['reused'])
+            destinations = {'speech.wav': root / 'retained.wav', 'gains': root / 'retained-gains'}
+            copied = cache.copy_auxiliary(hit, destinations)
+            self.assertEqual(set(copied), {'speech.wav', 'gains/manifest.json'})
+            self.assertEqual((root / 'retained.wav').read_bytes(), b'speech')
+            self.assertEqual((root / 'retained-gains/manifest.json').read_bytes(), b'gain proof')
+            with self.assertRaises(FileExistsError):
+                cache.copy_auxiliary(hit, destinations)
+            (cache.root / 'mix' / event['key'] / 'gains/manifest.json').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError, 'Corrupted cache'):
+                cache.get('mix', {'gain_schema': 1}, '.wav', root / 'third.wav', build,
+                          auxiliary_paths=['speech.wav', 'gains'])
+            with self.assertRaisesRegex(ValueError, 'auxiliary content changed'):
+                cache.copy_auxiliary(hit, {'speech.wav': root / 'other.wav', 'gains': root / 'other-gains'})
+            self.assertFalse((root / 'other.wav').exists())
+
+    def test_auxiliary_metadata_and_unexpected_member_changes_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'source.mov'; source.write_bytes(b'source')
+            cache = RenderCache(root / 'cache', source, fingerprint(source))
+            def build(artifact, log):
+                artifact.write_bytes(b'mix'); log.write_text('log')
+                folder = artifact.parent / 'gains'; folder.mkdir()
+                (folder / 'manifest.json').write_bytes(b'proof')
+            event = cache.get('mix', {}, '.wav', root / 'mix.wav', build, auxiliary_paths=['gains'])
+            folder = cache.root / 'mix' / event['key']
+            (folder / 'gains/added.npy').write_bytes(b'new unknown member')
+            with self.assertRaisesRegex(ValueError, 'auxiliary content changed'):
+                cache.copy_auxiliary(event, {'gains': root / 'copy'})
+            (folder / 'gains/added.npy').unlink()
+            (folder / 'meta.json').write_text((folder / 'meta.json').read_text() + ' ')
+            with self.assertRaisesRegex(ValueError, 'auxiliary metadata changed'):
+                cache.copy_auxiliary(event, {'gains': root / 'copy'})
+
 if __name__ == '__main__':
     unittest.main()

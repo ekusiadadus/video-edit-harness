@@ -10,6 +10,7 @@ import wave
 import numpy as np
 
 from .cues import _asset_map, validate_cues, _seconds
+from .audio_envelopes import file_identity, write_audio_envelopes
 
 
 RATE = 48000
@@ -71,13 +72,18 @@ def _speech_duck(speech, settings):
                                                 "window_seconds": .1}
 
 
-def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=None):
+def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=None, *, gain_output=None):
     """Render 48 kHz stereo PCM of exact requested sample count.
 
     Asset gain is anchored to measured speech RMS when available. The result is
     deliberately not loudness-normalized; parent render measures/normalizes it.
     """
     settings = dict(audio_settings or {})
+    for key in ("speech_activity_floor", "duck_hold_seconds", "duck_attack_seconds",
+                "duck_release_seconds", "duck_db", "music_below_speech_db"):
+        if key in settings and (isinstance(settings[key], bool) or
+                                not math.isfinite(float(settings[key]))):
+            raise ValueError(f"{key} must be finite")
     assets = _asset_map(assets)
     cues = validate_cues(cues, assets, duration)
     if any(c["role"] not in {"music", "sfx"} for c in cues):
@@ -86,11 +92,16 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
     if samples <= 0:
         raise ValueError("duration is empty")
     speech = np.zeros((samples, CHANNELS), dtype=np.float32)
+    speech_identity = None
     if speech_wav is not None:
         speech_path = Path(speech_wav)
         if not speech_path.is_file():
             raise FileNotFoundError(speech_path)
+        if gain_output is not None:
+            speech_identity = file_identity(speech_path)
         decoded = _decode(speech_path, duration=duration)
+        if gain_output is not None and file_identity(speech_path) != speech_identity:
+            raise ValueError("speech source changed during decode")
         if abs(len(decoded) - samples) > 1:
             raise ValueError("speech PCM length differs from output duration")
         speech[:min(samples, len(decoded))] = decoded[:samples]
@@ -98,14 +109,22 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
     speech_rms = _rms(speech)
     duck_envelope, duck_evidence = _speech_duck(speech, settings) if speech_rms else (None, None)
     evidence_cues = []
+    gain_curves = {}
+    asset_identities = {}
     for cue in cues:
         asset = assets[cue["asset_id"]]
         path = Path(asset.get("path") or asset.get("local_path"))
+        if gain_output is not None:
+            asset_identities[cue["asset_id"]] = file_identity(path)
+            if asset_identities[cue["asset_id"]]["sha256"] != (asset.get("sha256") or asset.get("file_sha256")):
+                raise ValueError(f"cue asset changed since validation: {cue['id']}")
         first = round(_seconds(cue["output_start"], 'output_start') * RATE)
         last = round(_seconds(cue["output_end"], 'output_end') * RATE)
         target = last - first
         source_len = float(_seconds(cue["source_end"], 'source_end') - _seconds(cue["source_start"], 'source_start'))
         chunk = _decode(path, float(_seconds(cue["source_start"], 'source_start')), source_len)
+        if gain_output is not None and file_identity(path) != asset_identities[cue["asset_id"]]:
+            raise ValueError(f"cue asset changed during decode: {cue['id']}")
         if not len(chunk):
             raise ValueError(f"cue asset has no decoded audio: {cue['id']}")
         expected_chunk = round(source_len * RATE)
@@ -121,16 +140,23 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
             # timing; the resulting dip still needs an audible phrase review.
             clip = np.tile(chunk, (math.ceil(target / len(chunk)), 1))[:target].copy()
             taper = min(round(.01 * RATE), len(chunk) // 4)
+            seam_gain = np.ones(target, dtype=np.float32) if gain_output is not None else None
             if taper:
                 for seam in range(len(chunk), target, len(chunk)):
                     left = min(taper, seam)
                     right = min(taper, target - seam)
-                    clip[seam - left:seam] *= np.linspace(1, 0, left, dtype=np.float32)[:, None]
-                    clip[seam:seam + right] *= np.linspace(0, 1, right, dtype=np.float32)[:, None]
+                    left_taper = np.linspace(1, 0, left, dtype=np.float32)
+                    right_taper = np.linspace(0, 1, right, dtype=np.float32)
+                    clip[seam - left:seam] *= left_taper[:, None]
+                    clip[seam:seam + right] *= right_taper[:, None]
+                    if seam_gain is not None:
+                        seam_gain[seam - left:seam] *= left_taper
+                        seam_gain[seam:seam + right] *= right_taper
         else:
             if len(chunk) < target - 1:
                 raise ValueError(f"cue is shorter than output range: {cue['id']}")
             clip = chunk[:target].copy()
+            seam_gain = None
         cue_rms = _rms(clip)
         gain_db = float(_seconds(cue["gain_db"], 'gain_db'))
         if cue["role"] == "music" and speech_rms and cue_rms:
@@ -148,6 +174,11 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
             gain[-fade_out:] *= np.linspace(1, 0, fade_out, dtype=np.float32)
         if cue["duck"] and duck_envelope is not None:
             gain *= duck_envelope[first:last]
+        if gain_output is not None:
+            curve = gain.copy() if seam_gain is None else seam_gain * gain
+            if not np.all(np.isfinite(curve)) or np.any(curve < 0):
+                raise ValueError(f"invalid effective gain: {cue['id']}")
+            gain_curves[cue["id"]] = curve
         output[first:last] += clip * gain[:, None]
         evidence_cues.append({"id": cue["id"], "asset_id": cue["asset_id"],
                               "source_rms": cue_rms, "applied_gain_db": gain_db,
@@ -155,6 +186,8 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
                               "loop": cue["loop"], "loop_period_samples": len(chunk) if cue["loop"] else None,
                               "loop_seam_taper_seconds": .01 if cue["loop"] else 0})
     peak_before = float(np.max(np.abs(output)))
+    if not math.isfinite(peak_before):
+        raise ValueError("mixed audio contains non-finite samples")
     guard = 1.0
     if peak_before > .98:
         guard = .98 / peak_before
@@ -169,6 +202,17 @@ def render_mix(speech_wav, cues, assets, output_wav, duration, audio_settings=No
         stream.setsampwidth(2)
         stream.setframerate(RATE)
         stream.writeframes((pcm * 32767).astype("<i2").tobytes())
+    if gain_output is not None:
+        if speech_wav is not None and file_identity(speech_path) != speech_identity:
+            raise ValueError("speech source changed during render")
+        for asset_id, identity in asset_identities.items():
+            asset_path = Path(assets[asset_id].get("path") or assets[asset_id].get("local_path"))
+            if file_identity(asset_path) != identity:
+                raise ValueError(f"cue asset changed during render: {asset_id}")
+        write_audio_envelopes(gain_output, cues=cues, assets=asset_identities,
+                              speech=speech_identity, settings=settings, samples=samples,
+                              curves=gain_curves, evidence=evidence_cues,
+                              peak_guard_gain=guard, mixed_wav=file_identity(path))
     return {"output": str(path), "sample_rate": RATE, "channels": CHANNELS,
             "samples": samples, "duration": samples / RATE, "speech_rms": speech_rms,
             "peak_before_guard": peak_before, "peak_guard_gain": guard,

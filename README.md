@@ -184,3 +184,5 @@ The development `depth prepare/infer/correct/stabilize/validate/render` commands
 Development portrait exports support opt-in Japanese/English measured caption wrapping through `tiktok-export --caption-layout`: preserve reviewed SRT times/manual breaks, protect specified terms and inspect the actual font. Portable portrait delivery retains redacted layout provenance. [操作と制約](docs/CAPTION_LAYOUT.ja.md).
 
 Development editable FCP visual cues retain static size, position and opacity from a shared preview pixel model. Actual FCP display calibration and audio parity remain pending. [操作と制約](docs/FCP_OVERLAY_PLACEMENT.ja.md).
+
+Development session renders with audio cues retain measured sample gain curves, mixer inputs and the pre-normalization mix, including verified restoration from cache. This prepares editable FCP audio automation; it does not yet export that automation or prove final normalization/playback parity. Local evidence references can contain private paths. [操作と制約](docs/AUDIO_GAIN_EVIDENCE.ja.md).

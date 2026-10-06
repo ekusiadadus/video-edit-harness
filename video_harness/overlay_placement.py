@@ -1,7 +1,7 @@
 """Shared, static pixel geometry for preview overlays and editable FCPXML.
 
 Coordinates are measured on the square-pixel output canvas. FCP positions are
-relative to its centre, in percentages of source frame height; positive Y moves up.
+relative to its centre, in percentages of project frame height; positive Y moves up.
 Dynamic tracking, source rotation and non-square pixels are excluded.
 """
 
@@ -137,14 +137,14 @@ def measure_placement(cue, canvas_width, canvas_height, source_width, source_hei
     # grid. Preserve its effective pixels, including odd top Y coordinates.
     x = ((cw - rw) // 2) & ~1
     y = int(ch * (.25 if position == 'center' else .1)) & ~1
-    # FCP position is relative to canvas centre, percentage of source height.
+    # FCP position is relative to canvas centre, percentage of project height.
     px = Fraction(2 * x + rw - cw, 2)
     py = Fraction(2 * y + rh - ch, 2)
     return {'canvas_size': [cw, ch], 'source_size': [sw, sh],
             'rendered_size': [rw, rh], 'x_pixels': x, 'y_pixels': y,
             'position': position, 'opacity': opacity,
             'transform_scale': [rw / sw, rh / sh],
-            'transform_position': [float(100 * px / sh), float(-100 * py / sh)]}
+            'transform_position': [float(100 * px / ch), float(-100 * py / ch)]}
 
 
 def xml_number(value):

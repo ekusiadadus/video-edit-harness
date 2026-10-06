@@ -193,5 +193,13 @@ class PlacementTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'constant frame timestamps'):
                 check_overlay_video_clock(path, stream)
 
+
+    def test_fcp_position_uses_project_height_for_small_overlay_source(self):
+        placement = measure_placement({'role': 'image', 'position': 'top'}, 160, 90, 120, 40)
+        # Actual decoded bounds are x24/y8 and112x37; their center is26.5px,
+        # 18.5px above the90px project center, independent of40px source height.
+        self.assertAlmostEqual(placement['transform_position'][0], 0)
+        self.assertAlmostEqual(placement['transform_position'][1], 18.5 / 90 * 100)
+
 if __name__ == '__main__':
     unittest.main()

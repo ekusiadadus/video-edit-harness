@@ -1339,6 +1339,8 @@ class Session:
             files['motion_template'] = deepcopy(operation['motion_template'])
         if (folder / 'audio-cuts.json').is_file():
             files['audio_cuts'] = fingerprint(folder / 'audio-cuts.json')
+        if (folder / 'audio-gain-evidence.json').is_file():
+            files['audio_gain_evidence'] = fingerprint(folder / 'audio-gain-evidence.json')
         if (folder / 'transition-evidence.json').is_file():
             files['transitions'] = fingerprint(folder / 'transition-evidence.json')
             files['pre_transition_mapping'] = fingerprint(folder / 'pre-transition-mapping.json')

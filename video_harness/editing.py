@@ -296,7 +296,8 @@ def render_edit(cfg, plan, out, preview=True):
                 from .audio_mix import render_mix
                 mix_input = artifact.parent / 'production-mix.wav'
                 mix_evidence = render_mix(joined, audio_cues, production_sources(production),
-                                          mix_input, total, effective['audio'])
+                                          mix_input, total, effective['audio'],
+                                          gain_output=artifact.parent / 'audio-envelopes')
                 write(artifact.parent / 'production-mix.json', mix_evidence)
             af = loudness_filter(effective, str(mix_input), 0, total, artifact.parent)
             run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-i', str(mix_input), '-af', af,
@@ -315,8 +316,31 @@ def render_edit(cfg, plan, out, preview=True):
             mix_settings['audio_cuts'] = {'setting':cfg['audio_cuts'], 'pcm_sha256':fingerprint(assembled)['sha256']}
         if audio_cues:
             mix_settings['production'] = mix_key(production)
+            mix_settings['audio_gain_schema'] = 1
         mix_event = cache.get('mix', mix_settings, '.m4a', mixed, build_mix,
-            out / 'mix.log')
+            out / 'mix.log', **({'auxiliary_paths': ['assembled.wav', 'production-mix.wav',
+                                                    'audio-envelopes']} if audio_cues else {}))
+        if audio_cues:
+            from .audio_envelopes import load_audio_envelopes
+            cache.copy_auxiliary(mix_event, {
+                'assembled.wav': out / 'audio-mixer-speech.wav',
+                'production-mix.wav': out / 'audio-mixer-input.wav',
+                'audio-envelopes': out / 'audio-envelopes',
+            })
+            manifest, _ = load_audio_envelopes(
+                out / 'audio-envelopes', expected_cues=audio_cues,
+                expected_assets=production_sources(production),
+                expected_speech=out / 'audio-mixer-speech.wav',
+                expected_mixed_wav=out / 'audio-mixer-input.wav')
+            write(out / 'audio-gain-evidence.json', {
+                'version': 1, 'scope': 'pre_normalization', 'actor': 'automation',
+                'decision_reason': 'Bind measured cue gains to the restored mix inputs',
+                'manifest': fingerprint(out / 'audio-envelopes' / 'manifest.json'),
+                'manifest_sha256': manifest['manifest_sha256'],
+                'speech': fingerprint(out / 'audio-mixer-speech.wav'),
+                'mixed_input': fingerprint(out / 'audio-mixer-input.wav'),
+                'cache_event': mix_event,
+            })
         final = out / 'video.mp4'
         picture_input = ['-i', str(retimed)] if retimed is not None else ['-f', 'concat', '-safe', '0', '-i', str(out/'video.ffconcat')]
         picture_codec = (['-vf', 'scale=-2:720',

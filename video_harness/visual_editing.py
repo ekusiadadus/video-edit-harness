@@ -341,9 +341,22 @@ def render_visual_edit(cfg, plan, out, preview=True):
             (out/'subtitles.srt').write_text(subtitle_text, encoding='utf-8')
         audio_source = speech
         if audio_cues:
+            from .audio_envelopes import load_audio_envelopes
             audio_source = out / 'creative-mix.wav'
             write(out / 'mix-evidence.json', render_mix(speech, audio_cues, production['assets'],
-                                                       audio_source, base['duration'], effective['audio']))
+                                                       audio_source, base['duration'], effective['audio'],
+                                                       gain_output=out / 'audio-envelopes'))
+            manifest, _ = load_audio_envelopes(
+                out / 'audio-envelopes', expected_cues=audio_cues,
+                expected_assets=production['assets'], expected_speech=speech,
+                expected_mixed_wav=audio_source)
+            write(out / 'audio-gain-evidence.json', {
+                'version': 1, 'scope': 'pre_normalization', 'actor': 'automation',
+                'decision_reason': 'Bind measured cue gains to the direct mix inputs',
+                'manifest': fingerprint(out / 'audio-envelopes' / 'manifest.json'),
+                'manifest_sha256': manifest['manifest_sha256'],
+                'speech': fingerprint(speech), 'mixed_input': fingerprint(audio_source),
+            })
         audio_cfg = deepcopy(effective)
         if not _nonzero_pcm(audio_source):
             audio_cfg['audio']['normalize'] = False
