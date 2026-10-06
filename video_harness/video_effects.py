@@ -531,6 +531,20 @@ def render_effects(input, plan, output, assets=None, composition=None):
         travel = min(height*.02*event['strength'], height*(1-title['bounds'][3]))
         static_y = f'{travel:.9f}*max(0,1-(t-{first:.9f})/{fade:.9f})' if event['parameters']['motion'] == 'rise' else '0'
         if event['type'] != 'tracked_title': y = static_y
+        if event['type'] == 'keyword_title' and event['parameters']['motion'] == 'rise':
+            import math
+            # Default overlay output is yuv420: its translation is rounded down
+            # to the two-pixel chroma grid. Keep the legacy rendering unchanged.
+            first_frame = _frame(_time(event['output_start'],'start'),rate,'start')
+            last_frame = _frame(_time(event['output_end'],'end'),rate,'end')
+            title['frame_positions'] = []
+            for frame in range(first_frame, last_frame):
+                offset = float(f'{travel:.9f}') * max(0, 1-(float(Fraction(frame,1)/rate)-float(f'{first:.9f}'))/float(f'{fade:.9f}'))
+                pixels = math.floor(offset) // 2 * 2
+                bounds = list(title['bounds'])
+                bounds[1] += pixels / height; bounds[3] += pixels / height
+                title['frame_positions'].append({'frame':frame,'bounds':bounds,
+                                                'x_pixels':0,'y_pixels':pixels})
         pixel_format = 'format=rgb:' if event['type']=='tracked_title' else ''
         graph += (f';[{label}][{branch}]overlay=x=\'{x}\':y=\'{y}\':{pixel_format}eval=frame:shortest=1:'
                   f"enable='gte(t,{first:.9f})*lt(t,{last:.9f})'[{target_label}]")
@@ -538,6 +552,8 @@ def render_effects(input, plan, output, assets=None, composition=None):
         titles.append({**title, 'path': str(png), 'event_id': event['id'],
                        'subject_clearance': 'unverified; measured text bounds only'})
     composition_evidence = None
+    from .title_collisions import check_title_collisions
+    title_collision_checks = check_title_collisions(events, titles, fps=rate)
     if composition is not None:
         from .composition import check_composition
         composition_evidence = check_composition(events, composition, titles, fps=rate)
@@ -582,6 +598,7 @@ def render_effects(input, plan, output, assets=None, composition=None):
             'text_assets': titles,
             'tracking_inputs': tracking_inputs,
             'composition': composition_evidence,
+            'title_collision_checks': title_collision_checks,
             'secondary_inputs': [{'asset_id': item['asset']['asset_id'],
                                   'sha256': item['asset']['sha256'],
                                   'source_fps': item['source_fps'],

@@ -42,6 +42,51 @@ def pcm_hash(path):
 
 
 class EffectsTest(unittest.TestCase):
+    def test_rise_title_positions_match_decoded_overlay_translation(self):
+        import numpy as np
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);source=root/'gray.mp4';output=root/'rise.mp4'
+            subprocess.run(['ffmpeg','-v','error','-nostdin','-y','-f','lavfi','-i',
+                            'color=c=gray:s=240x720:r=60:d=0.5','-f','lavfi','-i',
+                            'sine=frequency=440:sample_rate=48000:duration=0.5',
+                            '-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',str(source)],
+                           check=True,capture_output=True)
+            mapping={'fps':'60','duration':'1/2','sequence':[]}
+            event={'id':'rise','type':'keyword_title','output_start':'0','output_end':'1/2',
+                   'strength':1,'reason':'Synthetic rise geometry',
+                   'parameters':{'text':'R','motion':'rise','background':'#000000','y':.5}}
+            plan=resolve_effects({'version':1,'mapping_sha256':digest(mapping),'events':[event]},mapping)
+            report=render_effects(source,plan,output)
+            positions={r['frame']:r for r in report['text_assets'][0]['frame_positions']}
+            self.assertGreater(positions[3]['y_pixels'],positions[9]['y_pixels'])
+            for index in (3,6,9):
+                picture=np.asarray(frame(output,index,root/f'frame-{index}.png'))
+                ys,xs=np.where(np.max(picture,axis=2)<110)
+                bounds=positions[index]['bounds']
+                self.assertLessEqual(abs(ys.min()-round(bounds[1]*720)),2)
+                self.assertLessEqual(abs(ys.max()+1-round(bounds[3]*720)),2)
+            self.assertEqual(report['frame_count'],30)
+            self.assertEqual(pcm_hash(source),pcm_hash(output))
+
+    def test_two_titles_are_checked_without_declared_subject_guides(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);source=root/'source.mp4';fixture(source)
+            mapping={'fps':'10','duration':'6/5','sequence':[]}
+            first={'id':'one','type':'keyword_title','output_start':'0','output_end':'1',
+                   'strength':1,'reason':'Synthetic first label','parameters':{'text':'A','y':.3}}
+            second={**first,'id':'two','reason':'Synthetic second label','parameters':{'text':'B','y':.3}}
+            plan=resolve_effects({'version':1,'mapping_sha256':digest(mapping),'events':[first,second]},mapping)
+            with self.assertRaisesRegex(ValueError,'one.*two.*frame'):
+                render_effects(source,plan,root/'overlap.mp4')
+            self.assertFalse((root/'overlap.mp4').exists())
+            second['parameters']['y']=.8
+            plan=resolve_effects({'version':1,'mapping_sha256':digest(mapping),'events':[first,second]},mapping)
+            report=render_effects(source,plan,root/'clear.mp4')
+            self.assertIsNone(report['composition'])
+            self.assertEqual(report['title_collision_checks'][0]['frames_checked'],9)
+            self.assertEqual(pcm_hash(source),pcm_hash(root/'clear.mp4'))
+            self.assertEqual(report['frame_count'],12)
+
     def test_wrapped_title_render_keeps_audio_and_refuses_changed_engine_binding(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);source=root/'source.mp4';output=root/'wrapped.mp4'
