@@ -310,6 +310,14 @@ class Session:
                 registered = render['files'].get(f'temporal_effect_layer_{index}')
                 if registered != {key: reference[key] for key in ('path', 'bytes', 'sha256')}:
                     raise ValueError('Temporal effect sample reference is not sealed')
+        if render['files'].get('effects'):
+            replays = read(render['files']['effects']['path']).get('temporal_replay', [])
+            for index, row in enumerate(replays):
+                for kind, reference in (('original', row['original_sample']['original_layer']),
+                                        ('remapped', row['remapped_layer'])):
+                    registered = render['files'].get(f'temporal_replay_{kind}_{index}')
+                    if registered != {key: reference[key] for key in ('path', 'bytes', 'sha256')}:
+                        raise ValueError('Temporal replay layer reference is not sealed')
         if render['files'].get('captions'):
             from .caption_timing import verify_caption_evidence
             verify_caption_evidence(read(render['files']['captions']['path']), render['files']['subtitles']['sha256'])
@@ -960,7 +968,9 @@ class Session:
                     raise ValueError('Existing settings refer to a different retime stage; rebuild from the original edit')
                 overlay_evidence = read(render['files']['overlays']['path']) if 'overlays' in render['files'] else {}
                 clocks = {row['cue_id']: row for row in overlay_evidence.get('video_cue_clocks', [])}
-                migrated=migrate_visual_settings(cfg,original_mapping,proposal['mapping'], video_clocks=clocks,
+                effect_evidence = read(render['files']['effects']['path']) if 'effects' in render['files'] else {}
+                migrated=migrate_visual_settings({**cfg, 'retime': setting},original_mapping,proposal['mapping'], video_clocks=clocks,
+                    temporal_samples=effect_evidence.get('temporal_effect_samples', []),
                     audio_backend=proposal['request'].get('audio_backend', 'rubberband'))
                 changes.update(migrated['changes'])
                 migration={**migrated['evidence'], 'actor':actor, 'reason':note,
@@ -1423,6 +1433,14 @@ class Session:
                 if actual != {key: reference[key] for key in ('path', 'bytes', 'sha256')}:
                     raise ValueError('Temporal effect sample changed before registration')
                 files[f'temporal_effect_layer_{index}'] = actual
+        if 'effects' in files:
+            for index, row in enumerate(read(files['effects']['path']).get('temporal_replay', [])):
+                for kind, reference in (('original', row['original_sample']['original_layer']),
+                                        ('remapped', row['remapped_layer'])):
+                    actual = fingerprint(reference['path'])
+                    if actual != {key: reference[key] for key in ('path', 'bytes', 'sha256')}:
+                        raise ValueError('Temporal replay layer changed before registration')
+                    files[f'temporal_replay_{kind}_{index}'] = actual
         if (folder / 'depth-evidence.json').is_file():
             files['depth_evidence'] = fingerprint(folder / 'depth-evidence.json')
             files['depth_manifest'] = fingerprint(read(files['depth_evidence']['path'])['setting']['manifest']['path'])

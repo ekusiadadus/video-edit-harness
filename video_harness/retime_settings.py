@@ -29,7 +29,7 @@ def _seconds(frame, fps):
     return str(Fraction(frame, 1) / fps)
 
 
-def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clocks=None, audio_backend='rubberband'):
+def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clocks=None, temporal_samples=None, audio_backend='rubberband'):
     """Return atomic candidate changes and frame-level migration evidence.
 
     ``original_mapping`` must be the observed render's mapping. The caller also
@@ -149,6 +149,12 @@ def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clo
                    for row in setting["events"]):
                 raise ValueError("Tracked effects need new tracking after retime")
             old_events = resolve_effects(setting, original_mapping, cfg.get("assets", []))["events"]
+        temporal_events = [row for row in old_events if row['type'] in {'comparison_wipe', 'motion_trail'}]
+        # With incomplete original capture, retain the legacy path for all
+        # temporal stages only if each window is a pure translation.
+        complete_capture = all(len([row for row in (temporal_samples or [])
+            if row.get('event_id') == event['id'] and 'original_layer' in row]) == 1
+            for event in temporal_events)
         events = []
         for event in old_events:
             if not isinstance(event, dict):
@@ -167,13 +173,28 @@ def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clo
                                for base in selected]}
                 evidence["items"][-1]["content_policy"] = "original_frame_effect_phase"
             elif kind in {"comparison_wipe", "motion_trail"}:
-                require_translation(event, f"video_effects:{event.get('id')}")
-                evidence["items"][-1]["content_policy"] = "unchanged_phase_pure_translation"
+                first, end, selected = source_frames(event)
+                samples = [row for row in (temporal_samples or []) if row.get('event_id') == event['id']]
+                if not complete_capture:
+                    require_translation(event, f"video_effects:{event.get('id')}; needs a fresh original render with sealed temporal samples")
+                    evidence["items"][-1]["content_policy"] = "unchanged_phase_pure_translation"
+                else:
+                    if len(samples) != 1 or 'original_layer' not in samples[0]:
+                        raise ValueError('Temporal effect needs a fresh original render with bounded sealed samples')
+                    sample = samples[0]
+                    if (sample['original_start_frame'] != first or sample['original_frame_count'] != end-first
+                            or sample['mapping_sha256'] != old_sha
+                            or sample['original_event_sha256'] != digest(event)):
+                        raise ValueError('Temporal effect original sample is stale against observed event/mapping')
+                    moved['content_map'] = {'version': 1, 'original_sample': deepcopy(sample),
+                        'original_events': deepcopy(old_events), 'original_event': deepcopy(event),
+                        'frames': [base-first for base in selected],
+                        'new_plan_sha256': '0'*64, 'project_picture_sha256': '0'*64}
+                    evidence["items"][-1]["content_policy"] = "sealed_original_temporal_stage_pixels"
             else:
                 evidence["items"][-1]["content_policy"] = "static_framewise_effect"
             events.append(moved)
         changes["video_effects"] = {"version": 1, "mapping_sha256": new_sha, "events": events}
-        resolve_effects(changes["video_effects"], new_mapping, cfg.get("assets", []))
 
     guides = cfg.get("composition_guides")
     if guides is not None:
@@ -191,6 +212,18 @@ def migrate_visual_settings(cfg, original_mapping, compiled_retime, *, video_clo
 
     prospective = deepcopy(cfg)
     prospective.update(deepcopy(changes))
+    if changes.get('video_effects'):
+        from .temporal_effect_phase import new_plan_binding, picture_binding
+        events = changes['video_effects']['events']
+        events.sort(key=lambda row: (Fraction(row['output_start']), row['type'], row['id']))
+        plan_sha = new_plan_binding(events, new_sha)
+        picture_sha = picture_binding(prospective)
+        for event in events:
+            if 'content_map' in event:
+                event['content_map']['new_plan_sha256'] = plan_sha
+                event['content_map']['project_picture_sha256'] = picture_sha
+        prospective['video_effects'] = deepcopy(changes['video_effects'])
+        resolve_effects(changes['video_effects'], new_mapping, cfg.get('assets', []))
     production = resolve_production(prospective, new_mapping)
     if isinstance(production, dict):
         if changes.get("cue_plan", {}).get("cues") and not production.get("cues"):

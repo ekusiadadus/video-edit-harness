@@ -321,9 +321,16 @@ def render_visual_edit(cfg, plan, out, preview=True):
             visual_input = rendered
         if production.get('effects', {}).get('events'):
             from .video_effects import render_effects
+            from .temporal_effect_phase import picture_binding, validate_retime_selections
+            if any('content_map' in event for event in production['effects']['events']):
+                if not effective.get('retime'):
+                    raise ValueError('Temporal replay needs a verified picture retime')
+                validate_retime_selections(production['effects']['events'], evidence['mapping'],
+                                          effective['retime']['input_mapping_sha256'])
             rendered = out / 'visual-effects.mp4'
             write(out / 'effects-evidence.json', render_effects(visual_input, production['effects'], rendered,
-                production['assets'], production.get('composition'), preserve_audio_end=bool(effective.get('retime'))))
+                production['assets'], production.get('composition'), preserve_audio_end=bool(effective.get('retime')),
+                project_picture_sha256=picture_binding(effective)))
             visual_input = rendered
         # Retimed PCM avoids another intermediate AAC decode. Other timelines
         # retain the existing decode/pad path before ducking and normalization.

@@ -66,7 +66,7 @@ def _frame(time, rate, field):
 
 def _canonical_event(row, rate, count):
     required = {'id', 'type', 'output_start', 'output_end', 'strength', 'reason'}
-    if not isinstance(row, dict) or not required <= set(row) or set(row) - required - {'parameters', 'effect_version', 'font_sha256', 'layout_binding', 'phase_map'}:
+    if not isinstance(row, dict) or not required <= set(row) or set(row) - required - {'parameters', 'effect_version', 'font_sha256', 'layout_binding', 'phase_map', 'content_map'}:
         raise ValueError('Effect event needs exact id, type, times, strength, reason')
     if not isinstance(row['id'], str) or not row['id'].strip():
         raise ValueError('Effect id must be nonempty')
@@ -124,7 +124,7 @@ def _canonical_event(row, rate, count):
                 raise ValueError('Subject mask artifact changed')
             params['mask_sha256']=sha
             _mask_data(result,rate)
-        if row['type']=='motion_trail' and last-first < result['parameters']['history_frames']:
+        if row['type']=='motion_trail' and last-first < result['parameters']['history_frames'] and 'content_map' not in row:
             raise ValueError('Motion trail window is shorter than its history')
         if row['type']=='tracked_zoom':
             params=result['parameters'];sha=_sha(params['track_path'])
@@ -134,6 +134,9 @@ def _canonical_event(row, rate, count):
             _tracking_data(result,rate)
     elif 'parameters' in row or 'effect_version' in row or 'font_sha256' in row or 'layout_binding' in row:
         raise ValueError('Legacy effects do not accept parameters; use a versioned new effect')
+    if 'content_map' in row:
+        from .temporal_effect_phase import validate_content_map
+        result['content_map'] = validate_content_map(row['content_map'], result, rate, first, last)
     if 'phase_map' in row:
         if row['type'] not in PHASE_TYPES:
             raise ValueError('Phase map is unsupported for this effect type')
@@ -201,7 +204,9 @@ def resolve_effects(setting, mapping, assets=None):
         events = setting['events']
     normalized = [_canonical_event(event, rate, count) for event in events]
     for event in normalized:
-        if event['type'] == 'motion_trail':
+        # Captured history already obeyed the old scene boundaries; retime
+        # rows also split at holds and speed spans without introducing a cut.
+        if event['type'] == 'motion_trail' and 'content_map' not in event:
             start,end = _time(event['output_start'],'start'),_time(event['output_end'],'end')
             if any(start < _time(row['output_start'],'cut') < end for row in mapping['sequence'] if row.get('output_start') is not None):
                 raise ValueError('Motion trail cannot cross a mapped cut; split the event')
@@ -220,6 +225,12 @@ def resolve_effects(setting, mapping, assets=None):
         raise ValueError('Duplicate effect ids')
     _check_trail_overlaps(normalized)
     normalized.sort(key=lambda item: (_time(item['output_start'], 'start'), item['type'], item['id']))
+    if any('content_map' in event for event in normalized):
+        from .temporal_effect_phase import new_plan_binding
+        binding = new_plan_binding(normalized, mapping_sha)
+        for event in normalized:
+            if 'content_map' in event and event['content_map']['new_plan_sha256'] != binding:
+                raise ValueError('Content map candidate plan binding changed')
     return {'version': 1, 'mapping_sha256': mapping_sha, 'preset': preset, 'events': normalized}
 
 
@@ -546,7 +557,7 @@ def _filter_graph(events, width, height, rate):
 
 
 def render_effects(input, plan, output, assets=None, composition=None, *, preserve_audio_end=False,
-                   capture_temporal_samples=True):
+                   capture_temporal_samples=True, project_picture_sha256=None):
     """Render a sealed effect plan; preserve original audio and frame count."""
     if type(preserve_audio_end) is not bool:
         raise ValueError('preserve_audio_end must be boolean')
@@ -572,6 +583,24 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
     # The public plan is bound to the real frame mapping by resolve_effects.
     # Here event frame validity is checked again against the observed input.
     events = [_canonical_event(event, rate, count) for event in plan['events']]
+    mapped_events = [event for event in events if 'content_map' in event]
+    if mapped_events:
+        from .temporal_effect_phase import new_plan_binding
+        binding = new_plan_binding(events, plan['mapping_sha256'])
+        temporal_events = [event for event in events if event['type'] in {'motion_trail', 'comparison_wipe'}]
+        old_events = mapped_events[0]['content_map']['original_events']
+        old_temporal = [event for event in old_events if event['type'] in {'motion_trail', 'comparison_wipe'}]
+        if (len(mapped_events) != len(temporal_events) or len(old_temporal) != len(temporal_events)
+                or any(event['content_map']['original_events'] != old_events for event in mapped_events)
+                or sorted(event['content_map']['original_sample']['stage_ordinal'] for event in mapped_events)
+                   != list(range(len(temporal_events)))):
+            raise ValueError('Temporal replay needs the complete original stage order')
+        if not isinstance(project_picture_sha256, str) or len(project_picture_sha256) != 64:
+            raise ValueError('Temporal replay needs the current project picture binding')
+        for event in mapped_events:
+            content = event['content_map']
+            if content['new_plan_sha256'] != binding or content['project_picture_sha256'] != project_picture_sha256:
+                raise ValueError('Temporal replay candidate plan or project picture changed')
     _check_trail_overlaps(events)
     if composition is not None:
         from .composition import resolve_guides
@@ -620,6 +649,48 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
     graph, label = _filter_graph(events, width, height, rate)
     temporal_inputs = []
     temporal_samples = []
+    replay_inputs = []
+
+    def replay_stage(event):
+        nonlocal graph, label
+        content = event['content_map']
+        sample = content['original_sample']
+        path = target.parent / f'temporal-replay-{uuid.uuid4().hex}.mkv'
+        input_index = (1 + sum(row['type'] == 'comparison_wipe' for row in events)
+                       + len(mask_inputs) + sum(row['type'] in {'keyword_title', 'tracked_title'} for row in events)
+                       + len(replay_inputs))
+        replay_inputs.append({'event_id': event['id'], 'path': path, 'frames': content['frames'],
+                              'original_sample': sample, 'input_index': input_index})
+        first = _frame(_time(event['output_start'], 'start'), rate, 'start')
+        end = _frame(_time(event['output_end'], 'end'), rate, 'end')
+        part = len(replay_inputs)
+        pieces = []
+        if first:
+            pieces.append((f'replay_prefix{part}', f'trim=end_frame={first}'))
+        if end < count:
+            pieces.append((f'replay_suffix{part}', f'trim=start_frame={end}'))
+        if len(pieces) == 2:
+            graph += f';[{label}]split=2[replay_base_a{part}][replay_base_b{part}]'
+            sources = [f'replay_base_a{part}', f'replay_base_b{part}']
+        elif not pieces:
+            graph += f';[{label}]nullsink'
+            sources = []
+        else:
+            sources = [label]
+        for source_label, (output_label, trim) in zip(sources, pieces):
+            graph += (f';[{source_label}]{trim},settb=expr={rate.denominator}/{rate.numerator},'
+                      f'setpts=N[{output_label}]')
+        center = f'replay_center{part}'
+        graph += f';[{input_index}:v]settb=expr={rate.denominator}/{rate.numerator},setpts=N[{center}]'
+        concat = ([f'replay_prefix{part}'] if first else []) + [center] + ([f'replay_suffix{part}'] if end < count else [])
+        next_label = f'replayed{part}'
+        if len(concat) == 1:
+            next_label = center
+        else:
+            graph += (';' + ''.join(f'[{name}]' for name in concat)
+                      + f'concat=n={len(concat)}:v=1:a=0,'
+                      + f'settb=expr={rate.denominator}/{rate.numerator},setpts=N[{next_label}]')
+        label = next_label
 
     def capture_stage(event):
         nonlocal graph, label
@@ -647,8 +718,12 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
         temporal_samples.append(row)
 
     from .motion_trail import build_trail_graph
-    for index,event in enumerate(events):
-        if event['type'] != 'motion_trail':
+    trail_events = [(index, event) for index, event in enumerate(events) if event['type'] == 'motion_trail']
+    if mapped_events:
+        trail_events.sort(key=lambda pair: pair[1]['content_map']['original_sample']['stage_ordinal'])
+    for index,event in trail_events:
+        if 'content_map' in event:
+            replay_stage(event)
             continue
         next_label = f'vtrail{index}'
         fragment,evidence = build_trail_graph(label,next_label,event,rate,count)
@@ -674,15 +749,23 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
         event_duration = _time(event['output_end'], 'end') - _time(event['output_start'], 'start')
         begin = _time(params['source_start'], 'source_start')
         _frame(begin, observed_source['fps'], 'Comparison source_start')
+        if 'content_map' in event:
+            old = event['content_map']['original_event']
+            event_duration = _time(old['output_end'], 'old end') - _time(old['output_start'], 'old start')
         if begin + event_duration > observed_source['duration']:
             raise ValueError('Comparison range exceeds second video duration')
         secondary.append({'event': event, 'asset': asset, 'source_fps': str(observed_source['fps'])})
+    if mapped_events:
+        secondary.sort(key=lambda item: item['event']['content_map']['original_sample']['stage_ordinal'])
     target.parent.mkdir(parents=True, exist_ok=True)
     log = target.with_suffix('.effects.log')
     command = ['ffmpeg', '-hide_banner', '-nostdin', '-n', '-i', str(source)]
     for index, item in enumerate(secondary, 1):
         event, asset = item['event'], item['asset']
         command += ['-i', asset['path']]
+        if 'content_map' in event:
+            replay_stage(event)
+            continue
         begin = event['parameters']['source_start']
         start, end = _seconds(event, 'output_start'), _seconds(event, 'output_end')
         divider = max(2, min(width - 2, round(width * event['parameters']['divider'] / 2) * 2))
@@ -811,6 +894,8 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
         label = target_label
         titles.append({**title, 'path': str(png), 'event_id': event['id'],
                        'subject_clearance': 'unverified; measured text bounds only'})
+    for item in replay_inputs:
+        command += ['-i', str(item['path'])]
     composition_evidence = None
     from .title_collisions import check_title_collisions
     title_collision_checks = check_title_collisions(events, titles, fps=rate)
@@ -854,6 +939,24 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
                '-c:a', 'copy', *(['-movie_timescale','48000'] if preserve_audio_end else []),
                '-movflags', '+faststart', str(target)]
     try:
+        if replay_inputs:
+            from .overlay_layers import remap_overlay_layer, validate_overlay_layer_reference
+            for item in replay_inputs:
+                sample = item['original_sample']
+                result = remap_overlay_layer(sample['original_layer'], item['frames'], rate,
+                                              (width, height), item['path'],
+                                              target.with_suffix('.temporal-remap.log'))
+                reference = {'path': str(item['path'].resolve()), 'sha256': result['sha256'],
+                             'bytes': result['bytes'], 'frame_count': result['frame_count'],
+                             'width': width, 'height': height,
+                             'fps': f'{rate.numerator}/{rate.denominator}'}
+                item['remapped_layer'] = validate_overlay_layer_reference(reference, rate,
+                                                                          count=len(item['frames']))
+                temporal_inputs.append({'event_id': item['event_id'],
+                                        'content': 'sealed_temporal_stage_replay',
+                                        'original_stage_ordinal': sample['stage_ordinal'],
+                                        'source_sha256': sample['original_layer']['sha256'],
+                                        'remap_sha256': result['sha256'], 'frames': item['frames']})
         with log.open('w', encoding='utf-8') as stream:
             stream.write(json.dumps(command) + '\n')
             stream.flush()
@@ -905,6 +1008,8 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
                 raise ValueError('Tracking resource changed during render')
     except Exception:
         target.unlink(missing_ok=True)
+        for item in replay_inputs:
+            item['path'].unlink(missing_ok=True)
         for path in new_sample_paths:
             path.unlink(missing_ok=True)
         raise
@@ -913,6 +1018,10 @@ def render_effects(input, plan, output, assets=None, composition=None, *, preser
             'text_assets': titles,
             'temporal_inputs': temporal_inputs,
             'temporal_effect_samples': temporal_samples,
+            'temporal_replay': [{'event_id': item['event_id'],
+                                 'original_sample': item['original_sample'],
+                                 'remapped_layer': item['remapped_layer']}
+                                for item in replay_inputs],
             'subject_masks':[{'event_id':item['event']['id'],'manifest_sha256':item['event']['parameters']['mask_sha256'],
                              'manifest_path':item['event']['parameters']['mask_path'],'source_sha256':item['doc']['source']['sha256'],
                              'frames':len(item['doc']['rows']),'review_required':True,

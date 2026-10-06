@@ -63,6 +63,21 @@ class VisualSettingMigrationTests(unittest.TestCase):
         self.assertEqual(result["evidence"]["items"][0]["new_frames"], [4, 11])
         self.assertEqual(cfg, before)
 
+    def test_partial_temporal_capture_keeps_legacy_one_to_one_path_for_all_stages(self):
+        old = mapping()
+        events = [{'id': name, 'type': 'motion_trail', 'output_start': begin,
+                   'output_end': end, 'strength': .5, 'reason': 'Synthetic legacy stage'}
+                  for name, begin, end in [('one', '0', '1/10'), ('two', '1/10', '1/5')]]
+        cfg = config(video_effects={'version': 1, 'mapping_sha256': digest(old), 'events': events})
+        result = self.migrate(cfg, old, compiled(list(range(6))), temporal_samples=[
+            {'event_id': 'one', 'original_layer': {}},
+            {'event_id': 'two', 'unavailable_reason': 'No retained layer'}])
+        self.assertTrue(all('content_map' not in row for row in result['changes']['video_effects']['events']))
+        with self.assertRaisesRegex(ValueError, 'fresh original render'):
+            self.migrate(cfg, old, compiled(), temporal_samples=[
+                {'event_id': 'one', 'original_layer': {}},
+                {'event_id': 'two', 'unavailable_reason': 'No retained layer'}])
+
     def test_animated_effect_preserves_old_relative_frame_phase(self):
         old = mapping()
         event = {"id": "pulse", "type": "smooth_zoom", "output_start": "1/15",
