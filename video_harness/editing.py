@@ -286,7 +286,8 @@ def render_edit(cfg, plan, out, preview=True):
                 write(artifact.parent / 'production-mix.json', mix_evidence)
             af = loudness_filter(effective, str(mix_input), 0, total, artifact.parent)
             run(['ffmpeg', '-hide_banner', '-nostdin', '-n', '-i', str(mix_input), '-af', af,
-                 '-c:a', 'aac', '-b:a', '384k', '-ar', '48000', str(artifact)], log)
+                 '-c:a', 'aac', '-b:a', '384k', '-ar', '48000',
+                 *(['-movie_timescale','48000'] if retimed is not None else []), str(artifact)], log)
             with log.open('a') as evidence:
                 for name in ('assemble-audio.log', 'audio-measure.log'):
                     path = artifact.parent / name

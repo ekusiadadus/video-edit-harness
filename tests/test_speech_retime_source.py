@@ -102,10 +102,14 @@ class SpeechRetimeSourceTests(unittest.TestCase):
                     'automation','Apply effect after synthetic retime')
                 finished=session.render(preview=False,actor='automation',candidate_id=effect['id'])
                 finished_folder=Path(finished['path'])
+                mix_info=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams',
+                    '-of','json',str(finished_folder/'mix.m4a')]))
+                from fractions import Fraction
+                mix_sound=next(s for s in mix_info['streams'] if s['codec_type']=='audio')
+                self.assertEqual(Fraction(mix_sound['duration_ts'])*Fraction(mix_sound['time_base']),Fraction(56,30))
                 audio_info=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams',
                     '-of','json',str(finished_folder/'video.mp4')]))
                 sound=next(s for s in audio_info['streams'] if s['codec_type']=='audio')
-                from fractions import Fraction
                 self.assertEqual(Fraction(sound['duration_ts'])*Fraction(sound['time_base']),Fraction(56,30))
                 self.assertEqual(pcm(folder/'video.mp4'),pcm(finished_folder/'video.mp4'))
                 self.assertEqual(len(pcm(finished_folder/'final-mix.wav')),89600*4)
