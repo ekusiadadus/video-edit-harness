@@ -11,7 +11,7 @@ from PIL import Image
 from video_harness.common import probe
 from video_harness.fcp import export_timeline
 from video_harness.production_fcp import (compare_production_reexport,
-                                          export_production_xml,
+                                          DTD_PATHS, export_production_xml,
                                           inspect_production_xml,
                                           resolve_media_path)
 from video_harness.visual_editing import _write_xml
@@ -56,7 +56,7 @@ class ProductionFCPTests(unittest.TestCase):
             production = {'assets': assets, 'cues': cues}
             mix = root / 'mix.fcpxml'
             result = export_production_xml(base, production, mixed, mix, mode='mix')
-            self.assertEqual(result['dtd'], 'passed')
+            self.assertEqual(result['dtd'], 'passed' if any(p.is_file() for p in DTD_PATHS) else 'unavailable')
             observed = inspect_production_xml(mix, result)
             self.assertTrue(all(clip['srcEnable'] == 'video' for clip in observed['primary']))
             self.assertEqual(len(observed['connected']), 1)
@@ -65,7 +65,7 @@ class ProductionFCPTests(unittest.TestCase):
             self.assertTrue(compare_production_reexport(mix, mix)['matched'])
             editable = root / 'editable.fcpxml'
             result = export_production_xml(base, production, mixed, editable, mode='editable')
-            self.assertEqual(result['dtd'], 'passed')
+            self.assertEqual(result['dtd'], 'passed' if any(p.is_file() for p in DTD_PATHS) else 'unavailable')
             self.assertTrue(any('ducking' in item for item in result['manual_remaining']))
             observed = inspect_production_xml(editable, result)
             self.assertEqual(len(observed['connected']), 3)  # two music loops plus still
@@ -98,7 +98,7 @@ class ProductionFCPTests(unittest.TestCase):
             title_result = export_production_xml(base, {'assets': [], 'cues': [
                 {'id': 'heading', 'asset_id': None, 'role': 'title', 'text': 'Hello',
                  'output_start': 0, 'output_end': .5}]}, None, title, mode='editable')
-            self.assertEqual(title_result['dtd'], 'passed')
+            self.assertEqual(title_result['dtd'], 'passed' if any(p.is_file() for p in DTD_PATHS) else 'unavailable')
 
     def test_rejects_stale_media_and_wrong_pcm_length(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -133,7 +133,7 @@ class ProductionFCPTests(unittest.TestCase):
                                           'b': {'path': str(second)}}, 'Mixed FPS')
             result = export_production_xml(base, {'assets': [], 'cues': []}, mixed,
                                            root / 'mixed-conform.fcpxml', mode='mix')
-            self.assertEqual(result['dtd'], 'passed')
+            self.assertEqual(result['dtd'], 'passed' if any(p.is_file() for p in DTD_PATHS) else 'unavailable')
             observed = inspect_production_xml(result['xml'])
             self.assertIsNone(observed['primary'][0]['conform_rate']['conform'])
             self.assertEqual(observed['primary'][1]['conform_rate']['conform']['srcFrameRate'], '25')
@@ -142,7 +142,7 @@ class ProductionFCPTests(unittest.TestCase):
                           'output_start': .25, 'output_end': .75,
                           'source_start': 0, 'source_end': .5}]}, None,
                 root / 'mixed-layer.fcpxml', mode='editable')
-            self.assertEqual(layered['dtd'], 'passed')
+            self.assertEqual(layered['dtd'], 'passed' if any(p.is_file() for p in DTD_PATHS) else 'unavailable')
             visual = next(item for item in inspect_production_xml(layered['xml'])['connected']
                           if item['name'] == 'visual')
             self.assertEqual(visual['conform_rate']['srcFrameRate'], '25')

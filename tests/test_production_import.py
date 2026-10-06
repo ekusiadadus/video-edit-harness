@@ -9,8 +9,15 @@ from pathlib import Path
 
 from video_harness.common import probe
 from video_harness.fcp import export_timeline
-from video_harness.production_fcp import export_production_xml
+from video_harness.production_fcp import DTD_PATHS, export_production_xml
 from video_harness.production_import import import_production_xml
+
+
+def requires_apple_dtd(version):
+    available = shutil.which('xmllint') and any(
+        path.with_name(f'FCPXMLv{version.replace(".", "_")}.dtd').is_file()
+        for path in DTD_PATHS)
+    return unittest.skipUnless(available, f'Installed Apple FCPXML {version} DTD required')
 
 
 class ProductionImportTests(unittest.TestCase):
@@ -131,6 +138,7 @@ class ProductionImportTests(unittest.TestCase):
             self.assertTrue(report['changes'])
             self.assertIn('no original word', report['scope'])
 
+    @requires_apple_dtd('1.14')
     def test_fcp_114_inert_export_fields_and_missing_start_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -173,6 +181,7 @@ class ProductionImportTests(unittest.TestCase):
             self.assertEqual(report['status'], 'rejected')
             self.assertIn('source cuts or frame mapping changed', report['reasons'][0])
 
+    @requires_apple_dtd('1.14')
     def test_fcp_114_nonidentity_color_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -196,6 +205,9 @@ class ProductionImportTests(unittest.TestCase):
             self.assertEqual(report['status'], 'rejected')
             self.assertIn('non-identity color', report['reasons'][0])
 
+    @requires_apple_dtd('1.12')
+    @requires_apple_dtd('1.13')
+    @requires_apple_dtd('1.14')
     def test_current_fcp_versions_use_matching_installed_dtd(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

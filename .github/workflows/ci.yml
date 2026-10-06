@@ -26,7 +26,7 @@ jobs:
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
       - name: FFmpeg (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg rubberband-cli libsndfile1
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg rubberband-cli libsndfile1 fonts-noto-cjk libxml2-utils
       - name: FFmpeg (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg rubberband
