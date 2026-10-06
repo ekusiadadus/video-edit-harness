@@ -28,6 +28,16 @@ class SessionRetimeTests(unittest.TestCase):
             self.assertEqual(Path(session.tracking_source(rendered['id'])['source']['path']).name,'visual-graded.mp4')
             self.assertEqual(session._load()['project'],before)
             self.assertTrue((Path(rendered['path'])/'original-cut-reference.fcpxml').is_file())
+            natural=session.create_candidate({'editing_pattern':{'id':'natural'}},'codex','Unchanged timing baseline')
+            baseline=session.render(preview=False,candidate_id=natural['id'])
+            with self.assertRaisesRegex(ValueError,'source frames'):
+                session.compare_candidates([baseline['id'],rendered['id']])
+            comparison=session.compare_candidates([baseline['id'],rendered['id']],mode='timing')
+            self.assertEqual(comparison['mode'],'timing')
+            self.assertEqual(read(comparison['evidence']['path'])['mode'],'timing')
+            self.assertEqual(session._load()['project'],before)
+            with self.assertRaisesRegex(ValueError,'mode'):
+                session.compare_candidates([baseline['id'],rendered['id']],mode='unknown')
 
     def test_natural_rejects_proposal_and_editable_handoff_rejects_retime(self):
         from video_harness.production import prepare_fcp_handoff

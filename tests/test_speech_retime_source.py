@@ -96,6 +96,11 @@ class SpeechRetimeSourceTests(unittest.TestCase):
                 self.assertEqual(mapping['retime']['frames'][32]['source_frame'],36)
                 self.assertEqual(pcm(folder/'speech-retimed.wav')[32*stride:41*stride],
                                  pcm(folder/'speech-base.wav')[36*stride:45*stride])
+            natural=session.create_candidate({'editing_pattern':{'id':'natural'}},'automation','Synthetic timing baseline')
+            baseline=session.render(preview=False,actor='automation',candidate_id=natural['id'])
+            compared=session.compare_candidates([baseline['id'],full['id']],mode='timing')
+            self.assertEqual(read(compared['evidence']['path'])['mode'],'timing')
+            self.assertEqual(session._load()['project'],initial)
             self.assertEqual(session._load()['project'],initial)
             with Path(basis['source']['path']).open('ab') as stream:
                 stream.write(b'tampered')

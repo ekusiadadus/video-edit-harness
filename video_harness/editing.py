@@ -308,7 +308,9 @@ def render_edit(cfg, plan, out, preview=True):
         run(['ffmpeg', '-hide_banner', '-nostdin', '-n', *picture_input,
              '-i', str(mixed), '-map', '0:v:0', '-map', '1:a:0',
              *picture_codec, '-c:a', 'copy',
-             '-map_metadata', '-1', '-t', str(total), '-movflags', '+faststart', str(final)], out / 'render.log')
+             '-map_metadata', '-1', '-t', str(total),
+             *(['-movie_timescale','48000'] if retimed is not None else []),
+             '-movflags', '+faststart', str(final)], out / 'render.log')
         if visual_cues:
             from .visual import render_overlays
             base = out / 'base-video.mp4'

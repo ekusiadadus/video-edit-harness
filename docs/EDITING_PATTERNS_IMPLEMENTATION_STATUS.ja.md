@@ -1,5 +1,13 @@
 # 編集パターン実装の進捗と検証台帳
 
+## 2026-10-06: 時間変更版の比較と音声末尾の修正（alpha.6後の開発版）
+
+- `session compare-candidates --mode timing` は同じ選択済み計画・元カット対応・色・基本音声設定・プレビュー条件を要求し、時間変更を再計算して出力対応表と照合する。尺・操作・省略／反復フレーム・追加演出を記録する。各案の全尺を個別に再生する。既定のeffects比較の厳密な同一対応表条件は維持する。別計画・並べ替え比較は未対応。
+- ブラウザー上の合成1.2秒／3.2秒比較で長い案の末尾到達を確認。修正メモのダウンロードは待機APIがタイムアウトしたが、実ファイルと画面を読み戻し、対象SHA・3.2秒・未採用／未承認を確認。`output/implementation-maya/timing-comparison-browser-evidence.json`／`timing-comparison-browser-selection.json`／`timing-comparison-browser.png`。人の試聴評価ではない。
+- 前回のCI37455001989はUbuntu3.13のretime音声尺検査で失敗し、他2環境はキャンセル。MP4のmovie timescale=1000で56/30秒のAAC末尾が32サンプル短くなるケースを再現。retimeと発話retime最終muxへ48000を明示し、89600サンプルの末尾検査を追加した。派生する効果・overlay・FCP再muxの同条件検証は今後も必要。
+- 必要extraを入れた環境で全371試験成功（112.248秒）、発話・visualの比較統合を含む22試験成功。生ログ: `output/implementation-maya/timing-comparison-full-suite.log`／`timing-comparison-integration.log`。実素材の見やすさ・FCP GUI・最終YouTube用MP4・計画全体の完了を証明するものではない。
+
+
 ## 2026-10-06: 発話保護を候補・最終描画へ接続（alpha.6後の開発版）
 
 - 発話 `session retime` は選択済み計画の必須単語保護と、観察した `nonspoken_intervals` を持つ未採用候補を作る。操作区間の全フレームに観察を要求し、単語に重なる観察や保護の改変を拒否する。単語がないことから非発話を推定しない。

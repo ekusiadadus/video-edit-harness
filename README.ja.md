@@ -215,3 +215,6 @@ TikTok公式APIの接続設定・OAuth・本人のプロフィールと公開動
 alpha.6後の開発版では、日本語・英語のタイトルを実フォント幅で折り返せます。数値と単位や指定した語句を保護し、収まらない文は修正理由を返します。 [設定と制限 / Controls and limits](docs/VIDEO_EFFECTS.ja.md)。公開済みalpha.6には未収録です。
 
 発話セッションでは `session retime-source` で連結済み映像と単語の保護区間を確認できます。開発版では `nonspoken_intervals` を指定して未採用候補を描画し、字幕・元フレーム対応を移行できます。PCMの後に追加音と正規化を適用します。 [Scope / 操作と制限](docs/RETIME.ja.md)
+
+
+開発版では `session compare-candidates SESSION NATURAL_RENDER RETIMED_RENDER --mode timing` で、同じ選択済みカットの自然版と時間変更版を比較できます。各案を個別に最後まで再生し、尺・変更操作を確認します。既定の `effects` は同じ対応表で同期する比較です。構成の並べ替え・別計画の比較はこのモードの対象外です。

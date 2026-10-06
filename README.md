@@ -159,3 +159,6 @@ See the [TikTok API connection guide](docs/TIKTOK_API.ja.md) for desktop OAuth a
 Post-alpha.6 development supports measured Japanese/English title wrapping, protected phrases and number/unit grouping, with explicit overflow rejection. [Controls and limits](docs/VIDEO_EFFECTS.ja.md). This feature is not included in the published alpha.6 assets.
 
 Post-alpha.6 development retains a pre-production speech assembly and exposes transcript-bound protected word frames through `session retime-source`. Speech retime candidate rendering remains pending. [Scope / 操作と制限](docs/RETIME.ja.md)
+
+
+Development timing comparisons use `session compare-candidates SESSION NATURAL_RENDER RETIMED_RENDER --mode timing`: inspect independent full-length playback and explicit duration/retime changes for the same selected cuts. Default `effects` retains strict mapping equality and synchronized playback. Comparing reordered or different plans remains outside this mode.

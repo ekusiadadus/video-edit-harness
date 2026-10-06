@@ -115,6 +115,8 @@ def parser():
     a = command('adopt-candidate', note=True)
     a.add_argument('candidate_id')
     a = command('compare-candidates', actor=None)
+    a.add_argument('--mode', choices=['effects','timing'], default='effects',
+                   help='effects: synchronized same mapping; timing: independent full retimed playback')
     a.add_argument('render_ids', nargs='+')
     a = command('native-finish', note=True)
     a.add_argument('render_id')
@@ -240,7 +242,7 @@ def dispatch(args):
                                          preference=args.preference,
                                          trend=_object(args.trend_profile) if args.trend_profile else None)
     if action == 'adopt-candidate': return session.adopt_candidate(args.candidate_id, args.actor, args.note)
-    if action == 'compare-candidates': return session.compare_candidates(args.render_ids)
+    if action == 'compare-candidates': return session.compare_candidates(args.render_ids, mode=args.mode)
     if action == 'native-finish': return session.native_finish(args.render_id, _object(args.request_file), args.actor, args.note)
     if action == 'feedback': return _feedback(session, args)
     if action == 'dismiss-feedback': return session.dismiss_feedback(args.feedback_id, args.actor, args.note)

@@ -131,7 +131,7 @@ def render_retime(source, proposal, output, *, pcm_output=None):
                              '-pix_fmt','yuv420p',
                              '-colorspace','bt709','-color_trc','bt709','-color_primaries','bt709',
                              '-c:a','aac','-b:a','384k','-t',str(float(Fraction(count,1)/rate)),
-                             '-movflags','+faststart',str(target)]
+                             '-movie_timescale','48000','-movflags','+faststart',str(target)]
             stream.write(json.dumps({'decoder':decoder_command,'encoder':encoder_command})+'\n');stream.flush()
             decoder=subprocess.Popen(decoder_command,stdout=subprocess.PIPE,stderr=stream)
             encoder=subprocess.Popen(encoder_command,stdin=subprocess.PIPE,stderr=stream)

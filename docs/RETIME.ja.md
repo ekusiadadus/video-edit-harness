@@ -63,3 +63,6 @@ uv run --no-sync video-harness session render SESSION --candidate-id CANDIDATE_I
 発話の連結段階はプレビューでもフル解像度で保持します。新しい候補の描画時に素材・計画・単語保護・対応表を再検証し、変更されていれば拒否します。旧renderの低解像度の連結段階は再描画が必要です。変速後の `speech-retimed.wav` をPCMのまま追加音・正規化へ渡し、最終MP4ではAACへ符号化します。未変更の保護発話は、この正規化・追加音・最終符号化前のPCMで保持します。freezeには無音が挿入されます。
 
 `pre-retime-mapping.json` と `original-cut-reference.fcpxml` に元の対応とカットを残します。新しい対応表は出力フレーム→連結段階→元素材の関係を持ち、字幕と検査時刻を移行します。追加音・効果は新しい尺で生成します。FCPのmix受け渡しは完成映像と最終音声を渡し、編集可能な速度変更は生成しません。候補作成・描画・技術検査は採用や人の全編視聴／試聴を意味しません。
+
+
+時間変更版は `session compare-candidates SESSION NATURAL_RENDER RETIMED_RENDER --mode timing` で同じ選択済み計画の自然版と比較します。尺が異なるため、各案の再生・シークは独立し、短い案の終了で長い案を止めません。元の選択範囲、色、基本音声設定、プレビュー条件は揃え、尺と変更操作を証拠へ記録します。既定の `effects` 比較は従来どおり同じ対応表を要求します。別計画・並べ替えの比較は未対応です。

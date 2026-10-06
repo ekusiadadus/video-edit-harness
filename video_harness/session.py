@@ -959,10 +959,12 @@ class Session:
                         'review_status': 'adoption_does_not_approve_full_render'})
         return candidate
 
-    def compare_candidates(self, render_ids):
+    def compare_candidates(self, render_ids, *, mode='effects'):
         """A sealed local comparison page; creating it has no adoption effect."""
         if not isinstance(render_ids, list) or not 2 <= len(render_ids) <= 4 or len(set(render_ids)) != len(render_ids):
             raise ValueError('Compare two to four distinct renders (up to three additions plus natural)')
+        if mode not in {'effects','timing'}:
+            raise ValueError('Comparison mode must be effects or timing')
         with self._lock():
             state = self._load()
             self._idle(state)
@@ -973,20 +975,27 @@ class Session:
             from .comparison import comparison_evidence
             for render in renders:
                 self._verify_render(render)
-            evidence = comparison_evidence(renders, state['source'])
+            evidence = comparison_evidence(renders, state['source'], mode=mode)
+            timing_rows = {row['render_id']:row for row in evidence['candidates']} if mode=='timing' else {}
             rows = []
             for render in renders:
                 label = read(render['project']['path']).get('editing_pattern', {}).get('id', 'natural')
                 video = Path(render['files']['video']['path']).as_uri()
                 rows.append({'label': f'{label} / {render["id"]}', 'video': video,
-                             'render_id': render['id'], 'sha256': render['files']['video']['sha256']})
+                             'render_id': render['id'], 'sha256': render['files']['video']['sha256'],
+                             **({'duration_seconds':timing_rows[render['id']]['duration_seconds'],
+                                 'retime_operations':timing_rows[render['id']]['retime_operations'],
+                                 'source_coverage':timing_rows[render['id']]['source_coverage'],
+                                 'production_changes':timing_rows[render['id']].get('production_changes',{})}
+                                if mode=='timing' else {})})
             folder = self.root / 'comparisons'
             folder.mkdir(exist_ok=True)
             target = folder / (uuid.uuid4().hex[:12] + '.html')
             from .comparison import comparison_page
-            target.write_text(comparison_page(rows), encoding='utf-8')
+            target.write_text(comparison_page(rows, mode=mode), encoding='utf-8')
             evidence_ref = self._artifact('comparison-evidence', evidence)
             item = {'render_ids': render_ids, 'artifact': fingerprint(target), 'evidence': evidence_ref}
+            if mode != 'effects':item['mode']=mode
             state.setdefault('candidate_comparisons', []).append(item)
             self._save(state, 'candidates_compared', 'automation', item)
         return item
