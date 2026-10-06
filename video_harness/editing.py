@@ -22,7 +22,7 @@ from .runs import evidence_run, code_hash
 from .render_cache import RenderCache, digest
 
 
-PIPELINE_SIGNATURE = 'edit-render-v3-ordered-frame-pcm-timestamp-fades-mix-20261005'
+PIPELINE_SIGNATURE = 'edit-render-v4-retained-speech-assembly-20261006'
 
 
 def revise_plan(plan_path, output, enable=(), disable=(), note=''):
@@ -139,7 +139,7 @@ def render_edit(cfg, plan, out, preview=True):
     if plan.get('version') == 3 and plan.get('status') != 'reviewed_selection':
         raise ValueError('V3 render requires reviewed_selection')
     duration = derive_edit(plan)['duration']
-    estimated = duration * (1_500_000 if preview else 3_000_000) + 256 * 1024 ** 2
+    estimated = duration * (3_000_000 if preview else 6_000_000) + 256 * 1024 ** 2
     disk = out.parent
     while not disk.exists():
         disk = disk.parent
@@ -211,6 +211,23 @@ def render_edit(cfg, plan, out, preview=True):
         _concat_file(out / 'video.ffconcat', videos)
         _concat_file(out / 'audio.ffconcat', audio)
         total = sum(float(end - start) for start, end in ranges)
+        # Retain the selected, graded picture and per-span PCM before production
+        # cues or loudness normalization. Copying picture adds no encode pass.
+        assembled = out / 'speech-base.wav'
+        run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-f', 'concat', '-safe', '0',
+             '-i', str(out/'audio.ffconcat'), '-c:a', 'pcm_s16le', str(assembled)],
+            out/'speech-assemble-audio.log')
+        run(['ffmpeg', '-v', 'error', '-nostdin', '-n', '-f', 'concat', '-safe', '0',
+             '-i', str(out/'video.ffconcat'), '-i', str(assembled), '-map', '0:v:0',
+             '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'pcm_s16le', '-map_metadata', '-1',
+             '-t', str(total), str(out/'speech-base.mov')], out/'speech-assemble.log')
+        write(out/'speech-assembly.json', {'version':1,
+              'source':fingerprint(out/'speech-base.mov'),
+              'mapping':fingerprint(out/'frame-mapping.json'),
+              'plan':fingerprint(out/'plan.json'), 'stage':'pre_production_speech_assembly',
+              'picture':'frame-aligned cuts with baked grade; copied from retained segments',
+              'audio':'48 kHz per-span PCM and selected fades; before normalization or added assets',
+              'review_required':True})
         from .production import resolve_production, mix_key, production_sources
         production = resolve_production(cfg, read(out / 'frame-mapping.json'))
         audio_cues = [c for c in production['cues'] if c['role'] in ('music', 'sfx')]

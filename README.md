@@ -157,3 +157,5 @@ Declared `composition_guides` guard supported title/zoom placement in fixed regi
 See the [TikTok API connection guide](docs/TIKTOK_API.ja.md) for desktop OAuth and read-only access to the authorized account profile and public videos. It does not post videos, download platform music, or retrieve trend rankings. Live connectivity requires separate OAuth and API verification.
 
 Post-alpha.6 development supports measured Japanese/English title wrapping, protected phrases and number/unit grouping, with explicit overflow rejection. [Controls and limits](docs/VIDEO_EFFECTS.ja.md). This feature is not included in the published alpha.6 assets.
+
+Post-alpha.6 development retains a pre-production speech assembly and exposes transcript-bound protected word frames through `session retime-source`. Speech retime candidate rendering remains pending. [Scope / 操作と制限](docs/RETIME.ja.md)

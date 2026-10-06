@@ -754,7 +754,19 @@ class Session:
         state=self._load();self._verify(state)
         render=self._find_render(state,render_id);self._verify_render(render)
         if read(render['project']['path']).get('edit_basis')!='visual':
-            raise ValueError('Speech retime requires word-bound protection integration; visual only')
+            folder=Path(render['path']);source=folder/'speech-base.mov'
+            if not source.is_file():
+                raise ValueError('Retained speech assembly is missing; render the selected plan again')
+            from .video_effects import _probe, _stream, _verified_rate
+            from .speech_protection import derive_speech_protection
+            info=_probe(source,count=True);video=_stream(info,'video')
+            rate=_verified_rate(source,video,int(video['nb_read_frames']))
+            mapping=folder/'frame-mapping.json'
+            protection=derive_speech_protection(read(render['plan']['path']),read(mapping),
+                                               fps=str(rate),frame_count=int(video['nb_read_frames']))
+            return {'render_id':render_id,'source':fingerprint(source),
+                    'mapping':fingerprint(mapping),'word_protection':protection,
+                    'stage':'pre_production_speech_assembly','review_required':True}
         folder=Path(render['path']);mapping=folder/'pre-retime-mapping.json'
         if not mapping.exists():mapping=Path(render['files']['mapping']['path'])
         return {'render_id':render_id,'source':fingerprint(folder/'visual-base.mp4'),
@@ -769,6 +781,8 @@ class Session:
         render=self._find_render(state,render_id);self._verify_render(render)
         cfg=read(render['project']['path']);pattern=frozen_pattern(cfg)
         if pattern['id']=='natural' or pattern['intensity']=='off':raise ValueError('Retime conflicts with natural/off')
+        if cfg.get('edit_basis') != 'visual':
+            raise ValueError('Speech retime rendering is not integrated yet; retime-source exposes protected word frames only')
         basis=self.retime_source(render_id)
         proposal=prepare_retime(basis['source']['path'],request,actor,note)
         setting={'version':1,'proposal':proposal,'input_mapping_sha256':digest(read(basis['mapping']['path']))}
