@@ -45,6 +45,8 @@ uv run video-harness session track-effect SESSION RENDER_ID --box 0.2 0.3 0.5 0.
 uv run --no-sync video-harness session track-effect SESSION RENDER_ID --effect tracked_title --title-parameters-file label.json --box 0.3 0.4 0.5 0.7 --first-frame 12 --end-frame 60 --algorithm csrt --actor codex --note '観察した動作の見せ場を短い文字で示す'
 ```
 
+自動折り返しを使う場合は `--title-version 2` を追加し、label.jsonに `language`（ja/en）、`max_width_fraction`、`max_lines`、`protected_phrases` を指定します。`text-layout` extraが必要です。省略時は従来の方式1です。文字の実測幅・行数・配置パラメーターは追跡開始前に検査し、収まらない文を先に拒否します。返される `title_preflight` に描画行・矩形・フォント／PNG・モデルの情報を保存します。追跡後の被写体との重なりや見切れは別の描画検査です。
+
 枠と区間は実際のエフェクト前映像で確認した値に置き換えます。返された未採用candidateを描画して比較します。`placement` は `above`／`below`／`left`／`right`、`gap_fraction` は画面幅・高さに対する間隔（0〜0.2）、`offset_x`／`offset_y` は画面座標の微調整（−0.5〜0.5）です。文字の色・背景・フォントは `keyword_title` と共通、動きはフェードのみです。固定の `x`／`y` は受け付けません。
 
 実測した文字カードを全フレームの観察枠に合わせ、描画位置と矩形を証拠に保存します。画面外へ出る場合は、勝手に端へ寄せず拒否します。宣言した投稿UI・字幕・被写体の領域との重なりを検査し、追跡喪失・古いSHAも拒否します。重なるズーム・分割・比較は未対応の座標変換なので同じ区間には適用しません。

@@ -804,7 +804,7 @@ class Session:
     def propose_tracking(self, render_id, box, first_frame, end_frame, actor, note,
                          *, algorithm='csrt', model_path=None, max_scale=1.12,
                          strength=.65, corrections=None, effect='tracked_zoom',
-                         title_parameters=None):
+                         title_parameters=None, title_version=1):
         """Track observed picture and propose an unadopted zoom or readable label."""
         from fractions import Fraction
         from .tracking import track_video,validate_track
@@ -817,15 +817,34 @@ class Session:
             raise ValueError('Tracking effect conflicts with natural/off; choose an enabled comparison direction')
         if effect not in {'tracked_zoom','tracked_title'}:
             raise ValueError('Choose tracked_zoom or tracked_title')
+        if type(title_version) is not int or title_version not in (1, 2):
+            raise ValueError('title_version must be 1 or 2')
         if effect=='tracked_title':
             if not isinstance(title_parameters,dict) or not title_parameters.get('text'):
                 raise ValueError('Tracked title requires observed label text')
-            if set(title_parameters) & {'track_path','track_sha256'}:
-                raise ValueError('Track binding is generated from the observed input')
-        elif title_parameters is not None:
+            if set(title_parameters) & {'track_path','track_sha256','x','y'}:
+                raise ValueError('Track bindings and x/y cannot be supplied for a tracked title')
+        elif title_parameters is not None or title_version != 1:
             raise ValueError('Title parameters require tracked_title')
         source=self.tracking_source(render_id)
         mapping=read(source['mapping']['path']);rate=Fraction(mapping['fps'])
+        title_preflight = None
+        if effect == 'tracked_title':
+            from .common import probe
+            from .text_effects import validate_text_parameters, render_text_asset
+            from .tracked_title import validate_follow_parameters
+            follow_keys = {'placement', 'gap_fraction', 'offset_x', 'offset_y'}
+            follow = validate_follow_parameters({k:v for k,v in title_parameters.items() if k in follow_keys})
+            text = validate_text_parameters({k:v for k,v in title_parameters.items() if k not in follow_keys}, version=title_version)
+            if text['motion'] != 'fade':
+                raise ValueError('Tracked titles support fade only')
+            media = probe(source['source']['path'])
+            picture = next(s for s in media['streams'] if s['codec_type'] == 'video')
+            with tempfile.TemporaryDirectory(prefix='title-preflight-') as folder:
+                title_preflight = render_text_asset(text, picture['width'], picture['height'],
+                                                   Path(folder)/'title.png', version=title_version)
+            text.pop('x'); text.pop('y')
+            title_parameters = {**text, **follow}
         track_path=self.root/'artifacts'/('track-'+uuid.uuid4().hex[:12]+'.json')
         track_video(source['source']['path'],box,track_path,start_frame=first_frame,end_frame=end_frame,
                     corrections=corrections,algorithm=algorithm,model_path=model_path,actor=actor,reason=note)
@@ -834,6 +853,10 @@ class Session:
                'output_start':str(Fraction(first_frame,1)/rate),'output_end':str(Fraction(end_frame,1)/rate),
                'strength':strength,'reason':note,
                'parameters':{'track_path':str(track_path),**(title_parameters if effect=='tracked_title' else {'max_scale':max_scale})}}
+        if title_preflight is not None:
+            event.update(effect_version=title_version, font_sha256=title_preflight['font_sha256'])
+            if title_version == 2:
+                event['layout_binding'] = title_preflight['layout_binding']
         from .video_effects import revise_effects
         from .composition import resolve_guides
         cfg=read(render['project']['path'])
@@ -846,6 +869,7 @@ class Session:
         candidate=self.create_candidate({'video_effects':effects,'composition_guides':resolved['guides']},
                                         actor,note,expected_project=state['project'],base_render_id=render_id)
         return {'candidate':candidate,'tracking':fingerprint(track_path),'basis':source,
+                **({'title_preflight':title_preflight} if title_preflight is not None else {}),
                 'adopted':False,'review_required':True}
 
     def propose_effects(self, render_id, operations, actor, note):

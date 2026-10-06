@@ -103,6 +103,8 @@ def parser():
     a.add_argument('--model',type=Path)
     a.add_argument('--effect',choices=['tracked_zoom','tracked_title'],default='tracked_zoom')
     a.add_argument('--title-parameters-file',type=Path,help='Label text, placement and readable style JSON')
+    a.add_argument('--title-version',type=int,choices=[1,2],default=1,
+                   help='1: explicit lines; 2: measured Japanese/English wrapping (text-layout extra)')
     a.add_argument('--max-scale',type=float,default=1.12)
     a.add_argument('--strength',type=float,default=.65)
     a.add_argument('--corrections-file',type=Path)
@@ -231,7 +233,8 @@ def dispatch(args):
         return session.propose_tracking(args.render_id,args.box,args.first_frame,args.end_frame,args.actor,args.note,
             algorithm=args.algorithm,model_path=args.model,max_scale=args.max_scale,strength=args.strength,
             corrections=read_corrections(args.corrections_file) if args.corrections_file else None,
-            effect=args.effect,title_parameters=_object(args.title_parameters_file) if args.title_parameters_file else None)
+            effect=args.effect,title_parameters=_object(args.title_parameters_file) if args.title_parameters_file else None,
+            title_version=args.title_version)
     if action == 'direction':
         return session.propose_direction(_object(args.request_file), args.actor, args.note,
                                          preference=args.preference,
