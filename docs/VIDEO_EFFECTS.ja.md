@@ -89,3 +89,20 @@ uv run video-harness session effects SESSION RENDER_ID --operations-file operati
 - [Apple: Add video effect keyframes](https://support.apple.com/guide/final-cut-pro/ver8e3f20ea/mac) — FCPのパラメータアニメーション。ハーネスの焼込み効果と編集可能なFCPキーフレームは別物として検証する。
 
 フックの配置、アクセントの密度、音楽との相性は編集上の提案であり、視聴維持率の実測結果ではない。
+
+## 日本語・英語の折り返しタイトル（alpha.6後の開発版）
+
+`keyword_title` と `tracked_title` の `effect_version: 2` は、実フォントの幅を測って折り返します。`uv sync --locked --extra text-layout` でローカルのBudouXとregexを導入してください。既存の方式1は自動改行しません。
+
+```json
+{"id":"result","type":"keyword_title","effect_version":2,
+ "output_start":"1","output_end":"4","strength":1,
+ "reason":"実演の結果を明示する",
+ "parameters":{"text":"Final Cut Proで24 fpsの映像を編集する",
+ "language":"ja","max_width_fraction":0.8,"max_lines":3,
+ "protected_phrases":["Final Cut Pro","24 fps"]}}
+```
+
+日本語は句の境界を優先し、必要なら文字のまとまりで折り返します。英語は単語間で改行します。明示した改行を保持し、選択した句読点の禁則、数値と対応する単位、`protected_phrases`を保護します。固有名詞・複合語は保護語句に指定してください。行数・幅に収まらない文は拒否し、縮小・省略しません。最大120文字、3行です。
+
+描画証拠は原文・実際の行・フォント／PNG SHA、BudouXとregexのバージョン、日本語モデルSHAを保持します。依存バージョン・モデルが変わった既存イベントは再提案が必要です。折り返し後の実測矩形を配置・追従・保護領域検査に使います。完全な日本語組版、表示時間の十分さ、字幕の意味や人の読みやすさを自動保証するものではありません。スマホ実寸で確認してください。公開済みalpha.6には未収録です。

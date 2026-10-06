@@ -42,6 +42,28 @@ def pcm_hash(path):
 
 
 class EffectsTest(unittest.TestCase):
+    def test_wrapped_title_render_keeps_audio_and_refuses_changed_engine_binding(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);source=root/'source.mp4';output=root/'wrapped.mp4'
+            fixture(source)
+            mapping={'fps':'10','duration':'6/5','sequence':[]}
+            event={'id':'wrapped','type':'keyword_title','effect_version':2,
+                   'output_start':'1/5','output_end':'1','strength':1,'reason':'Measured two-line title',
+                   'parameters':{'text':'Modern dance rhythm','language':'en',
+                                 'max_width_fraction':.65,'font_size_fraction':.12}}
+            plan=resolve_effects({'version':1,'mapping_sha256':digest(mapping),'events':[event]},mapping)
+            report=render_effects(source,plan,output)
+            self.assertEqual(pcm_hash(source),pcm_hash(output))
+            self.assertEqual(report['frame_count'],12)
+            self.assertGreater(len(report['text_assets'][0]['rendered_lines']),1)
+            bounds=report['text_assets'][0]['bounds']
+            crop=tuple(round(v*s) for v,s in zip(bounds,(160,90,160,90)))
+            before=frame(source,5,root/'before-wrap.png');after=frame(output,5,root/'after-wrap.png')
+            self.assertGreater(sum(ImageStat.Stat(ImageChops.difference(before.crop(crop),after.crop(crop))).mean),20)
+            broken=json.loads(json.dumps(plan));broken['events'][0]['layout_binding']['model_sha256']='0'*64
+            with self.assertRaisesRegex(ValueError,'layout engine/model binding'):
+                render_effects(source,broken,root/'changed.mp4')
+
     def test_tracked_zoom_renders_exact_valid_rows_and_rejects_stale_or_lost(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);source=root/'source.mp4';output=root/'tracked.mp4';track=root/'track.json'

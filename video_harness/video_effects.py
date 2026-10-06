@@ -62,7 +62,7 @@ def _frame(time, rate, field):
 
 def _canonical_event(row, rate, count):
     required = {'id', 'type', 'output_start', 'output_end', 'strength', 'reason'}
-    if not isinstance(row, dict) or not required <= set(row) or set(row) - required - {'parameters', 'effect_version', 'font_sha256'}:
+    if not isinstance(row, dict) or not required <= set(row) or set(row) - required - {'parameters', 'effect_version', 'font_sha256', 'layout_binding'}:
         raise ValueError('Effect event needs exact id, type, times, strength, reason')
     if not isinstance(row['id'], str) or not row['id'].strip():
         raise ValueError('Effect id must be nonempty')
@@ -81,14 +81,23 @@ def _canonical_event(row, rate, count):
             'reason': row['reason'].strip()}
     if row['type'] in {'keyword_title', 'tracked_title'}:
         from .effect_catalog import validate_parameters
-        if type(row.get('effect_version', 1)) is not int or row.get('effect_version', 1) != 1:
+        if type(row.get('effect_version', 1)) is not int or row.get('effect_version', 1) not in (1, 2):
             raise ValueError('Unsupported effect version')
-        result['parameters'] = validate_parameters(row['type'], row.get('parameters', {}))
+        version = row.get('effect_version', 1)
+        result['parameters'] = validate_parameters(row['type'], row.get('parameters', {}), version=version)
+        if version == 2:
+            from .text_effects import layout_binding
+            binding = layout_binding()
+            if row.get('layout_binding', binding) != binding:
+                raise ValueError('Text layout engine/model binding changed')
+            result['layout_binding'] = binding
+        elif 'layout_binding' in row:
+            raise ValueError('Only version-2 text effects accept a layout binding')
         font_sha = _sha(result['parameters']['font_path'])
         if row.get('font_sha256', font_sha) != font_sha:
             raise ValueError('Text font binding changed')
         result['font_sha256'] = font_sha
-        result['effect_version'] = 1
+        result['effect_version'] = version
         if row['type'] == 'tracked_title':
             params = result['parameters']; sha = _sha(params['track_path'])
             if params['track_sha256'] not in (None, sha):
@@ -96,7 +105,7 @@ def _canonical_event(row, rate, count):
             params['track_sha256'] = sha
             _tracking_data(result, rate)
     elif row['type'] in {'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe'}:
-        if 'font_sha256' in row:
+        if 'font_sha256' in row or 'layout_binding' in row:
             raise ValueError('Only text effects accept a font binding')
         if type(row.get('effect_version', 1)) is not int or row.get('effect_version', 1) != 1:
             raise ValueError('Unsupported effect version')
@@ -111,7 +120,7 @@ def _canonical_event(row, rate, count):
                 raise ValueError('Tracking artifact changed')
             params['track_sha256']=sha
             _tracking_data(result,rate)
-    elif 'parameters' in row or 'effect_version' in row or 'font_sha256' in row:
+    elif 'parameters' in row or 'effect_version' in row or 'font_sha256' in row or 'layout_binding' in row:
         raise ValueError('Legacy effects do not accept parameters; use a versioned new effect')
     return result
 
@@ -488,7 +497,9 @@ def render_effects(input, plan, output, assets=None, composition=None):
         resource_dir.mkdir(parents=True, exist_ok=True)
         png = resource_dir / f'title-{len(titles)}.png'
         text_parameters = {k:v for k,v in event['parameters'].items() if k not in {'track_path','track_sha256','placement','gap_fraction','offset_x','offset_y'}}
-        title = render_text_asset(text_parameters, width, height, png)
+        title = render_text_asset(text_parameters, width, height, png, version=event['effect_version'])
+        if event['effect_version'] == 2 and title['layout_binding'] != event['layout_binding']:
+            raise ValueError('Text layout engine/model changed while rendering')
         if title['font_sha256'] != event['font_sha256']:
             raise ValueError('Text font changed while rendering')
         input_index = len(secondary) + len(titles) + 1

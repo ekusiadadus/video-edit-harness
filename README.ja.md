@@ -211,3 +211,5 @@ uv run video-harness verify /path/to/final.mp4 --output output/final-check
 映像効果の指定は [VIDEO_EFFECTS.ja.md](docs/VIDEO_EFFECTS.ja.md) を参照。控えめ／ポップのプリセットと、時刻・強度を指定するイベントを区別し、実レンダーで検証します。
 
 TikTok公式APIの接続設定・OAuth・本人のプロフィールと公開動画一覧の読み取りは [接続ガイド](docs/TIKTOK_API.ja.md) を参照してください。これは作業ツリーの追加機能です。投稿、音源ダウンロード、流行ランキングの取得は含みません。実アカウントとの疎通はOAuth後に別途確認します。
+
+alpha.6後の開発版では、日本語・英語のタイトルを実フォント幅で折り返せます。数値と単位や指定した語句を保護し、収まらない文は修正理由を返します。 [設定と制限 / Controls and limits](docs/VIDEO_EFFECTS.ja.md)。公開済みalpha.6には未収録です。

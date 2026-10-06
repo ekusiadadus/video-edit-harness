@@ -74,6 +74,12 @@ def catalog() -> dict:
                        'background': {'type': 'color', 'default': '#171717'},
                        'motion': {'type': 'enum', 'values': ['fade', 'rise'], 'default': 'fade'},
                        'font_path': {'type': 'file', 'default': 'first available CJK system font'}}}
+    effects['keyword_title']['supported_versions'] = [1, 2]
+    effects['keyword_title']['version_2_parameters'] = {
+        'language': {'type': 'enum', 'values': ['ja', 'en'], 'default': 'ja'},
+        'max_width_fraction': {'type': 'number', 'minimum': .2, 'maximum': .9, 'default': .8},
+        'max_lines': {'type': 'integer', 'minimum': 1, 'maximum': 3, 'default': 3},
+        'protected_phrases': {'type': 'text_array', 'default': []}}
     effects['tracked_title'] = deepcopy(effects['keyword_title'])
     effects['tracked_title']['intent'] = 'Follow observed object boxes with a measured label; reject loss, clipping and declared-region collision.'
     effects['tracked_title']['parameters'].update({
@@ -89,19 +95,20 @@ def catalog() -> dict:
     return {"version": 1, "effects": effects}
 
 
-def validate_parameters(kind: str, parameters: dict | None) -> dict:
+def validate_parameters(kind: str, parameters: dict | None, *, version: int = 1) -> dict:
     """Validate one effect's controls and fill defaults without mutating input."""
     if kind == 'tracked_title':
         if not isinstance(parameters, dict):
             raise ValueError('Tracked title parameters must be an object')
-        specs = catalog()['effects'][kind]['parameters']
+        definition = catalog()['effects'][kind]
+        specs = {**definition['parameters'], **(definition['version_2_parameters'] if version == 2 else {})}
         if parameters.keys() - specs.keys():
             raise ValueError('Unknown tracked_title parameters')
         from .text_effects import validate_text_parameters
         from .tracked_title import validate_follow_parameters
         follow_keys = {'placement', 'gap_fraction', 'offset_x', 'offset_y'}
         text = validate_text_parameters({k: v for k, v in parameters.items()
-                                        if k not in follow_keys | {'track_path', 'track_sha256'}})
+                                        if k not in follow_keys | {'track_path', 'track_sha256'}}, version=version)
         if text['motion'] != 'fade':
             raise ValueError('Tracked titles support fade only')
         text.pop('x'); text.pop('y')
@@ -111,7 +118,7 @@ def validate_parameters(kind: str, parameters: dict | None) -> dict:
                 **validate_follow_parameters({k: v for k, v in parameters.items() if k in follow_keys})}
     if kind == 'keyword_title':
         from .text_effects import validate_text_parameters
-        return validate_text_parameters(parameters or {})
+        return validate_text_parameters(parameters or {}, version=version)
     if kind not in _EFFECTS:
         raise ValueError(f"Unsupported effect kind: {kind!r}")
     if parameters is None:

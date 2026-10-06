@@ -15,6 +15,24 @@ FONT = next((path for path in FONT_PATHS if Path(path).is_file()), None)
 
 
 class TextEffectsTests(unittest.TestCase):
+    @unittest.skipUnless(FONT, 'No CJK font')
+    def test_version_two_wraps_measured_card_without_changing_legacy_pixels(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            settings = {'text': 'Modern dance with clear rhythm', 'font_path': FONT,
+                        'font_size_fraction': .12}
+            a = render_text_asset({'text': '結果', 'font_path': FONT}, 640, 360, root/'a.png')
+            b = render_text_asset({'text': '結果', 'font_path': FONT}, 640, 360, root/'b.png', version=1)
+            self.assertEqual(a['png_sha256'], b['png_sha256'])
+            result = render_text_asset({**settings, 'language': 'en', 'max_width_fraction': .6},
+                                       640, 360, root/'wrapped.png', version=2)
+            self.assertGreater(len(result['rendered_lines']), 1)
+            self.assertEqual(' '.join(result['rendered_lines']), settings['text'])
+            self.assertLessEqual(result['bounds'][2]-result['bounds'][0], .6)
+            self.assertEqual(result['original_text'], settings['text'])
+            with self.assertRaises(ValueError):
+                render_text_asset({**settings, 'language': 'en'}, 640, 360, root/'legacy.png')
+
     def test_validation_rejects_unsafe_or_unreadable_parameters(self):
         for parameters in (
             {"text": ""}, {"text": "a\nb\nc\nd"}, {"text": "a\rb"},
