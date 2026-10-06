@@ -115,7 +115,7 @@ def resolve_production(cfg, mapping):
                 raise ValueError('Pattern permits user-owned visual assets only')
     used = {c['asset_id'] for c in cues if c.get('asset_id')}
     for event in effects['events']:
-        if event['type'] == 'keyword_title' and pattern['visual_assets'] == 'off':
+        if event['type'] in {'keyword_title','tracked_title'} and pattern['visual_assets'] == 'off':
             raise ValueError('Keyword title contradicts disabled visual assets')
         if event['type'] == 'comparison_wipe':
             asset_id = event['parameters']['asset_id']
@@ -158,7 +158,7 @@ def verify_production(production, operation='embedded_use'):
         from fractions import Fraction
         import json
         for event in production['effects']['events']:
-            if event['type']=='tracked_zoom':
+            if event['type'] in {'tracked_zoom','tracked_title'}:
                 doc=json.loads(Path(event['parameters']['track_path']).read_text())
                 _tracking_data(event,Fraction(doc['fps']))
     assets = {a['asset_id']: a for a in production.get('source_assets', []) + production['assets']}

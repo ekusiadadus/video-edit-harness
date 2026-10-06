@@ -8,6 +8,8 @@ alpha.6の編集パターン実装では、自然な編集を既定にBGM・効�
 
 固定領域と追跡した人物・字幕領域の保護には `composition_guides`、ローカル追跡には `tracking track`／`tracking validate` を使用します。`session track-effect` は観察した区間の追跡ズームと、文字の重なり・ズーム見切れの検査を未採用候補にします。[追跡と配置検査](docs/TRACKING.ja.md)にOpenCV・MediaPipeの選択と制限を記載しています。`retime prepare`／`retime render` で変速・静止保持、音声伸縮、字幕時刻の移行を単独のMP4へ描画できます。[時間変更の操作と制限](docs/RETIME.ja.md)を参照してください。visualセッションの未採用候補と変速済み映像のFCP受け渡しに対応します。FCPで編集できる時間変更と発話セッションへの統合は未対応です。
 
+alpha.6後の開発版には、観察した位置へ短い文字を追従させる `tracked_title` を追加しています。`session track-effect --effect tracked_title --title-parameters-file label.json` で未採用候補を作れます。公開済みalpha.6には未収録です。[使い方と制限](docs/TRACKING.ja.md#追従ラベルを提案するalpha6後の作業ツリー)を確認してください。
+
 変速はまず素材を連結した段階の映像を確認し、観察したフレーム範囲で未採用候補を作ります。
 
 ```sh

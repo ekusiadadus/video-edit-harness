@@ -102,7 +102,9 @@ def _framewise_checks(events, guide, titles, rate):
         raise ValueError('Tracked composition does not support split/comparison geometry; revise interval')
     tracks={e['id']:{r['frame']:r['box'] for r in _tracking_data(e,rate)['rows']}
             for e in active if e['type']=='tracked_zoom'}
-    counts={e['id']:0 for e in active if e['type'] in {'keyword_title','smooth_zoom','tracked_zoom','zoom_pulse'}}
+    title_positions={key:{r['frame']:r['bounds'] for r in title.get('frame_positions',[])}
+                     for key,title in titles.items()}
+    counts={e['id']:0 for e in active if e['type'] in {'keyword_title','tracked_title','smooth_zoom','tracked_zoom','zoom_pulse'}}
     for frame in range(first,last):
         present=[e for e in active if _time(e['output_start'],'start')*rate<=frame<_time(e['output_end'],'end')*rate]
         box=list(boxes[frame])
@@ -125,9 +127,14 @@ def _framewise_checks(events, guide, titles, rate):
             raise ValueError(f'Zoom crops tracked subject: guide {guide["id"]}, frame {frame}')
         for e in present:
             if e['id'] in counts:counts[e['id']]+=1
-            if e['type']!='keyword_title':continue
+            if e['type'] not in {'keyword_title','tracked_title'}:continue
             if e['id'] not in titles:raise ValueError('Missing measured title bounds')
-            bounds=list(titles[e['id']]['bounds'])
+            title=titles[e['id']]
+            if e['type']=='tracked_title':
+                positions=title_positions[e['id']]
+                if frame not in positions:raise ValueError('Missing tracked title position')
+                bounds=list(positions[frame])
+            else:bounds=list(title['bounds'])
             if e['parameters']['motion']=='rise':bounds[3]=min(1,bounds[3]+.02*e['strength'])
             # Partially offscreen caption regions have only a visible portion.
             clipped=[max(0,box[0]),max(0,box[1]),min(1,box[2]),min(1,box[3])]
@@ -155,10 +162,24 @@ def check_composition(events, composition, title_assets=(), *, fps=None):
             if (_time(event['output_start'],'start') >= _time(guide['output_end'],'end') or
                 _time(guide['output_start'],'start') >= _time(event['output_end'],'end')):
                 continue
-            if event['type'] not in {'keyword_title', 'smooth_zoom'}:
+            if event['type'] not in {'keyword_title', 'tracked_title', 'smooth_zoom'}:
                 checked.append({'event_id':event['id'],'guide_id':guide['id'],'status':'not_checked_for_this_effect'})
                 continue
             problem=None
+            if event['type']=='tracked_title':
+                if event['id'] not in titles:raise ValueError('Missing measured title bounds')
+                if fps is None:raise ValueError('Tracked title checks require output FPS')
+                rate=Fraction(fps)
+                from .video_effects import _frame
+                first=_frame(_time(guide['output_start'],'start'),rate,'start')
+                last=_frame(_time(guide['output_end'],'end'),rate,'end')
+                rows=[r for r in titles[event['id']]['frame_positions'] if first<=r['frame']<last]
+                for row in rows:
+                    if overlap(row['bounds'],guide['rect'])>0:
+                        raise ValueError(f'Text intersects protected region: event {event["id"]}, guide {guide["id"]}, frame {row["frame"]}')
+                checked.append({'event_id':event['id'],'guide_id':guide['id'],
+                                'status':'no_detected_conflict','frames_checked':len(rows)})
+                continue
             if event['type']=='keyword_title':
                 if event['id'] not in titles:raise ValueError('Missing measured title bounds')
                 bounds=list(titles[event['id']]['bounds'])

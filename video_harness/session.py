@@ -793,8 +793,9 @@ class Session:
 
     def propose_tracking(self, render_id, box, first_frame, end_frame, actor, note,
                          *, algorithm='csrt', model_path=None, max_scale=1.12,
-                         strength=.65, corrections=None):
-        """Track observed picture and propose a source-bound unadopted zoom."""
+                         strength=.65, corrections=None, effect='tracked_zoom',
+                         title_parameters=None):
+        """Track observed picture and propose an unadopted zoom or readable label."""
         from fractions import Fraction
         from .tracking import track_video,validate_track
         from .production import frozen_pattern
@@ -804,16 +805,25 @@ class Session:
         pattern=frozen_pattern(read(render['project']['path']))
         if pattern['id']=='natural' or pattern['intensity']=='off':
             raise ValueError('Tracking effect conflicts with natural/off; choose an enabled comparison direction')
+        if effect not in {'tracked_zoom','tracked_title'}:
+            raise ValueError('Choose tracked_zoom or tracked_title')
+        if effect=='tracked_title':
+            if not isinstance(title_parameters,dict) or not title_parameters.get('text'):
+                raise ValueError('Tracked title requires observed label text')
+            if set(title_parameters) & {'track_path','track_sha256'}:
+                raise ValueError('Track binding is generated from the observed input')
+        elif title_parameters is not None:
+            raise ValueError('Title parameters require tracked_title')
         source=self.tracking_source(render_id)
         mapping=read(source['mapping']['path']);rate=Fraction(mapping['fps'])
         track_path=self.root/'artifacts'/('track-'+uuid.uuid4().hex[:12]+'.json')
         track_video(source['source']['path'],box,track_path,start_frame=first_frame,end_frame=end_frame,
                     corrections=corrections,algorithm=algorithm,model_path=model_path,actor=actor,reason=note)
         validate_track(track_path,source=source['source']['path'],first_frame=first_frame,end_frame=end_frame)
-        event={'id':'track-'+uuid.uuid4().hex[:12],'type':'tracked_zoom',
+        event={'id':'track-'+uuid.uuid4().hex[:12],'type':effect,
                'output_start':str(Fraction(first_frame,1)/rate),'output_end':str(Fraction(end_frame,1)/rate),
                'strength':strength,'reason':note,
-               'parameters':{'track_path':str(track_path),'max_scale':max_scale}}
+               'parameters':{'track_path':str(track_path),**(title_parameters if effect=='tracked_title' else {'max_scale':max_scale})}}
         from .video_effects import revise_effects
         from .composition import resolve_guides
         cfg=read(render['project']['path'])

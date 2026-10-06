@@ -12,6 +12,8 @@ Turn local spoken footage into coherent edits with **Codex or Claude Code**: sho
 
 This English demo uses an original illustration, synthetic English speech and English captions. The [Japanese demo](README.ja.md) has separate Japanese speech, captions and labels. Both are synthetic examples: the YouTube edit keeps both tips and TikTok keeps one complete tip. The comparison uses actual local renders; it is not a screen recording. Automated checks and these examples do not establish human listening approval, FCP GUI import or real-footage quality. [Provenance and offline reproduction](docs/demo/README.md).
 
+The development checkout after alpha.6 adds `tracked_title`: measured labels follow observed boxes through `session track-effect --effect tracked_title --title-parameters-file label.json`. Lost/stale tracking, clipping and declared-region collision fail; overlapping zoom/split/comparison geometry is unsupported. This addition is absent from the published alpha.6 assets. See [tracking](docs/TRACKING.ja.md).
+
 ## Ask for an edit
 
 | Where | Regular YouTube | TikTok / Reels / Shorts |

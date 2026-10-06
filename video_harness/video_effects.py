@@ -13,7 +13,7 @@ import subprocess
 import uuid
 
 TYPES = {'zoom_pulse', 'split_screen', 'monochrome', 'color_frame',
-         'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe', 'keyword_title'}
+         'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe', 'keyword_title', 'tracked_title'}
 INTENSITY = {'low': .35, 'medium': .65, 'high': 1.0}
 
 
@@ -79,16 +79,22 @@ def _canonical_event(row, rate, count):
     result = {'id': row['id'], 'type': row['type'], 'output_start': str(Fraction(first, 1) / rate),
             'output_end': str(Fraction(last, 1) / rate), 'strength': float(row['strength']),
             'reason': row['reason'].strip()}
-    if row['type'] == 'keyword_title':
-        from .text_effects import validate_text_parameters
+    if row['type'] in {'keyword_title', 'tracked_title'}:
+        from .effect_catalog import validate_parameters
         if type(row.get('effect_version', 1)) is not int or row.get('effect_version', 1) != 1:
             raise ValueError('Unsupported effect version')
-        result['parameters'] = validate_text_parameters(row.get('parameters', {}))
+        result['parameters'] = validate_parameters(row['type'], row.get('parameters', {}))
         font_sha = _sha(result['parameters']['font_path'])
         if row.get('font_sha256', font_sha) != font_sha:
             raise ValueError('Text font binding changed')
         result['font_sha256'] = font_sha
         result['effect_version'] = 1
+        if row['type'] == 'tracked_title':
+            params = result['parameters']; sha = _sha(params['track_path'])
+            if params['track_sha256'] not in (None, sha):
+                raise ValueError('Tracking artifact changed')
+            params['track_sha256'] = sha
+            _tracking_data(result, rate)
     elif row['type'] in {'smooth_zoom', 'tracked_zoom', 'saturation_pulse', 'comparison_wipe'}:
         if 'font_sha256' in row:
             raise ValueError('Only text effects accept a font binding')
@@ -402,12 +408,12 @@ def render_effects(input, plan, output, assets=None, composition=None):
                                     'sha256':guide['track_sha256'],'algorithm':doc['algorithm'],
                                     'source_sha256':doc['source']['sha256']})
     for event in events:
-        if event['type']=='tracked_zoom':
+        if event['type'] in {'tracked_zoom', 'tracked_title'}:
             for other in events:
-                if other is event or other['type'] not in {'zoom_pulse','smooth_zoom','tracked_zoom'}:
+                if other is event or other['type'] not in ({'zoom_pulse','smooth_zoom','tracked_zoom','split_screen','comparison_wipe'} if event['type']=='tracked_title' else {'zoom_pulse','smooth_zoom','tracked_zoom'}):
                     continue
                 if _time(event['output_start'],'start')<_time(other['output_end'],'end') and _time(other['output_start'],'start')<_time(event['output_end'],'end'):
-                    raise ValueError('Tracking anchors cannot be stacked with another overlapping zoom')
+                    raise ValueError('Tracked geometry cannot be stacked with overlapping zoom/split/comparison effects')
             doc=_tracking_data(event,rate)
             if doc['source']['sha256']!=source_sha or doc['source']['bytes']!=source.stat().st_size:
                 raise ValueError('Tracking belongs to a different effects input; track the retained pre-effects picture')
@@ -476,12 +482,13 @@ def render_effects(input, plan, output, assets=None, composition=None):
     titles = []
     resource_dir = target.parent / (target.stem + '.resources-' + uuid.uuid4().hex[:8])
     for event in events:
-        if event['type'] != 'keyword_title':
+        if event['type'] not in {'keyword_title', 'tracked_title'}:
             continue
         from .text_effects import render_text_asset
         resource_dir.mkdir(parents=True, exist_ok=True)
         png = resource_dir / f'title-{len(titles)}.png'
-        title = render_text_asset(event['parameters'], width, height, png)
+        text_parameters = {k:v for k,v in event['parameters'].items() if k not in {'track_path','track_sha256','placement','gap_fraction','offset_x','offset_y'}}
+        title = render_text_asset(text_parameters, width, height, png)
         if title['font_sha256'] != event['font_sha256']:
             raise ValueError('Text font changed while rendering')
         input_index = len(secondary) + len(titles) + 1
@@ -492,9 +499,29 @@ def render_effects(input, plan, output, assets=None, composition=None):
         graph += (f';[{input_index}:v]format=rgba,colorchannelmixer=aa={event["strength"]:.9f},'
                   f'fade=t=in:st={first:.9f}:d={fade:.9f}:alpha=1,'
                   f'fade=t=out:st={last-fade:.9f}:d={fade:.9f}:alpha=1[{branch}]')
+        x = '0'
+        if event['type'] == 'tracked_title':
+            from .tracked_title import compile_title_positions
+            doc = _tracking_data(event, rate)
+            first_frame=_frame(_time(event['output_start'],'start'),rate,'start')
+            last_frame=_frame(_time(event['output_end'],'end'),rate,'end')
+            rows=[r for r in doc['rows'] if first_frame<=r['frame']<last_frame]
+            positions = compile_title_positions(rows, first_frame, last_frame,
+                                                width, height, title['bounds'],
+                                                {k:event['parameters'][k] for k in ('placement','gap_fraction','offset_x','offset_y')})
+            title['frame_positions'] = positions
+            def expression(rows, key):
+                if len(rows) == 1: return str(rows[0][key])
+                half = len(rows)//2
+                clock = f'floor(t*{rate.numerator}/{rate.denominator}+0.5)'
+                return f'if(lt({clock},{rows[half]["frame"]}),{expression(rows[:half],key)},{expression(rows[half:],key)})'
+            x = expression(positions, 'x_pixels')
+            y = expression(positions, 'y_pixels')
         travel = min(height*.02*event['strength'], height*(1-title['bounds'][3]))
-        y = f'{travel:.9f}*max(0,1-(t-{first:.9f})/{fade:.9f})' if event['parameters']['motion'] == 'rise' else '0'
-        graph += (f';[{label}][{branch}]overlay=x=0:y=\'{y}\':shortest=1:'
+        static_y = f'{travel:.9f}*max(0,1-(t-{first:.9f})/{fade:.9f})' if event['parameters']['motion'] == 'rise' else '0'
+        if event['type'] != 'tracked_title': y = static_y
+        pixel_format = 'format=rgb:' if event['type']=='tracked_title' else ''
+        graph += (f';[{label}][{branch}]overlay=x=\'{x}\':y=\'{y}\':{pixel_format}eval=frame:shortest=1:'
                   f"enable='gte(t,{first:.9f})*lt(t,{last:.9f})'[{target_label}]")
         label = target_label
         titles.append({**title, 'path': str(png), 'event_id': event['id'],

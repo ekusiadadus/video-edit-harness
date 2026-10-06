@@ -1,6 +1,6 @@
 # 映像効果の指定と確認
 
-この文書は作業ツリーで追加中の `video_effects` 契約を記述する。公開済み alpha.5 の機能として扱わず、利用前に現在のCLI help、実装、テストと実レンダーを確認する。映像の魅力は効果の数で測らない。話の要点、動作、感情の変化、最後の答えを先に定め、効果はその一点を読み取りやすくするために使う。
+この文書は作業ツリーで追加中の `video_effects` 契約を記述する。alpha.6の機能と、その後の作業ツリーの追加を区別し、利用前に現在のCLI help、実装、テストと実レンダーを確認する。映像の魅力は効果の数で測らない。話の要点、動作、感情の変化、最後の答えを先に定め、効果はその一点を読み取りやすくするために使う。
 
 ## 設定
 
@@ -10,7 +10,9 @@
 
 `keyword_title` は明示した重要語をフェード／短い上昇で見せる。`parameters` は `text`（最大120文字・3行）、`x`／`y`、`font_size_fraction`（0.02〜0.12）、`foreground`／`background`（`#RRGGBB`）、`motion`（`fade`／`rise`）、任意の `font_path`。文字カードの実測矩形とフォント／PNGのSHAを記録する。文字と背景の指定色は4.5:1以上を要求するが、アニメーション中の透過・完成画面・読む時間の確認を代替しない。顔・手・字幕・投稿UIを自動検出して避ける機能ではない。配置を調整して全編確認する。
 
-`smooth_zoom` の `parameters` は `anchor_x`／`anchor_y`（0〜1の画面座標）、`max_scale`（1〜1.5）、`easing`（`smoothstep`／`cosine`）。これは手動アンカーで、被写体追跡や顔・足先を守る自動検査は未実装。`saturation_pulse` は `minimum_saturation`（0〜1）と同じイージングを持つ。新効果は入口・出口で変化をゼロに戻し、3フレーム以上を必要とする。`strength` はズーム量・彩度低下量へ反映する。
+`tracked_title` はalpha.6後の作業ツリーで追加した追従ラベル。追跡ファイルとSHA、`placement`、間隔・微調整を指定し、全フレームの実測文字矩形で画面外や宣言領域との衝突を拒否する。`session track-effect --effect tracked_title --title-parameters-file` の手順と制限は [TRACKING.ja.md](TRACKING.ja.md) に記載している。自動で顔や空き場所を探す機能ではない。
+
+`smooth_zoom` の `parameters` は `anchor_x`／`anchor_y`（0〜1の画面座標）、`max_scale`（1〜1.5）、`easing`（`smoothstep`／`cosine`）。これは手動アンカーで、対象追跡は別の `tracked_zoom` を使い、顔・足先は観察した保護領域で宣言する。`saturation_pulse` は `minimum_saturation`（0〜1）と同じイージングを持つ。新効果は入口・出口で変化をゼロに戻し、3フレーム以上を必要とする。`strength` はズーム量・彩度低下量へ反映する。
 
 ## 局所修正を候補として作る
 
