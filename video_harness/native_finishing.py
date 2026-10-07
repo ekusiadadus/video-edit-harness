@@ -1,9 +1,14 @@
-"""Local instructions for platform-native finishing; no upload or native render."""
+"""Local native-finishing proposals and returned-media inspection; no upload."""
 from copy import deepcopy
 from fractions import Fraction
 from urllib.parse import urlparse
 
-from .common import fingerprint
+import math
+from pathlib import Path
+import re
+import json
+
+from .common import fingerprint, run, write
 
 
 def _url(value):
@@ -73,3 +78,95 @@ def plan_native_finishing(video, mapping, production, request):
                                 'Effect supports this uploaded video rather than capture only',
                                 'Selected sound start offset, cut alignment and original sound volume',
                                 'Native preview visual/listening review and explicit upload/publication approval']}
+
+
+def validate_native_receipt(proposal, returned_video, receipt):
+    """Check an explicit source/output declaration, not the truth of native execution."""
+    fields = {'base_video_sha256', 'result_video_sha256', 'method', 'reference_url',
+              'reported_music_applied', 'reported_effect_ids', 'note'}
+    if not isinstance(receipt, dict) or set(receipt) != fields:
+        raise ValueError('Native result needs an exact source/output receipt')
+    if (receipt['base_video_sha256'] != proposal['base_video']['sha256']
+            or receipt['result_video_sha256'] != returned_video['sha256']):
+        raise ValueError('Native result receipt source/output SHA mismatch')
+    if receipt['method'] not in {'studio_ui', 'business_api', 'symphony_api'}:
+        raise ValueError('Unknown native finishing method')
+    _url(receipt['reference_url'])
+    # OAuth callback URLs and tokens must never become local editing artifacts.
+    from urllib.parse import parse_qs
+    query = parse_qs(urlparse(receipt['reference_url']).query, keep_blank_values=True)
+    if set(query) - {'tempId'}:
+        raise ValueError('Native receipt URL must not contain authentication or other query parameters')
+    if type(receipt['reported_music_applied']) is not bool:
+        raise ValueError('Native music report must be a boolean')
+    if receipt['reported_music_applied'] and proposal['music'] is None:
+        raise ValueError('Reported native music differs from the proposal')
+    ids = receipt['reported_effect_ids']
+    if (not isinstance(ids, list) or any(not isinstance(value, str) for value in ids)
+            or len(ids) != len(set(ids))
+            or set(ids) - {effect['id'] for effect in proposal['effects']}):
+        raise ValueError('Reported native effects differ from the proposal')
+    if not isinstance(receipt['note'], str) or not receipt['note'].strip():
+        raise ValueError('Native result receipt needs an observation note')
+    return deepcopy(receipt)
+
+
+def inspect_native_result(video, output, require_music=False):
+    """Decode a returned file and flag absent/near-silent audio without approving music."""
+    if type(require_music) is not bool:
+        raise ValueError('require_music must be a boolean')
+    video = Path(video).resolve()
+    original = fingerprint(video)
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=False)
+    # A downloaded MP4 must not be interpreted as a network playlist.
+    input_args = ['-protocol_whitelist', 'file,pipe', '-f', 'mov', '-i', str(video)]
+    probe_log = run(['ffprobe', '-v', 'error', *input_args, '-show_streams', '-show_format',
+                     '-of', 'json'], output / 'probe.log')
+    data = json.loads(probe_log.split('\n', 1)[1])
+    write(output / 'probe.json', data)
+    picture = next((stream for stream in data['streams'] if stream['codec_type'] == 'video'), None)
+    if picture is None:
+        raise ValueError('Native result has no video stream')
+    duration = float(data['format']['duration'])
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError('Native result has invalid duration')
+    run(['ffmpeg', '-hide_banner', '-nostdin', '-v', 'error', '-xerror', *input_args,
+         '-map', '0:v:0', '-map', '0:a?', '-f', 'null', '-'], output / 'decode.log')
+    audio = next((stream for stream in data['streams'] if stream['codec_type'] == 'audio'), None)
+    measurement = {'audio_stream_present': audio is not None, 'peak_db': None,
+                   'near_silent': None, 'near_silent_threshold_db': -90,
+                   'scope': 'first audio stream, whole file; not track identity or listening review'}
+    if audio is not None:
+        log = run(['ffmpeg', '-hide_banner', '-nostdin', *input_args, '-map', '0:a:0',
+                   '-vn', '-af', 'volumedetect', '-f', 'null', '-'], output / 'audio-level.log')
+        match = re.search(r'max_volume:\s*(-?inf|[-+\d.]+) dB', log)
+        if not match:
+            raise ValueError('Cannot establish native result audio level')
+        peak = float(match.group(1))
+        if math.isnan(peak) or peak == math.inf:
+            raise ValueError('Invalid native result audio level')
+        measurement.update(peak_db=peak if math.isfinite(peak) else None,
+                           near_silent=peak <= measurement['near_silent_threshold_db'])
+    write(output / 'audio-measurement.json', measurement)
+    if fingerprint(video) != original:
+        raise ValueError('Native result changed during inspection')
+    missing_music = require_music and (audio is None or measurement['near_silent'])
+    result = {'version': 1, 'video': original, 'decode': 'pass', 'duration': duration,
+              'picture': {'width': picture['width'], 'height': picture['height'],
+                          'frame_rate': picture.get('avg_frame_rate'),
+                          'declared_frame_count': picture.get('nb_frames')},
+              'audio': measurement, 'music_requested': require_music,
+              'status': 'requested_music_not_demonstrated' if missing_music else 'awaiting_native_result_review',
+              'music_identity_verified': False, 'native_effects_verified': False,
+              'source_relationship_verified': False, 'timeline_mapping_inherited': False,
+              'human_visual_review': False, 'human_listening_review': False,
+              'cross_platform_rights_verified': False, 'published': False,
+              'next_action': ('Return to the native editor: requested music is absent or near-silent.'
+                              if missing_music else
+                              'Verify source relationship, selected music/effects, rights and exact-file playback.'),
+              'evidence': {name: fingerprint(output / name) for name in
+                           ('probe.json', 'probe.log', 'decode.log', 'audio-measurement.json') +
+                           (('audio-level.log',) if audio is not None else ())}}
+    write(output / 'inspection.json', result)
+    return result

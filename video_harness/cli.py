@@ -36,6 +36,7 @@ def parser():
  a=s.add_parser('export-xml');a.add_argument('plan',type=Path);a.add_argument('output',type=Path);a.add_argument('--name',default='Talk Pacing Review')
  a=s.add_parser('verify');a.add_argument('video',type=Path);a.add_argument('--output',type=Path,required=True)
  a.add_argument('--require-audio',action='store_true');a.add_argument('--expected-audio-range',nargs=2,type=float,metavar=('START','END'))
+ a=s.add_parser('native-inspect',help='Inspect downloaded native finishing media locally without assuming source or rights');a.add_argument('video',type=Path);a.add_argument('--output',type=Path,required=True);a.add_argument('--require-music',action='store_true')
  a=s.add_parser('transcribe');a.add_argument('project',type=Path);a.add_argument('--output',type=Path);a.add_argument('--provider',choices=['auto','openai','azure']);a.add_argument('--model');a.add_argument('--language')
  a=s.add_parser('edit-plan');a.add_argument('project',type=Path);a.add_argument('transcript',type=Path);a.add_argument('--output',type=Path)
  a=s.add_parser('revise-plan');a.add_argument('plan',type=Path);a.add_argument('output',type=Path);a.add_argument('--enable',default='');a.add_argument('--disable',default='');a.add_argument('--note',required=True)
@@ -135,6 +136,9 @@ def main():
    keeps=keep_intervals(plan);result=export_timeline(src,probe(src),keeps,args.output,args.name)
    write(args.output.with_suffix('.manifest.json'),{'source':current,'keep':keeps,'result':result,'cuts_enabled':sum(x.get('enabled') is True for x in plan['cuts']),'note':'Natural source audio; apply combined LUT in FCP; normalize final mix after editing.'});print(args.output);return
   if args.cmd=='verify':verify(args.video,args.output,require_audio=args.require_audio,expected_audio_range=args.expected_audio_range);print('decode + color tags + track coverage PASS');return
+  if args.cmd=='native-inspect':
+   from .native_finishing import inspect_native_result
+   print(json.dumps(inspect_native_result(args.video,args.output,args.require_music),ensure_ascii=False,indent=2));return
   if args.cmd=='check-fcp':
    from .fcp_check import compare_roundtrip
    result=compare_roundtrip(args.reference,args.returned,args.output,args.project_name)

@@ -164,6 +164,8 @@ Declared `composition_guides` guard supported title/zoom placement in fixed regi
 
 See the [TikTok API connection guide](docs/TIKTOK_API.ja.md) for desktop OAuth and read-only access to the authorized account profile and public videos. It does not post videos, download platform music, or retrieve trend rankings. Live connectivity requires separate OAuth and API verification. A live Symphony UI check applied a segment effect to a stock video and downloaded the MP4; music addition, editing API integration and rights for YouTube use remain unverified. This capability demo is not a finished production or proof of API connection.
 
+Development `native-inspect` checks a downloaded finishing MP4 locally; `session native-result` retains returned bytes and an explicit source/output receipt under the proposal. Missing or near-silent audio is flagged when music was requested. These commands preserve exact-file evidence without adopting the result or inheriting the original timeline, captions or review. [Commands and limits](docs/TIKTOK_API.ja.md).
+
 Alpha.7 supports measured Japanese/English title wrapping, protected phrases and number/unit grouping, with explicit overflow rejection. [Controls and limits](docs/VIDEO_EFFECTS.ja.md).
 
 Alpha.7 retains a pre-production speech assembly and exposes transcript-bound protected word frames through `session retime-source`. Speech retime candidates render with observed nonspoken intervals and transcript word protection. [Scope / 操作と制限](docs/RETIME.ja.md)

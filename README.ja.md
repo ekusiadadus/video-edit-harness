@@ -218,6 +218,8 @@ uv run video-harness verify /path/to/final.mp4 --output output/final-check
 
 TikTok公式APIの接続設定・OAuth・本人のプロフィールと公開動画一覧の読み取りは [接続ガイド](docs/TIKTOK_API.ja.md) を参照してください。これは作業ツリーの追加機能です。投稿、音源ダウンロード、流行ランキングの取得は含みません。実アカウントとの疎通はOAuth後に別途確認します。Symphonyの実編集画面ではStock動画への区間エフェクト適用とMP4ダウンロードを確認しましたが、音楽追加・編集API連携・YouTube用途の素材権利確認は未完了です。機能確認デモを完成作品やAPI接続の証拠とは扱いません。
 
+開発版の`native-inspect`は、外部仕上げのMP4をローカルで検査します。`session native-result`は提案と元／返却SHAの申告に結び付けて、返却動画と検査ログを保持します。音楽入りの依頼に音声がない／実質無音なら不足を示します。元の時間対応・字幕・レビューは継承せず、自動採用もしません。[操作と制限](docs/TIKTOK_API.ja.md)。
+
 alpha.7では、日本語・英語のタイトルを実フォント幅で折り返せます。数値と単位や指定した語句を保護し、収まらない文は修正理由を返します。 [設定と制限 / Controls and limits](docs/VIDEO_EFFECTS.ja.md)。
 
 発話セッションでは `session retime-source` で連結済み映像と単語の保護区間を確認できます。alpha.7では `nonspoken_intervals` を指定して未採用候補を描画し、字幕・元フレーム対応を移行できます。PCMの後に追加音と正規化を適用します。 [Scope / 操作と制限](docs/RETIME.ja.md)

@@ -22,7 +22,7 @@ SESSION_ACTIONS = ('start', 'status', 'cloud-policy', 'transcribe', 'transcript'
                    'package', 'finish', 'resume', 'handoff', 'revise', 'review',
                    'register-vertical', 'review-vertical', 'audition-junctions',
                    'inspect', 'preview-effects', 'preview-changes', 'delivery-check', 'candidate', 'adopt-candidate',
-                   'compare-candidates', 'select-comparison', 'effects', 'audio-cuts', 'direction', 'native-finish',
+                   'compare-candidates', 'select-comparison', 'effects', 'audio-cuts', 'direction', 'native-finish', 'native-result',
                    'tracking-source', 'track-effect',
                    'retime-source', 'retime',
                    'visual-plan', 'propose-beats', 'import-production-fcp')

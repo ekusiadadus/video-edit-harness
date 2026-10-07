@@ -235,6 +235,10 @@ class Session:
             check_ref(proposal)
         for finishing in state.get('native_finishing', []):
             check_ref(finishing['artifact'])
+        for returned in state.get('native_results', []):
+            check_ref(returned['proposal'])
+            for ref in returned['files'].values():
+                check_ref(ref)
         for imported in state.get('production_imports', []):
             for key in ('xml', 'report', 'candidate_changes'):
                 if imported.get(key):
@@ -377,6 +381,8 @@ class Session:
                 'pending_feedback': pending, 'next_action': next_action,
                 'last_actor': state['last_actor'], 'deep_verified': deep,
                 'operation': state['operation'], 'deliveries': state['deliveries'],
+                'native_finishing': state.get('native_finishing', []),
+                'native_results': state.get('native_results', []),
                 'derivatives': state.get('derivatives', []), 'cloud_permission': state.get('cloud_permission')}
 
     def resume(self, actor='codex'):
@@ -1843,10 +1849,64 @@ class Session:
                 raise ValueError('Native finishing needs a full base render')
             production = read(render['files']['production']['path']) if 'production' in render['files'] else {'cues': []}
             value = plan_native_finishing(render['files']['video'], read(render['files']['mapping']['path']), production, request)
-            item = {'render_id': rid, 'actor': actor, 'note': note,
+            item = {'id': uuid.uuid4().hex[:12], 'render_id': rid, 'actor': actor, 'note': note,
                     'artifact': self._artifact('native-finishing', value)}
             state.setdefault('native_finishing', []).append(item)
             self._save(state, 'native_finishing_proposed', actor, item)
+        return item
+
+    def native_result(self, proposal_id, video, receipt, actor, note):
+        """Retain and inspect external finishing bytes without adopting an unknown timeline."""
+        from .native_finishing import inspect_native_result, validate_native_receipt
+        require_note(note)
+        actor_name(actor)
+        if not isinstance(proposal_id, str) or not proposal_id:
+            raise ValueError('Native result needs a proposal ID or artifact SHA')
+        with self._lock():
+            state = self._load()
+            self._idle(state)
+            self._verify(state)
+            proposals = [item for item in state.get('native_finishing', [])
+                         if proposal_id in (item.get('id'), item['artifact']['sha256'])]
+            if len(proposals) != 1:
+                raise ValueError('Unknown or ambiguous native finishing proposal')
+            proposal = proposals[0]
+            render = self._find_render(state, proposal['render_id'])
+            self._verify_render(render)
+            value = read(proposal['artifact']['path'])
+            if value['base_video'] != render['files']['video']:
+                raise ValueError('Native finishing proposal base changed')
+            source = fingerprint(video)
+            declaration = validate_native_receipt(value, source, receipt)
+            identifier = uuid.uuid4().hex[:12]
+            folder = self.root / 'native-results' / identifier
+            folder.mkdir(parents=True, exist_ok=False)
+            saved = folder / 'returned.mp4'
+            shutil.copyfile(source['path'], saved)
+            copied = fingerprint(saved)
+            if copied['sha256'] != source['sha256'] or fingerprint(source['path']) != source:
+                raise ValueError('Native result changed while retaining bytes')
+            report = inspect_native_result(saved, folder / 'inspection', require_music=value['music'] is not None)
+            report.update(proposal=deepcopy(proposal['artifact']),
+                          base_render_id=proposal['render_id'], reported_execution=declaration,
+                          native_api_response_verified=False)
+            from fractions import Fraction
+            report['base_duration'] = float(Fraction(value['duration']))
+            report['duration_delta'] = report['duration'] - report['base_duration']
+            write(folder / 'report.json', report)
+            write(folder / 'receipt.json', declaration)
+            item = {'id': identifier, 'actor': actor, 'note': note,
+                    'proposal': deepcopy(proposal['artifact']), 'status': report['status'],
+                    'files': {'video': copied, 'report': fingerprint(folder / 'report.json'),
+                              'receipt': fingerprint(folder / 'receipt.json'),
+                              'inspection': fingerprint(folder / 'inspection' / 'inspection.json'),
+                              **report['evidence']}}
+            self._verify_render(render)
+            check_ref(proposal['artifact'])
+            for ref in item['files'].values():
+                check_ref(ref)
+            state.setdefault('native_results', []).append(item)
+            self._save(state, 'native_result_inspected', actor, item)
         return item
 
     def audition_junctions(self, rid, offset=0, limit=24, ids=None):

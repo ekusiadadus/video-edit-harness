@@ -437,6 +437,10 @@ commit1aaeae0のCI37502587768とcommit ee2409fのCI37504081601は完了・成功
 
 2026-10-07の再確認でSymphonyログイン済みの制作画面へ入れた。Stockの21.9秒ダンス素材にNightclubの区間エフェクトを追加し、横方向ブラーと効果レイヤーを確認。Downloadした実MP4は1080×1920、30fps、657フレーム、全AVデコード成功、SHA-256 `73567571e63d2bba409b1bc6019859dc8e4a6b157f214960e87bb7cb6af40ad3`。K-popカタログの検索／選択はできたが音楽レイヤー追加は未確認で、完成MP4は実質無音（−91 dB）。Studio UIでの効果適用の証拠であり、編集API疎通・音ハメ完成・人の全編受入・YouTube用途の権利確認を証明しない。ローカル素材送信・配信投稿なし。証跡は `output/implementation-maya/tiktok-native-live-20261007/`。同時点のdoctorはAPI未構成・未接続。
 
+開発版の外部仕上げ返却経路: `native-inspect`が取得MP4の全AVデコード・音声ピークを検査し、`session native-result`が既存提案と元／返却SHAの申告へ結び付けて動画・申告・検査・生ログを保持する。提案には新しいIDを付け、旧形式はartifact SHAでも指定可能。音声なし／ピーク−90 dB以下では音楽入りの要求を`requested_music_not_demonstrated`と示す。音があるだけで選択曲や効果の適用を確認済みとはしない。元の時間対応・字幕・拍・追跡・レビューを継承せず、採用中project／plan／renders／reviewsを変えない。外部処理のAPI申告も実API応答の証明ではない。改変はstatus／resumeで拒否する。
+
+関連14テスト（1.602秒）で実MP4の音あり・無音・音声なし、CLI取り込み、旧提案、SHA不一致／未知効果／認証query拒否、検査中差し替え、保存動画改変、壊れたMP4／ネットワークプレイリスト拒否、採用状態の不変を確認。共通スキル構造検査成功。実際のSymphony取得MP4を新CLIへ通し、21.9秒・全AVデコードpass・ピーク−91 dB・`requested_music_not_demonstrated`を確認。証跡は `output/implementation-maya/native-result-import-20261007/`。このStock動画を無関係なローカルSessionの返却として登録していない。Business／Symphony API接続、人の全編視聴・試聴、権利・配信確認とM4全体の受入は引き続き未完了。公開alpha.7には含まない。
+
 区間描画の最終検証: 全678テスト（452.220秒）、共通スキル構造検査が成功。最終コードの3回再測定は4.597557〜4.803436秒、中央値4.682672秒。元の全編基準との比は1.98倍、時間短縮49.46%。測定は上記の単一合成ケースに限定。`candidate-final.json` / `validation-final.json` と全体ログを保存。
 
 ## 実ダンスの複合演出比較（2026-10-07 開発版）
