@@ -12,13 +12,15 @@ from .video_effects import _mapping_shape
 
 _FIELDS = {'version', 'id', 'cue_id', 'beat_map', 'beat_indices', 'window_frames',
            'strength', 'reduced_motion', 'parameters', 'protected_intervals'}
+_TIME_FIELDS = (_FIELDS - {'beat_indices'}) | {'output_times', 'max_distance'}
 _METHODS = {'manual_beats', 'manual_bpm', 'librosa_beat_track', 'transient_hints'}
 
 
 def compile_beat_focus(request, mapping, production, reason):
-    if (not isinstance(request, dict) or set(request) != _FIELDS
-            or type(request['version']) is not int or request['version'] != 1):
-        raise ValueError('Beat focus requires exact version-1 fields')
+    if (not isinstance(request, dict) or type(request.get('version')) is not int
+            or request['version'] not in (1, 2)
+            or set(request) != (_FIELDS if request['version']==1 else _TIME_FIELDS)):
+        raise ValueError('Beat focus requires exact version-1 or version-2 fields')
     if (not isinstance(request['id'], str) or not request['id'] or request['id'].strip() != request['id']
             or any(c.isspace() for c in request['id']) or not isinstance(request['cue_id'], str)):
         raise ValueError('Beat focus needs a nonempty namespace and music cue ID')
@@ -72,7 +74,42 @@ def compile_beat_focus(request, mapping, production, reason):
     except (ValueError, ZeroDivisionError, OverflowError):
         raise ValueError('Invalid protected music-effect interval') from None
     mapped = map_beats(beat_map, [cue], mapping['fps'], protected)
-    indices = request['beat_indices']
+    time_selection = []
+    if request['version']==1:
+        indices = request['beat_indices']
+    else:
+        requested = request['output_times']
+        if not isinstance(requested, list) or not 1 <= len(requested) <= 32:
+            raise ValueError('Choose 1..32 output times')
+        def seconds(value):
+            if type(value) not in (str, int, float):
+                raise ValueError('Output times and distance must be rational seconds')
+            try:
+                return Fraction(str(value))
+            except (ValueError, ZeroDivisionError, OverflowError):
+                raise ValueError('Output times and distance must be rational seconds') from None
+        limit = seconds(request['max_distance'])
+        if not 0 <= limit <= 1:
+            raise ValueError('Maximum beat distance must be within 0..1 seconds')
+        indices = []
+        for raw in requested:
+            point = seconds(raw)
+            if not 0 <= point < Fraction(count, 1)/rate:
+                raise ValueError('Requested output time is outside the video')
+            distances = [(abs(Fraction(b['frame'], 1)/rate-point), i)
+                         for i,b in enumerate(mapped['beats'])]
+            if not distances:
+                raise ValueError('No mapped music beat near the requested time')
+            distances.sort()
+            distance, index = distances[0]
+            if distance > limit:
+                raise ValueError('No music beat within the requested maximum distance')
+            if len(distances)>1 and distances[1][0]==distance:
+                raise ValueError('Requested time is equally close to multiple beats; specify a clearer time')
+            indices.append(index)
+            time_selection.append({'requested_output_time': str(point), 'mapped_beat_index': index,
+                                   'selected_peak_time': str(Fraction(mapped['beats'][index]['frame'], 1)/rate),
+                                   'distance_seconds': str(distance), 'max_distance_seconds': str(limit)})
     window = request['window_frames']
     if (not isinstance(indices, list) or not 1 <= len(indices) <= 32
             or any(type(i) is not int or not 0 <= i < len(mapped['beats']) for i in indices)
@@ -103,4 +140,4 @@ def compile_beat_focus(request, mapping, production, reason):
         'music_sha256': asset['sha256'], 'source_beat_map': deepcopy(beat_map),
         'mapped_beats': mapped, 'anchors': anchors, 'operations': deepcopy(operations),
         'musical_meter_verified': False, 'human_listening_review': False,
-        'requires_review': True}
+        'requires_review': True, **({'time_selection': time_selection} if request['version']==2 else {})}

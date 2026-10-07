@@ -72,6 +72,54 @@ class BeatFocusTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Captured'):
             self.compile(req, mapping, production)
 
+    def time_request(self):
+        req, mapping, production = fixture()
+        req.pop('beat_indices')
+        req.update(version=2, output_times=['41/100'], max_distance='1/20')
+        return req, mapping, production
+
+    def test_output_time_selects_the_actual_trimmed_music_peak(self):
+        req, mapping, production = self.time_request()
+        before = deepcopy(req)
+        ops, proof = self.compile(req, mapping, production)
+        self.assertEqual(req, before)
+        self.assertEqual(proof['anchors'][0]['peak_frame'], 4)
+        self.assertEqual(proof['time_selection'][0]['requested_output_time'], '41/100')
+        self.assertEqual(proof['time_selection'][0]['distance_seconds'], '1/100')
+        self.assertEqual(proof['time_selection'][0]['selected_peak_time'], '2/5')
+        self.assertEqual(ops[0]['event']['output_start'], '3/10')
+        reduced, _ = self.compile({**req, 'reduced_motion': True}, mapping, production)
+        self.assertEqual([op['event']['type'] for op in reduced], ['saturation_pulse'])
+
+    def test_time_selection_rejects_ambiguity_distance_and_protection(self):
+        req, mapping, production = self.time_request()
+        cases = [{'output_times': ['3/10'], 'max_distance': '1/5'},
+                 {'output_times': ['7/10']}, {'output_times': ['41/100', '42/100']},
+                 {'output_times': [True]}, {'output_times': ['nan']},
+                 {'output_times': ['4/5']}, {'output_times': []},
+                 {'max_distance': True}, {'max_distance': '-1/10'}, {'max_distance': '2'},
+                 {'protected_intervals': [['1/2','7/10']]}, {'beat_indices': [1]},
+                 {'beat_map': {**req['beat_map'], 'source_sha256': 'b'*64}}]
+        for changes in cases:
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.compile({**req, **changes}, mapping, production)
+
+    def test_time_cli_builds_request_without_an_effect_json(self):
+        from video_harness.workflow_cli import parser, _beat_effect_request
+        with tempfile.TemporaryDirectory() as tmp:
+            beat_file = Path(tmp)/'beats.json';write(beat_file, fixture()[0]['beat_map'])
+            base = ['beat-effects','session','render','--note','One observed moment']
+            args = parser().parse_args(base+['--beat-map-file',str(beat_file),
+                    '--cue-id','bgm','--at','41/100','--window-frames','3','--max-distance','1/20'])
+            req = _beat_effect_request(args)
+            self.assertEqual(req['version'],2)
+            _, proof = self.compile(req, fixture()[1], fixture()[2])
+            self.assertEqual(proof['anchors'][0]['peak_frame'],4)
+            args.cue_id = None
+            with self.assertRaises(ValueError): _beat_effect_request(args)
+            args = parser().parse_args(base+['--request-file',str(beat_file),'--at','0.4'])
+            with self.assertRaises(ValueError): _beat_effect_request(args)
+
     def test_session_music_bytes_peak_and_recipe_survive_render(self):
         from tests.test_visual_editing import VisualEditingTests
         from video_harness.assets import register_asset
@@ -96,13 +144,14 @@ class BeatFocusTests(unittest.TestCase):
                      'source_start':'1/5','source_end':'1','gain_db':0,'fade_in':0,'fade_out':0,
                      'duck':False,'loop':False,'reason':'Synthetic music trim'}]}},'codex','Enable requested beat accents')
             render=s.render(preview=False,candidate_id=base['id'])
-            req=fixture()[0];req['beat_map']=analyze_beats(song,manual_beats=[.4,.6,.8])
+            req=self.time_request()[0];req['beat_map']=analyze_beats(song,manual_beats=[.4,.6,.8])
             before=s._load()
             candidate=s.propose_beat_effects(render['id'],req,'codex','Selected observed synthetic beats')
             result=s.render(preview=False,candidate_id=candidate['id'])
             proof=read(result['files']['motion_template']['path'])
             self.assertEqual(proof['music_sha256'],fingerprint(song)['sha256'])
             self.assertEqual(proof['anchors'][0]['peak_frame'],4)
+            self.assertEqual(proof['time_selection'][0]['distance_seconds'],'1/100')
             self.assertEqual(result['files']['motion_template'],candidate['motion_template'])
             self.assertEqual(read(result['files']['mapping']['path']),mapping)
             def pcm(r):

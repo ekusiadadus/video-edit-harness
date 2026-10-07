@@ -2,6 +2,14 @@
 
 各項目は記録時点の状態です。直近の開発機能を先頭に掲載し、過去の未完了記録も検証履歴として残しています。公開alpha.7と開発版を区別してください。
 
+## 2026-10-07 開発版: 秒数で音ハメの見せ場を指定
+
+`session beat-effects`へ`--beat-map-file`／`--cue-id`／`--at`を追加。エフェクトrequest JSONなしで、完成動画の指定秒に近い、実曲の拍の頂点フレームを選べる。既定150msの許容差を明示し、距離不足・同距離の曖昧さ・重複・保護区間・端を拒否。安全そうな別の拍へ黙示移動しない。version 2は指定時刻／選択頂点／差を封印し、version 1の描画・入力契約を維持する。`--reduced-motion`と観察済み保護区間にも対応。CLIは発話・サビ・強拍・振付の頂点を自動認識しない。[操作](BEAT_EFFECTS.ja.md)。
+
+既存のNeon Steps＋実ダンスへ4.35秒を指定し、元音源の測定拍4.3626667秒に対応する頂点frame105／4.375秒を選択。指定と頂点の差25ms、曲の拍と頂点の量子化差12.333ms。frame100..111のズーム／彩度候補を全編描画。新動画SHAはf2f3233939878e7f0ccc7301cb544b1d36d1268d56c5bb298dc797d15e35badb。前後の完成PCM490000ステレオsampleframesとmappingが完全一致。音付き前後比較はoutput/implementation-maya/beat-time-controls-20261007/delivery/beat-time-before-after.mp4、SHA84c89a13e03a6b5312afecc9800c9b89db7001d15cc58fae2f023f8488362e00、20.4167秒／490フレーム／24fps、全AVデコード成功。前版もカットと速度編集を保持し、完全な自然版ではない。静止画で拡大の差を確認したが、人の全編視聴／試聴承認ではない。
+
+関連29テストが25.619秒で成功。実符号化Sessionでversion2候補の描画、音声／mapping不変、証跡改変・実曲差し替え拒否、version1、距離／曖昧さ／不正値／保護／CLI混在拒否を検証。初回の拡大テストは既存test_workflowのtop-level importが失敗し、ログを保持、PYTHONPATH=testsで正しく実行して成功。共通スキル構造検査とgit diff --check成功。README・共通スキル更新。API実行・FCP GUI受入・人の全編評価・計画全体の完了・公開alpha.7更新とは分ける。投稿なし。
+
 ## 2026-10-07 開発版: 新曲に結び付いた音ハメ演出と実MP4
 
 `session beat-effects`を追加。完成renderの登録曲SHA／実バイト、音楽cueのtrim・loop、解析結果、出力FPSへ結び付いた選択拍を使う。奇数フレーム区間の中央へズーム／彩度演出の頂点を合わせる。全区間・全拍へ自動適用せず、保護区間全体の重なり、欠ける区間、重複区間、保存済み音楽phase/audio_retime、古い曲を拒否。追加ズームを省く選択肢と、実操作・拍誤差の封印済みmotion_template証跡を保持する。[使い方](BEAT_EFFECTS.ja.md)。

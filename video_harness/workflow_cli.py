@@ -14,6 +14,24 @@ def _json(path):
     return value
 
 
+def _beat_effect_request(args):
+    shortcut = (args.cue_id, args.at, args.beat_effect_id, args.max_distance,
+                args.window_frames, args.strength, args.protected_intervals_file)
+    if args.request_file:
+        if any(x is not None for x in shortcut) or args.reduced_motion:
+            raise ValueError('Use the request file or time controls, not both')
+        return _object(args.request_file)
+    if not args.cue_id or not args.at:
+        raise ValueError('Time controls require --cue-id and --at')
+    return {'version': 2, 'id': args.beat_effect_id or 'beat-focus', 'cue_id': args.cue_id,
+            'beat_map': _object(args.beat_map_file), 'output_times': args.at,
+            'max_distance': args.max_distance if args.max_distance is not None else '3/20',
+            'window_frames': args.window_frames if args.window_frames is not None else 11,
+            'strength': args.strength if args.strength is not None else .8,
+            'reduced_motion': args.reduced_motion, 'parameters': {},
+            'protected_intervals': _json(args.protected_intervals_file) if args.protected_intervals_file else []}
+
+
 def _object(path):
     value = _json(path)
     if not isinstance(value, dict):
@@ -91,7 +109,17 @@ def parser():
     a.add_argument('--operations-file', type=Path, required=True, help='Add, update or remove local effects on this render')
     a = command('beat-effects', note=True)
     a.add_argument('render_id')
-    a.add_argument('--request-file', type=Path, required=True, help='Exact music beat map and selected beat indices for compound accents')
+    group = a.add_mutually_exclusive_group(required=True)
+    group.add_argument('--request-file', type=Path, help='Versioned exact music beat request')
+    group.add_argument('--beat-map-file', type=Path, help='Actual analyzed music map; use with --cue-id and --at')
+    a.add_argument('--cue-id', help='Existing music cue')
+    a.add_argument('--at', nargs='+', help='Output seconds near the desired beat peaks, including rational times')
+    a.add_argument('--id', dest='beat_effect_id', help='Unique accent namespace; default beat-focus')
+    a.add_argument('--max-distance', help='Maximum distance from the requested time in seconds; default 3/20')
+    a.add_argument('--window-frames', type=int, help='Odd effect duration in frames; default 11')
+    a.add_argument('--strength', type=float, help='Accent strength; default 0.8')
+    a.add_argument('--reduced-motion', action='store_true', help='Omit new zoom and limit saturation change')
+    a.add_argument('--protected-intervals-file', type=Path, help='Observed protected output-second pairs')
     a = command('motion-template', note=True)
     a.add_argument('render_id')
     a.add_argument('--request-file', type=Path, required=True, help='Versioned compound local-effect recipe; remains unadopted')
@@ -277,7 +305,7 @@ def dispatch(args):
     if action == 'candidate': return session.create_candidate(_object(args.changes_file), args.actor, args.note)
     if action == 'select-comparison': return session.candidate_from_selection(_object(args.data_file), args.actor, args.note)
     if action == 'effects': return session.propose_effects(args.render_id, _array(args.operations_file), args.actor, args.note)
-    if action == 'beat-effects': return session.propose_beat_effects(args.render_id, _object(args.request_file), args.actor, args.note)
+    if action == 'beat-effects': return session.propose_beat_effects(args.render_id, _beat_effect_request(args), args.actor, args.note)
     if action == 'motion-template': return session.propose_motion_template(args.render_id, _object(args.request_file), args.actor, args.note)
     if action == 'depth-layer': return session.propose_depth_layer(args.render_id, args.manifest, args.asset_id,
         args.threshold, args.softness, args.strength, args.actor, args.note)

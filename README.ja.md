@@ -254,3 +254,5 @@ alpha.7の実験的な `tracked_background` は、追跡対象のフレームご
 開発版 `session preview-changes SESSION CANDIDATE_ID` で、修正後の全編を待たずに効果の変更区間を確認できます。保存済みの映像・完成音声を再利用し、効果の時計と残像履歴を保ちます。区間だけの試作は採用条件や全編レビューを満たしません。[操作と制約](docs/COMPARISON_ADJUSTMENTS.ja.md)。
 
 開発版の`native-compare BEFORE.mp4 AFTER.mp4 --output DIR`は、外部仕上げの前後を全AVデコードし、再サンプリングしない音声PCMと、時刻が一致するフレームの縮小RGBを比較します。音の違いと映像の変化を分け、曲・効果の同一性、API実行、利用許諾は別途確認します。[比較の操作](docs/TIKTOK_API.ja.md)。
+
+開発版の音ハメ演出は`session beat-effects --beat-map-file music-beats.json --cue-id MUSIC_CUE --at 4.35`で完成動画の秒数を指定できます。request JSONを作らず、許容差内の最寄りの拍だけを選び、指定秒・頂点秒・差を記録します。拍不足・同距離・保護区間は拒否し、別の拍へ黙って移しません。[時間指定](docs/BEAT_EFFECTS.ja.md)。
