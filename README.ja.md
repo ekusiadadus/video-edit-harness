@@ -216,7 +216,7 @@ uv run video-harness verify /path/to/final.mp4 --output output/final-check
 
 映像効果の指定は [VIDEO_EFFECTS.ja.md](docs/VIDEO_EFFECTS.ja.md) を参照。控えめ／ポップのプリセットと、時刻・強度を指定するイベントを区別し、実レンダーで検証します。
 
-TikTok公式APIの接続設定・OAuth・本人のプロフィールと公開動画一覧の読み取りは [接続ガイド](docs/TIKTOK_API.ja.md) を参照してください。これは作業ツリーの追加機能です。投稿、音源ダウンロード、流行ランキングの取得は含みません。実アカウントとの疎通はOAuth後に別途確認します。
+TikTok公式APIの接続設定・OAuth・本人のプロフィールと公開動画一覧の読み取りは [接続ガイド](docs/TIKTOK_API.ja.md) を参照してください。これは作業ツリーの追加機能です。投稿、音源ダウンロード、流行ランキングの取得は含みません。実アカウントとの疎通はOAuth後に別途確認します。Symphonyの実編集画面ではStock動画への区間エフェクト適用とMP4ダウンロードを確認しましたが、音楽追加・編集API連携・YouTube用途の素材権利確認は未完了です。機能確認デモを完成作品やAPI接続の証拠とは扱いません。
 
 alpha.7では、日本語・英語のタイトルを実フォント幅で折り返せます。数値と単位や指定した語句を保護し、収まらない文は修正理由を返します。 [設定と制限 / Controls and limits](docs/VIDEO_EFFECTS.ja.md)。
 

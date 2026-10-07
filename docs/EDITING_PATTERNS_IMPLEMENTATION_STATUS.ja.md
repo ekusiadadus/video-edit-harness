@@ -433,7 +433,9 @@ commit1aaeae0のCI37502587768とcommit ee2409fのCI37504081601は完了・成功
 
 再確認: ローカル `tiktok-api status` はクライアント／Keychain未構成・未接続。既存の開発者Sandboxは `user.info.basic` / `video.list` とテストユーザー登録まで。ブラウザーのログインをAPI接続・ネイティブ演出適用と呼ばない。[Direct Post仕様](https://developers.tiktok.com/docs/en/content-posting-api-reference-direct-post)のリクエストは投稿設定・素材転送であり、曲／エフェクト指定を含まない。[Symphonyエディター](https://ads.tiktok.com/resources/help/article/how-to-edit-videos-with-symphony-creative-studio)は音楽・区間エフェクトを備えるが、Studio画面の機能をAPIのエンドポイントとして推測実装しない。[公式Symphony API入口](https://ads.tiktok.com/creative/creativeCenter/tools/api?aioChannel=creative_center)と[公式Business API音楽合成](https://www.postman.com/tiktok/tiktok-api-for-business/request/hvcbkdi/video-soundtrack)は別経路として利用権限・仕様・用途を検証する。
 
-実ブラウザーではSymphony編集画面がBusinessログインへ戻った。TikTokログイン経路はDM管理・投稿管理・設定変更・広告作成公開と規約同意を要求したため、権限付与せずメールログインへ戻し、既存Businessアカウントのログインをユーザーへ依頼。素材アップロード・曲／効果適用・投稿は未実施。証跡は `output/implementation-maya/effect-window-performance/tiktok-live-audit-20261007.json`。接続確認後も完成MP4と実行結果が得られるまではネイティブ演出対応済みと表示しない。
+当初の実ブラウザーではSymphony編集画面がBusinessログインへ戻った。TikTokログイン経路はDM管理・投稿管理・設定変更・広告作成公開と規約同意を要求したため、権限付与せずメールログインへ戻し、既存Businessアカウントのログインをユーザーへ依頼。この時点の証跡は `output/implementation-maya/effect-window-performance/tiktok-live-audit-20261007.json`。その後の実編集・書き出し確認は下記に分けて記録する。
+
+2026-10-07の再確認でSymphonyログイン済みの制作画面へ入れた。Stockの21.9秒ダンス素材にNightclubの区間エフェクトを追加し、横方向ブラーと効果レイヤーを確認。Downloadした実MP4は1080×1920、30fps、657フレーム、全AVデコード成功、SHA-256 `73567571e63d2bba409b1bc6019859dc8e4a6b157f214960e87bb7cb6af40ad3`。K-popカタログの検索／選択はできたが音楽レイヤー追加は未確認で、完成MP4は実質無音（−91 dB）。Studio UIでの効果適用の証拠であり、編集API疎通・音ハメ完成・人の全編受入・YouTube用途の権利確認を証明しない。ローカル素材送信・配信投稿なし。証跡は `output/implementation-maya/tiktok-native-live-20261007/`。同時点のdoctorはAPI未構成・未接続。
 
 区間描画の最終検証: 全678テスト（452.220秒）、共通スキル構造検査が成功。最終コードの3回再測定は4.597557〜4.803436秒、中央値4.682672秒。元の全編基準との比は1.98倍、時間短縮49.46%。測定は上記の単一合成ケースに限定。`candidate-final.json` / `validation-final.json` と全体ログを保存。
 

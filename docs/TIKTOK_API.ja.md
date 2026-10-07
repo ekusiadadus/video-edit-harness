@@ -31,9 +31,15 @@ uv run video-harness tiktok-api refresh --network
 
 「TikTokと接続したらTikTokの曲やエフェクトをMP4へ付けられる」とは扱わない。[Direct Postの現行スキーマ](https://developers.tiktok.com/docs/en/content-posting-api-reference-direct-post)には投稿設定と完成素材の転送はあるが、動画への曲やエフェクトの指定はない。Display API接続を完了しても、この編集機能は増えない。
 
+現在の`session native-finish`は参照URLと時間指定を封印する**指示書の作成**までで、Studioの操作・音楽合成・エフェクト描画・MP4取得は実行しない。指示書を作れたことを適用成功と表示しない。編集APIを追加する際は、Display APIとは別のBusiness／Symphony認証と実仕様、処理ジョブの完了、取得MP4のSHA・映像・音声を確認する必要がある。
+
 [Symphony Creative Studioの編集機能](https://ads.tiktok.com/resources/help/article/how-to-edit-videos-with-symphony-creative-studio)には音楽と区間エフェクトがある。Studioで使える機能を、そのまま公開APIの機能として推測しない。[Symphony APIの公式入口](https://ads.tiktok.com/creative/creativeCenter/tools/api?aioChannel=creative_center)と[Business APIのVideo Soundtrack仕様](https://www.postman.com/tiktok/tiktok-api-for-business/request/hvcbkdi/video-soundtrack)は別の接続経路として、アカウントの利用権限・仕様・素材と音楽の用途を確認する。現在のクライアントにはこれらの処理を実装・接続していない。
 
-現在の実環境は`status`で未構成・未接続、リモート検証未実施。開発者サイトのログイン／Sandboxテストユーザー登録は済んでいても、ローカルの認証設定と本人API応答は別の証拠。Businessログイン待ちのStudioからは素材転送・曲／効果適用を実施していない。ローカルで描画した音ハメ・残像・ズームを「TikTokネイティブ」と表示しない。ユーザーが完成MP4を自分で投稿する現在の方針も維持する。
+2026-10-07の実環境では`doctor`が未構成・未接続、リモート検証未実施を報告した。開発者サイトのログイン／Sandboxテストユーザー登録は済んでいても、ローカルの認証設定と本人API応答は別の証拠。
+
+SymphonyのBusinessログイン待ちは解消し、実編集画面でStockの21.9秒ダンス素材へNightclubカテゴリの区間エフェクトを追加した。タイムラインの効果レイヤーと横方向ブラーを確認し、Downloadから実MP4を保存した。1080×1920、30fps、657フレーム、21.9秒、全AVデコード成功。音声トラックはあるが測定値は−91 dBで実質無音。K-pop音楽カタログの検索・選択はできたが、音楽レイヤー追加は未確認で、選択曲は完成MP4へ入っていない。これは**Studio UIの機能確認**であり、APIによる編集でも、音ハメの完成デモでもない。素材／曲のYouTube用途への権利確認、人の全編視聴・試聴も未実施。
+
+ローカル証跡は`output/implementation-maya/tiktok-native-live-20261007/`の`observations.json`、`doctor.json`、`probe.json`、`decode.log`、`audio-level.log`、`native-export.jpg`と`native-effect-demo.mp4`。動画SHA-256は`73567571e63d2bba409b1bc6019859dc8e4a6b157f214960e87bb7cb6af40ad3`。個人のローカル素材は送信していない。ローカルで描画した音ハメ・残像・ズームを「TikTokネイティブ」と表示しない。完成MP4の投稿はユーザー自身が行う。
 
 ## 公式資料
 
