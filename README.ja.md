@@ -256,3 +256,5 @@ alpha.7の実験的な `tracked_background` は、追跡対象のフレームご
 開発版の`native-compare BEFORE.mp4 AFTER.mp4 --output DIR`は、外部仕上げの前後を全AVデコードし、再サンプリングしない音声PCMと、時刻が一致するフレームの縮小RGBを比較します。音の違いと映像の変化を分け、曲・効果の同一性、API実行、利用許諾は別途確認します。[比較の操作](docs/TIKTOK_API.ja.md)。
 
 開発版の音ハメ演出は`session beat-effects --beat-map-file music-beats.json --cue-id MUSIC_CUE --at 4.35`で完成動画の秒数を指定できます。request JSONを作らず、許容差内の最寄りの拍だけを選び、指定秒・頂点秒・差を記録します。拍不足・同距離・保護区間は拒否し、別の拍へ黙って移しません。[時間指定](docs/BEAT_EFFECTS.ja.md)。
+
+開発版のFCP出力は、モノラル素材のチャンネル数を保持し、プロジェクトをステレオ出力にします。FCPが素材をコピーした場合は`check-fcp --allow-media-relocation`で実SHA／バイト数と時間対応を照合できます。最小XMLの実GUI読み込みと返却XMLの照合は確認済み。複合編集の受入は未完了です。[実測と制限](docs/FCP_ROUNDTRIP.ja.md)。

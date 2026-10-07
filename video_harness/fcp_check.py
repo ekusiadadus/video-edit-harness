@@ -65,13 +65,15 @@ def _timeline(xml, name=None):
             'unsupported_effects': sorted(set(unsupported))}
 
 
-def compare_roundtrip(expected, returned, output, project_name=None):
+def compare_roundtrip(expected, returned, output, project_name=None, *, allow_media_relocation=False):
     """A matching XML proves timing/media mapping, not playback or effect fidelity."""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     result = {'reference': fingerprint(expected), 'returned': fingerprint(returned),
               'status': 'failed', 'scope': 'flat timeline media, clip count and rational timing',
-              'gui_playback': 'not_verified', 'effect_fidelity': 'not_verified', 'differences': []}
+              'gui_playback': 'not_verified', 'effect_fidelity': 'not_verified', 'differences': [],
+              'media_identity': 'sha256' if allow_media_relocation else 'path', 'media_evidence': []}
+    media_refs = {}
     try:
         result['dtd'] = {'reference': validate_dtd(expected, output / 'reference-dtd.log'),
                          'returned': validate_dtd(returned, output / 'returned-dtd.log')}
@@ -81,14 +83,29 @@ def compare_roundtrip(expected, returned, output, project_name=None):
         if len(a['clips']) != len(b['clips']):
             result['differences'].append('Clip count differs')
         for i, (left, right) in enumerate(zip(a['clips'], b['clips']), 1):
-            for key in ('source', 'offset', 'start', 'duration'):
+            if allow_media_relocation:
+                refs = []
+                for clip in (left, right):
+                    if clip['source'] not in media_refs:
+                        media_refs[clip['source']] = fingerprint(clip['source'])
+                    refs.append(media_refs[clip['source']])
+                equal = refs[0]['bytes']==refs[1]['bytes'] and refs[0]['sha256']==refs[1]['sha256']
+                result['media_evidence'].append({'clip': i, 'reference': refs[0], 'returned': refs[1],
+                                                 'exact_bytes_equal': equal})
+                if not equal:
+                    result['differences'].append(f'Clip {i}: source bytes differ')
+            elif left['source'] != right['source']:
+                result['differences'].append(f'Clip {i}: source differs')
+            for key in ('offset', 'start', 'duration'):
                 if left[key] != right[key]:
                     result['differences'].append(f'Clip {i}: {key} differs')
         result['clips_expected'] = len(a['clips'])
         result['clips_returned'] = len(b['clips'])
         result['unsupported_effects'] = b['unsupported_effects']
+        if any(fingerprint(path) != ref for path, ref in media_refs.items()):
+            result['differences'].append('Compared media changed during validation')
         result['status'] = 'pass' if not result['differences'] else 'failed'
-    except (ValueError, ET.ParseError) as exc:
+    except (ValueError, OSError, ET.ParseError) as exc:
         result['differences'].append(str(exc))
     finally:
         write(output / 'roundtrip.json', result)

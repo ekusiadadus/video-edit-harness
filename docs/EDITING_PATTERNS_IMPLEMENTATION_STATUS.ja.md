@@ -2,6 +2,16 @@
 
 各項目は記録時点の状態です。直近の開発機能を先頭に掲載し、過去の未完了記録も検証履歴として残しています。公開alpha.7と開発版を区別してください。
 
+## 2026-10-07 開発版: FCPのモノラル警告と管理素材コピーの往復
+
+FCP 12.4（454072）で単一asset-clipの最小XMLをQAライブラリへ実読み込み。元sequenceのaudioLayout=monoに警告が出て、FCPから返した1.14 XMLはstereo、元assetは1音声チャンネルのままだった。新しい書き出しではmono／stereo素材をstereoプロジェクトへ出し、assetの元チャンネル数は保持。修正版の最小XMLを実GUIで警告なしに読み込み、タイムラインのsourceクリップ2秒とモノラルsource音声構成を確認した。XMLのmonoが全要素で不正という一般論にはしない。[実測と操作](FCP_ROUNDTRIP.ja.md)。
+
+FCPが元素材をQAライブラリのOriginal Mediaへコピーしたため、最初の返却XMLはパス一致で失敗。check-fcpへ明示的なallow-media-relocationを追加し、全clipのローカル素材の実SHA／バイト数を検査し、時間対応の条件は保持。最初の実返却XMLと同じ素材・尺を持つ修正後の最小XMLの照合が成功した。修正版そのもののFCP再書き出しは未実施。両素材26605bytes、SHA a1c8e2a7ab01beabaad84f173782f1d0fac5bb9fdfe149819242b2f6a1b2afca。unknown adjust-colorConformは未検証で保持し、媒体・時間の一致を色／音／画素の一致へ広げない。
+
+同じ修正で音量キーフレーム・画像・タイトルの複合XMLを再生成したが、読み込み直後にnoWindowsAvailable、FCP停止を確認。読み込み・再生・出力一致は未受入。現時点のDiagnosticReportsは古い07:06の報告のみで、この試行の原因を示さない。複合XMLのSHAは20d571cd6cafcd0d5916a12e4ba2509e4add0658e38ccfa3ff9b4438cde4826d。個人ライブラリへ変更なし、素材と以前の失敗を保持、再試行を繰り返さない。
+
+関連39テストが12.187秒で成功。元monoチャンネル保持／stereo出力、同一bytesの移動／コピー、異なるbytes・素材不足・clip開始の変更拒否と従来の厳密パス比較、編集可能な音声／FCP取込の回帰を確認。共通スキル構造検査、git diff --check成功。証跡はoutput/implementation-maya/fcp-minimal-import-20261007/のobservations.json、実返却XML、roundtrip-relocated、画像、AXログとテスト／失敗ログ。API設定はこの試行でも未構成・未接続。人の試聴・複合FCP較正・全計画受入・alpha.7更新・投稿は未実施。
+
 ## 2026-10-07 開発版: 秒数で音ハメの見せ場を指定
 
 `session beat-effects`へ`--beat-map-file`／`--cue-id`／`--at`を追加。エフェクトrequest JSONなしで、完成動画の指定秒に近い、実曲の拍の頂点フレームを選べる。既定150msの許容差を明示し、距離不足・同距離の曖昧さ・重複・保護区間・端を拒否。安全そうな別の拍へ黙示移動しない。version 2は指定時刻／選択頂点／差を封印し、version 1の描画・入力契約を維持する。`--reduced-motion`と観察済み保護区間にも対応。CLIは発話・サビ・強拍・振付の頂点を自動認識しない。[操作](BEAT_EFFECTS.ja.md)。

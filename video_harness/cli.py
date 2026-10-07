@@ -44,7 +44,7 @@ def parser():
  for cmd in ['edit-preview','edit-render','edit-export','audition']:
   a=s.add_parser(cmd);a.add_argument('project',type=Path);a.add_argument('plan',type=Path);a.add_argument('--output',type=Path)
   if cmd=='audition':a.add_argument('--cut-ids');a.add_argument('--context',type=float,default=1.5)
- a=s.add_parser('check-fcp');a.add_argument('reference',type=Path);a.add_argument('returned',type=Path);a.add_argument('--project-name');a.add_argument('--output',type=Path,required=True)
+ a=s.add_parser('check-fcp');a.add_argument('reference',type=Path);a.add_argument('returned',type=Path);a.add_argument('--project-name');a.add_argument('--allow-media-relocation',action='store_true',help='Require exact local media SHA/bytes when FCP copies or relocates assets');a.add_argument('--output',type=Path,required=True)
  for cmd in ['review','adopt']:
   a=s.add_parser(cmd);a.add_argument('run',type=Path);a.add_argument('--candidate',required=True);a.add_argument('--note',required=True)
   if cmd=='review':a.add_argument('--decision',choices=['accept','reject'],required=True)
@@ -145,7 +145,7 @@ def main():
    print(json.dumps(inspect_native_result(args.video,args.output,args.require_music),ensure_ascii=False,indent=2));return
   if args.cmd=='check-fcp':
    from .fcp_check import compare_roundtrip
-   result=compare_roundtrip(args.reference,args.returned,args.output,args.project_name)
+   result=compare_roundtrip(args.reference,args.returned,args.output,args.project_name,allow_media_relocation=args.allow_media_relocation)
    if result['status']!='pass':raise ValueError(f'FCP timeline differs; see {args.output / "roundtrip.json"}')
    print(args.output/'roundtrip.json');return
   if args.cmd=='revise-plan':

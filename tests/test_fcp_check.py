@@ -40,6 +40,32 @@ class FCPRoundtripTests(unittest.TestCase):
                 self.assertEqual(result['status'], 'failed')
                 self.assertIn('Clip 2: start differs', result['differences'])
 
+    def test_relocated_media_requires_exact_bytes_and_keeps_timing_guards(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'source.mov';source.write_bytes(b'original media fixture')
+            copied=root/'managed-copy.mov';copied.write_bytes(source.read_bytes())
+            info={'streams':[{'codec_type':'video','r_frame_rate':'30/1','avg_frame_rate':'30/1',
+                              'width':320,'height':180,'duration':'2'}],'format':{'duration':'2'}}
+            reference=root/'reference.fcpxml';returned=root/'returned.fcpxml'
+            export_timeline(source,info,[(0,2)],reference,'Relocation')
+            tree=ET.parse(reference);tree.find('./resources/asset/media-rep').set('src',copied.as_uri());tree.write(returned)
+            with patch('video_harness.fcp_check.validate_dtd',return_value={'status':'pass'}):
+                self.assertEqual(compare_roundtrip(reference,returned,root/'strict')['status'],'failed')
+                result=compare_roundtrip(reference,returned,root/'copied',allow_media_relocation=True)
+                self.assertEqual(result['status'],'pass')
+                self.assertTrue(result['media_evidence'][0]['exact_bytes_equal'])
+                self.assertEqual(result['effect_fidelity'],'not_verified')
+                clip=tree.find('.//spine/asset-clip');clip.set('start','1/30s');tree.write(returned)
+                result=compare_roundtrip(reference,returned,root/'timing',allow_media_relocation=True)
+                self.assertIn('Clip 1: start differs',result['differences'])
+                clip.set('start','0s');tree.write(returned)
+                copied.write_bytes(b'changed media fixture!')
+                result=compare_roundtrip(reference,returned,root/'changed',allow_media_relocation=True)
+                self.assertEqual(result['status'],'failed')
+                self.assertIn('Clip 1: source bytes differ',result['differences'])
+                copied.unlink()
+                self.assertEqual(compare_roundtrip(reference,returned,root/'missing',allow_media_relocation=True)['status'],'failed')
+
     def test_dtd_path_with_spaces_uses_file_uri(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);dtd=root/'Final Cut Pro.app'/'FCPXMLv1_10.dtd';dtd.parent.mkdir();dtd.write_text('fixture')

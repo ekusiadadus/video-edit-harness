@@ -27,6 +27,14 @@ class FCPTests(unittest.TestCase):
         self.source.write_bytes(b"test fixture")
         self.output = self.directory / "edited.fcpxml"
 
+    def test_mono_source_keeps_one_channel_in_stereo_project(self):
+        info = probe();info['streams'][1]['channels']=1
+        export_timeline(self.source,info,[(0,1)],self.output,'Mono speech')
+        root=ET.parse(self.output).getroot()
+        self.assertEqual(root.find('./resources/asset').get('audioChannels'),'1')
+        self.assertEqual(root.find('.//project/sequence').get('audioLayout'),'stereo')
+        self.assertEqual(root.find('.//project/sequence').get('audioRate'),'48k')
+
     def test_export_frame_mapping_audio_and_dtd(self):
         result = export_timeline(self.source, probe(), [(0.01, 1.51), (3.02, 4.01)], self.output, 'Cut & "Review"')
         self.assertEqual((result["width"], result["height"]), (1080, 1920))

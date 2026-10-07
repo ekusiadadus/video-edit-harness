@@ -232,7 +232,10 @@ def export_timeline(source: Path, probe: dict, keep: list[tuple[float, float]],
     total = sum((length for _, length in ranges), Fraction(0))
     sequence_attrs = {"format": "fmt", "duration": _time(total), "tcStart": "0s", "tcFormat": "NDF"}
     if audio:
-        sequence_attrs["audioLayout"] = "mono" if int(audio["channels"]) == 1 else "stereo" if int(audio["channels"]) == 2 else "surround"
+        # Project output is stereo for mono/stereo source components. FCP 12.4
+        # warns on a top-level mono layout and exports it back as stereo.
+        # Preserve the original mono asset/channel configuration above.
+        sequence_attrs["audioLayout"] = "stereo" if int(audio["channels"]) <= 2 else "surround"
         sequence_attrs["audioRate"] = "48k" if int(audio["sample_rate"]) == 48000 else "44.1k" if int(audio["sample_rate"]) == 44100 else "96k" if int(audio["sample_rate"]) == 96000 else ""
         if not sequence_attrs["audioRate"]:
             raise ValueError("unsupported sequence audio sample rate")
