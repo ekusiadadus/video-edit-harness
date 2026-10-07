@@ -45,6 +45,20 @@ class FCPAudioAutomationTests(unittest.TestCase):
             self.assertTrue(compare_production_reexport(output, output)['matched'])
             self.assertEqual(evidence['dtd'], 'passed' if any(path.exists() for path in fixtures.DTD_PATHS) else 'unavailable')
             tree = ET.parse(output)
+            # Explicit interpolation makes FCP discard the whole volume
+            # animation, even though it passes DTD validation.
+            self.assertTrue(all('interp' not in frame.attrib for frame in tree.iter('keyframe')))
+            self.assertTrue(inspect_production_xml(output, expected=evidence))
+            legacy = root / 'legacy-interp.fcpxml'
+            for frame in tree.iter('keyframe'):
+                frame.set('interp', 'linear')
+            tree.write(legacy)
+            self.assertTrue(inspect_production_xml(legacy))
+            # Preserve exact attribute hashes; compatibility is not permission
+            # to accept a changed animation against current export evidence.
+            with self.assertRaisesRegex(ValueError, 'differs from expected evidence'):
+                inspect_production_xml(legacy, expected=evidence)
+            tree = ET.parse(output)
             volume = tree.getroot().find('.//adjust-volume/param/..')
             volume.remove(volume.find('param'))
             missing = root / 'missing-automation.fcpxml'

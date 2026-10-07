@@ -2,6 +2,18 @@
 
 各項目は記録時点の状態です。直近の開発機能を先頭に掲載し、過去の未完了記録も検証履歴として残しています。公開alpha.7と開発版を区別してください。
 
+## 2026-10-07 開発版: 全体回帰と作業ツリー外からの実素材レンダー
+
+コード基準3b2cbba。`uv run --no-sync python -m unittest discover -s tests -v`が704件・596.188秒で成功。wheel／sdist／3スキル／Claudeプラグインの計6配布物を検証用フォルダーに生成し、アーカイブ内容・定義・checksum・設定済み秘密値の検査が成功した。公開alpha.7の配布物やtagは変更していない。検証用ファイル名は現行pyprojectの版を使うが、既存公開releaseそのものではない。
+
+新しいPython 3.12.12環境へbase wheelをインストールし、VIDEO_EDIT_HARNESS_ROOTとPYTHONPATHを外して作業ツリー外から7項目（CLI help、doctor、効果、レシピ、プリセット、Session help、既存Session詳細検査）を確認。3スキルのZIPを別環境へ展開しdoctorで配置を確認した。独立エージェントによる3スキルの制作実行や、tracking／depth／retime等のoptional extraの新規インストールを確認したという意味ではない。
+
+保持済みの開発Sessionをインストール済みCLIでresume。変化はgeneration／history／updated_atのみで、他の保存フィールドは不変。既存projectとplanを使い、site-packagesのwheelから実ダンス素材を全編レンダーした。1920×1080、245フレーム／24fps、10.208333秒、48kHzステレオ、全AVデコード成功。動画SHAは1144f77f09c96d3ebed0df60247e06202e5ac8e60f722a482d40687264afe5cf。これは既存の基本構成の制作経路の検証であり、新たな演出案や人の視聴承認ではない。
+
+生ログ・配布物・復帰前後のstate・実MP4・証跡SHAは`output/implementation-maya/integration-validation-20261007/summary.json`と同フォルダーに保存。M0〜M5全体の受入、複合FCP GUI往復、Business/Symphony API実編集、人の全編視聴・試聴、投稿先再生は未完了。
+
+当初のFCP切り分けでは音声のみ／音量自動化／画像のみ／文字のみの4XMLを準備し、DTDは成功。画面取得のタイムアウトと前面アプリ変更で、この時点では個別XMLのGUI読み込みは実行していなかった。その後、固定音量と修正した音量自動化のGUI取り込み・131キーの保持を確認し、exporterを修正した。下記追加記録とFCP_ROUNDTRIPを参照。後から取得した10:38のSIGABRT報告は接続asset-clipのXMLインポート処理を示すが、原因レイヤーは未特定。証跡は`output/implementation-maya/fcp-layer-isolation-20261007/`。準備を読み込み成功と扱わない。
+
 ## 2026-10-07 開発版: FCPのモノラル警告と管理素材コピーの往復
 
 FCP 12.4（454072）で単一asset-clipの最小XMLをQAライブラリへ実読み込み。元sequenceのaudioLayout=monoに警告が出て、FCPから返した1.14 XMLはstereo、元assetは1音声チャンネルのままだった。新しい書き出しではmono／stereo素材をstereoプロジェクトへ出し、assetの元チャンネル数は保持。修正版の最小XMLを実GUIで警告なしに読み込み、タイムラインのsourceクリップ2秒とモノラルsource音声構成を確認した。XMLのmonoが全要素で不正という一般論にはしない。[実測と操作](FCP_ROUNDTRIP.ja.md)。
@@ -516,3 +528,5 @@ Pexelsの既存登録済みダンス素材（245フレーム、24fps）とMixkit
 これはStudio UIの実実行であり、Business／Symphony編集APIの実実行ではない。ローカルTikTok APIは引き続き未構成・未接続。YouTube転用許諾未確認のため機能検証用として保持し、既存の絶望ドメイン向け4分類の公開用素材には混ぜない。公開alpha.7を変更しない。
 
 新規4テストと既存返却検査8テストが成功（全12、3.497秒）。実際に符号化した映像で、画面変更＋同一PCM、音声変更＋同一縮小画面、短い尺・異なるPTSの比較拒否、音声なし、MP4を装ったネットワークプレイリスト拒否を確認。共通スキル検査・git diff --check成功。機能検証用の音付き前後MP4はdelivery/tiktok-native-music-effect-before-after.mp4、43.8秒、1314フレーム、全AVデコード成功。比較ラベルを追加し、各音声末尾を21.9秒まで無音補填して連結した。人の全編視聴／試聴承認は未実施。
+
+2026-10-07追加: FCP固定BGMのGUI取り込み成功。測定音量は補間属性でparamを無視する警告を再現し、interpを省略するexporter修正を実装。修正候補の警告なしGUI取り込みとネイティブXML再書き出しで131キーの時刻一致を確認、往復取り込み側の対応を含む関連57テスト成功（12.828秒）。画像・タイトル・複合XML・音声再生一致は別の未受入項目。Business API開発者申請は審査待ちへ進み、アプリ説明を準備したが、アプリ作成と編集APIは未実行。詳細はFCP_ROUNDTRIPとTIKTOK_APIを参照。

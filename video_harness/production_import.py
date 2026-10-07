@@ -195,8 +195,8 @@ def _volume(clip, src_enable=None):
             points = []
             for frame in animations[0]:
                 if (frame.tag != 'keyframe' or len(frame) or
-                        set(frame.attrib) != {'time', 'value', 'interp', 'curve'} or
-                        frame.get('interp') != 'linear' or frame.get('curve') != 'linear'):
+                        set(frame.attrib) not in ({'time', 'value', 'curve'}, {'time', 'value', 'interp', 'curve'}) or
+                        frame.get('interp', 'linear') != 'linear' or frame.get('curve') != 'linear'):
                     raise ValueError('unsupported audio keyframe attributes')
                 instant = _read_time(frame.get('time'))
                 value = frame.get('value', '')

@@ -424,13 +424,18 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix', *
                             raise ValueError('measured audio exceeds total keyframe budget')
                         amount.set('amount', '0dB')
                         animation = ET.SubElement(ET.SubElement(amount, 'param', name='amount'), 'keyframeAnimation')
-                        for frame in compiled['keyframes']:
-                            ET.SubElement(animation, 'keyframe', {key: frame[key] for key in ('time', 'value', 'interp', 'curve')})
+                        # FCP 12.4 ignores the entire volume param when an
+                        # explicit interp attribute is present. Audio uses
+                        # the linear curve without a video interpolation mode.
+                        emitted_frames = [{key: frame[key] for key in ('time', 'value', 'curve')}
+                                          for frame in compiled['keyframes']]
+                        for frame in emitted_frames:
+                            ET.SubElement(animation, 'keyframe', frame)
                         automation_evidence.append({'cue_id': cue['id'], 'repeat': repeat,
                             'samples': compiled['samples'], 'keyframes': len(compiled['keyframes']),
                             'output_start': _fcp_time(part_start), 'source_start': node.get('start'),
                             'duration': node.get('duration'),
-                            'keyframes_sha256': _animation_digest([{key: frame[key] for key in ('time', 'value', 'interp', 'curve')} for frame in compiled['keyframes']]),
+                            'keyframes_sha256': _animation_digest(emitted_frames),
                             'max_absolute_gain_error': compiled['max_absolute_gain_error'],
                             'zero_floor_db': compiled['zero_floor_db']})
                     elif repeat == 0 and float(_seconds(cue['fade_in'], 'fade_in')) or repeat == periods - 1 and float(_seconds(cue['fade_out'], 'fade_out')):
@@ -692,8 +697,8 @@ def _read_audio_animation(clip):
     previous = None
     for frame in animations[0]:
         if (frame.tag != 'keyframe' or len(frame) or
-                set(frame.attrib) != {'time', 'value', 'interp', 'curve'} or
-                frame.get('interp') != 'linear' or frame.get('curve') != 'linear'):
+                set(frame.attrib) not in ({'time', 'value', 'curve'}, {'time', 'value', 'interp', 'curve'}) or
+                frame.get('interp', 'linear') != 'linear' or frame.get('curve') != 'linear'):
             raise ValueError('unsupported audio keyframe attributes')
         time = _read_time(frame.get('time'))
         value = frame.get('value')

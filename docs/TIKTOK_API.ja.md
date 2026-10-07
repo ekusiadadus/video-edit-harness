@@ -9,7 +9,7 @@
 | APIで音楽を合成する | Business API Video Soundtrack | 公式公開リクエストあり。完全な契約・利用権限・実応答は未確認 |
 | 商品紹介動画を生成／リミックスする | Symphony Generate & Remix | 公式技術仕様を閲覧。任意のダンス演出を指定するAPIとは同一視しない |
 
-**DevelopersのSandboxとBusiness APIのアプリは別。** ログイン中Business APIのMy Appsはアプリなし、Become a Developerを表示した。登録画面にはメール・電話認証とNextでのDeveloper Terms同意があり、本人操作待ち。登録・同意は代行していない。別アカウントのアプリ有無は未確認。
+**DevelopersのSandboxとBusiness APIのアプリは別。** 初回観測ではアプリなし・開発者登録待ちだった。その後の再確認では、本人の開発者申請は提出済み・審査待ちになった。My Appsは現在もアプリなし。アプリ名と461文字の英語説明を入力した未送信フォームを保持している。認証の戻り先URLは未設定、権限は未選択。v1.3の権限検索で`video_soundtrack`はNo dataだった。これはこのアカウントのフォームで見つからなかった証拠であり、API全体の廃止を意味しない。登録・同意の本人操作は代行していない。現在の観測は`output/implementation-maya/tiktok-business-app-draft-20261007/`。
 
 [Symphony外部資料](https://bytedance.sg.larkoffice.com/docx/LWkDdoOGmo4abxxrL1ylUkQcgSg)はTikTok担当窓口を通じたAPP IDのallowlist登録を案内する。アプリ作成だけで利用許可済みとはしない。[2026統合ガイド](https://bytedance.larkoffice.com/wiki/KcOawZdBwiiI0MkTOU8c6a2Lnac)と、そこから辿った[Remix技術仕様](https://bytedance.sg.larkoffice.com/docx/Wo80dHLp5oxkQ3xmVJblhxI3gMe)をブラウザーで読めた。Web取得のログインリダイレクトだけで資料未公開と判断しない。
 

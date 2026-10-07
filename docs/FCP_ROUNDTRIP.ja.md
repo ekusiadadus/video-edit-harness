@@ -31,3 +31,7 @@ uv run --no-sync video-harness check-fcp reference.fcpxml \
 複合XMLの読み込み・再生・書き出し一致は未受入です。最小XMLの成功を複合機能の成功へ広げません。往復検査のscopeは平坦な素材と有理数時間で、未知のeffectは未検証として報告します。元の完成MP4と編集素材を保持し、焼き込み納品と編集可能な納品を区別してください。
 
 証跡は`output/implementation-maya/fcp-minimal-import-20261007/`の`observations.json`、2本の最小XML、`minimal-returned.fcpxmld/Info.fcpxml`、`roundtrip-relocated/roundtrip.json`、GUI画像、複合XMLと生ログです。個人のライブラリは編集せず、Harness Pattern QA 20261006だけを使用しました。
+
+後続の切り分けで、10:38:15のSIGABRT報告を取得しました。例外バックトレースはFFXMLImporterの接続asset-clipインポートを示しますが、原因レイヤーや修正の正しさまでは証明しません。音声のみ／音量自動化／画像のみ／文字のみの4候補を現行exporterから生成し、すべてDTD検査を通しました。画面取得のタイムアウトと前面アプリ変更により、この時点では個別XMLのGUIインポートはまだ実行していませんでした。新しい証跡は`output/implementation-maya/fcp-layer-isolation-20261007/`のfixtures.json、decision.json、障害要約とプロセスsampleです。同じ複合XMLを再試行して成功扱いにはしていません。
+
+その後、個別GUI検証を実行できました。固定音量のBGMは警告なしに取り込み、プロジェクトの音声レイヤーを開けました。測定音量のXMLは`interp="linear"`があると「補間属性非対応のためparamを無視」の警告が出ました。同じ131キーからinterpだけを外した候補は警告なしに取り込み、FCPから1.14 XMLを書き出せました。131キーすべての有理数時刻が一致し、音量値の書き出し丸め差は最大0.00005 dBでした。exporterはinterpを省略し、curve=linearを保持します。旧形式のローカル検査は維持し、証跡ハッシュは実際の属性を照合します。往復取り込み側の対応を含む関連57テスト成功（12.828秒）。これは小さな音声候補のインポート・キー保持の証拠で、再生ミックスの一致、画像・タイトルの取り込み、複合XMLのクラッシュ解消は未確認です。`audio-automation/native-roundtrip-evidence.json`と前後のGUI証跡を参照してください。
