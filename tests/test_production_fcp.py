@@ -90,6 +90,42 @@ class ProductionFCPTests(unittest.TestCase):
             self.assertEqual(result['mode'], 'mix')
             self.assertTrue((root / 'baked.fcpxml').is_file())
 
+    def test_native_stills_reject_ambiguous_resources_and_orphans(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base, mixed, assets = self.fixtures(root)
+            production = {'assets': assets, 'cues': [
+                {'id': 'still', 'asset_id': 'p', 'role': 'image', 'output_start': .5, 'output_end': 1.5},
+                {'id': 'label', 'role': 'title', 'text': 'QA', 'output_start': 0, 'output_end': .5}]}
+            output = root / 'still.fcpxml'
+            export_production_xml(base, production, mixed, output, mode='editable')
+            tree = ET.parse(output)
+            self.assertEqual(len(tree.findall('.//spine/asset-clip/video')), 2)
+            for modification in ('duration', 'rate', 'geometry', 'orphan', 'audio', 'clock', 'bytes'):
+                with self.subTest(modification=modification):
+                    tree = ET.parse(output)
+                    node = tree.find('.//spine/asset-clip/video')
+                    source = tree.find("./resources/asset[@id='%s']" % node.get('ref'))
+                    fmt = tree.find("./resources/format[@id='%s']" % source.get('format'))
+                    self.assertEqual(source.get('duration'), '0s')
+                    self.assertIsNone(fmt.get('frameDuration'))
+                    if modification == 'duration': source.set('duration', '2s')
+                    elif modification == 'rate': fmt.set('frameDuration', '1/30s')
+                    elif modification == 'geometry': fmt.set('width', '999')
+                    elif modification == 'audio': ET.SubElement(node, 'adjust-volume', amount='0dB')
+                    elif modification == 'clock': node.set('offset', '99s')
+                    elif modification == 'bytes':
+                        invalid = root / 'invalid.png'
+                        invalid.write_bytes(b'not an image')
+                        source.find('media-rep').set('src', invalid.as_uri())
+                    else:
+                        tree.find('.//spine/asset-clip').remove(node)
+                        tree.find('resources').append(node)
+                    changed = root / (modification + '.fcpxml')
+                    tree.write(changed)
+                    with self.assertRaises(ValueError):
+                        inspect_production_xml(changed)
+
     def test_three_modes_and_strict_readback(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -35,7 +35,7 @@ SUPPORTED_TAGS = {'fcpxml', 'resources', 'format', 'asset', 'media-rep', 'librar
                   'event', 'project', 'sequence', 'spine', 'asset-clip', 'marker',
                   'adjust-volume', 'param', 'fadeIn', 'fadeOut', 'conform-rate',
                   'adjust-conform', 'adjust-transform', 'adjust-blend',
-                  'keyframeAnimation', 'keyframe'}
+                  'keyframeAnimation', 'keyframe', 'video'}
 FCP_SOURCE_RATES = {Fraction(24000, 1001): '23.98', Fraction(24): '24',
                     Fraction(25): '25', Fraction(30000, 1001): '29.97',
                     Fraction(30): '30', Fraction(60): '60',
@@ -108,7 +108,7 @@ def _sequence(root, *, allow_connected=False):
     spine = sequence.find('spine')
     if not list(spine) or any(item.tag != 'asset-clip' for item in spine):
         raise ValueError('base XML is not a flat asset-clip timeline')
-    if not allow_connected and any(item.find('./asset-clip') is not None for item in spine):
+    if not allow_connected and any(any(child.tag in {'asset-clip', 'video'} for child in item) for item in spine):
         raise ValueError('base XML already has connected clips')
     return sequence, spine
 
@@ -142,15 +142,34 @@ def _add_asset(resources, identifier, path, kind, duration, *, channels=None):
                 if image.getexif().get(274, 1) != 1:
                     raise ValueError('rotated image geometry is unsupported')
                 source_width, source_height = image.size
-            canvas_format = resources.find("format[@id='fmt']")
-            frame_duration = canvas_format.get('frameDuration')
-        ET.SubElement(resources, 'format', id=video_format,
-                      frameDuration=frame_duration,
-                      width=str(source_width), height=str(source_height))
-        attrs.update(hasVideo='1', hasAudio='0', format=video_format)
+        format_attrs = dict(id=video_format, width=str(source_width), height=str(source_height))
+        if kind == 'video':
+            format_attrs['frameDuration'] = frame_duration
+            attrs.update(hasVideo='1', hasAudio='0', format=video_format)
+        else:
+            format_attrs['name'] = 'FFVideoFormatRateUndefined'
+            attrs.update(hasVideo='1', format=video_format, duration='0s', videoSources='1')
+        ET.SubElement(resources, 'format', format_attrs)
     asset = ET.SubElement(resources, 'asset', attrs)
     ET.SubElement(asset, 'media-rep', kind='original-media', src=path.as_uri())
     return asset
+
+
+def validate_still_resource(asset, formats, media):
+    """Require a native zero-duration still backed by actual image geometry."""
+    fmt = formats.get(asset.get('format'))
+    if (asset.get('hasVideo') != '1' or asset.get('hasAudio', '0') != '0'
+            or _read_time(asset.get('duration')) != 0 or fmt is None
+            or fmt.get('name') != 'FFVideoFormatRateUndefined' or fmt.get('frameDuration') is not None):
+        raise ValueError('still connection requires a zero-duration image resource')
+    try:
+        with Image.open(media) as image:
+            if (image.getexif().get(274, 1) != 1 or
+                    image.size != (int(fmt.get('width')), int(fmt.get('height')))):
+                raise ValueError('still resource geometry differs from local image')
+            image.load()
+    except OSError as exc:
+        raise ValueError('still resource is not a readable local image') from exc
 
 
 def _anchor(spine, position):
@@ -448,11 +467,13 @@ def export_production_xml(base_xml, production, mixed_pcm, output, mode='mix', *
                 if cue['loop']:
                     raise ValueError('visual cue loop cannot be represented in editable XML')
                 anchor = _anchor(spine, begin)
-                node = ET.SubElement(anchor, 'asset-clip', ref=identifier, name=cue['id'],
+                node = ET.SubElement(anchor, 'asset-clip' if role == 'video' else 'video', ref=identifier, name=cue['id'],
                               lane='1', offset=_fcp_time(_anchor_local_time(anchor, begin)),
                               start=_fcp_time(_seconds(cue['source_start'], 'source_start')) if role == 'video' else '0s',
-                              duration=_fcp_time(length), srcEnable='video', videoRole='video')
+                              duration=_fcp_time(length))
                 if role == 'video':
+                    node.set('srcEnable', 'video')
+                    node.set('videoRole', 'video')
                     source_rate = Fraction(next(s for s in info['streams'] if s['codec_type'] == 'video')['r_frame_rate'])
                     fmt = resources.find("format[@id='fmt']")
                     output_rate = 1 / _read_time(fmt.get('frameDuration'))
@@ -591,7 +612,7 @@ def inspect_production_xml(path, expected=None):
                                 'output_time': _fcp_time(marker_output),
                                 'value': node.get('value')})
                 continue
-            if node.tag != 'asset-clip':
+            if node.tag not in {'asset-clip', 'video'}:
                 raise ValueError(f'unknown primary clip child: {node.tag}')
             if node.get('ref') not in asset_refs or not node.get('lane'):
                 raise ValueError('connected clip lacks resource/lane')
@@ -603,24 +624,34 @@ def inspect_production_xml(path, expected=None):
             if spatial_order and spatial_order != ['adjust-conform', 'adjust-transform', 'adjust-blend']:
                 raise ValueError('visual placement node order is unsupported')
             source_asset = asset_refs[node.get('ref')]
+            source_enable = node.get('srcEnable')
+            if node.tag == 'video':
+                validate_still_resource(source_asset, format_refs, resolve_media_path(resource_uris[node.get('ref')], path))
+                if set(node.attrib) - {'ref', 'name', 'lane', 'offset', 'start', 'duration'}:
+                    raise ValueError('unsupported still connection attributes')
+                source_enable = 'video'
             connected_conform = None
-            if node.get('srcEnable') not in {'video', 'audio'}:
+            if source_enable not in {'video', 'audio'}:
                 raise ValueError('connected clip source enable must be video or audio')
             video_format = None
-            if node.get('srcEnable') == 'video':
+            if source_enable == 'video':
                 if not source_asset.get('format'):
                     raise ValueError('connected visual source format missing')
                 video_format = format_refs.get(source_asset.get('format'))
                 if video_format is None:
                     raise ValueError('connected visual source format missing')
-                source_rate = 1 / _read_time(video_format.get('frameDuration'))
-                connected_conform = _check_conform_node(node, source_rate, output_rate)
+                if node.tag == 'video':
+                    if node.find('conform-rate') is not None:
+                        raise ValueError('still connection cannot have conform-rate')
+                else:
+                    source_rate = 1 / _read_time(video_format.get('frameDuration'))
+                    connected_conform = _check_conform_node(node, source_rate, output_rate)
             elif node.find('conform-rate') is not None:
                 raise ValueError('audio connection cannot have conform-rate')
             placement = parse_static_placement(node)
-            if node.get('srcEnable') == 'audio' and placement is not None:
+            if source_enable == 'audio' and placement is not None:
                 raise ValueError('audio connection cannot have visual placement')
-            if node.get('srcEnable') == 'video' and node.find('adjust-volume') is not None:
+            if source_enable == 'video' and node.find('adjust-volume') is not None:
                 raise ValueError('video connection cannot have audio volume')
             volume = node.find('adjust-volume')
             cue_output = parent_output + _read_time(node.get('offset')) - parent_start
@@ -631,11 +662,11 @@ def inspect_production_xml(path, expected=None):
                               'lane': node.get('lane'), 'offset': node.get('offset'),
                               'output_start': _fcp_time(cue_output),
                               'start': node.get('start'), 'duration': node.get('duration'),
-                              'srcEnable': node.get('srcEnable'), 'audioRole': node.get('audioRole'),
-                              'videoRole': node.get('videoRole'), 'conform_rate': connected_conform,
+                              'srcEnable': source_enable, 'audioRole': node.get('audioRole'),
+                              'videoRole': 'video' if node.tag == 'video' else node.get('videoRole'), 'conform_rate': connected_conform,
                               'placement': placement,
                               'source_size': ([int(video_format.get('width')), int(video_format.get('height'))]
-                                              if node.get('srcEnable') == 'video' else None),
+                                              if source_enable == 'video' else None),
                               'gain': volume.get('amount') if volume is not None else None,
                               'audio_keyframes': _read_audio_animation(node),
                               'fade_in': volume.find('.//fadeIn').get('duration') if volume is not None and volume.find('.//fadeIn') is not None else None,
@@ -739,14 +770,18 @@ def _validate_spatial_context(root, spine):
     """Only direct connected visual clips may carry static spatial nodes."""
     spatial = {'adjust-conform', 'adjust-transform', 'adjust-blend'}
     parents = {child: parent for parent in root.iter() for child in parent}
+    for node in root.iter('video'):
+        owner = parents.get(node)
+        if owner is None or owner.tag != 'asset-clip' or parents.get(owner) is not spine:
+            raise ValueError('still video is outside a connected clip')
     connected = set()
     for node in root.iter():
         if node.tag not in spatial:
             continue
         owner = parents.get(node)
         primary = parents.get(owner)
-        if (owner is None or owner.tag != 'asset-clip' or
-                owner.get('srcEnable') != 'video' or
+        if (owner is None or owner.tag not in {'asset-clip', 'video'} or
+                owner.tag == 'asset-clip' and owner.get('srcEnable') != 'video' or
                 primary is None or primary.tag != 'asset-clip' or
                 parents.get(primary) is not spine):
             raise ValueError('visual placement is outside a connected video clip')

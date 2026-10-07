@@ -66,7 +66,7 @@ class ProductionImportTests(unittest.TestCase):
             item.set('name', f'Display Name {index}')
             item.find('media-rep').set('src', f'./media/{target.name}')
             ET.SubElement(item, 'metadata')
-        for clip in root.findall('.//asset-clip'):
+        for clip in root.findall('.//asset-clip') + root.findall('.//video'):
             clip.set('ref', remap[clip.get('ref')])
             clip.set('name', 'FCP renamed this clip')
         tree.write(output)
@@ -258,6 +258,26 @@ class ProductionImportTests(unittest.TestCase):
             self.assertEqual(result['cue_plan']['cues'][0]['opacity'], .35)
             self.assertEqual(result['gui_playback'], 'unverified')
 
+    @requires_apple_dtd('1.14')
+    def test_native_still_identity_color_conform(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            production, reference = self.visual_fixture(root)
+            output = root / 'native-still-return.fcpxml'
+            tree = self.returned_copy(reference, output)
+            tree.getroot().set('version', '1.14')
+            visual = tree.find('.//asset-clip/video')
+            conform = ET.SubElement(visual, 'adjust-colorConform', enabled='1',
+                                    autoOrManual='manual', conformType='conformNone',
+                                    peakNitsOfPQSource='1000', peakNitsOfSDRToPQSource='203')
+            tree.write(output)
+            result = import_production_xml(reference, output, production, 'codex', 'Native still identity conform')
+            self.assertEqual(result['status'], 'review_required', result)
+            conform.set('conformType', 'conformPQToSDR')
+            tree.write(output)
+            changed = import_production_xml(reference, output, production, 'codex', 'Reject changed still color')
+            self.assertEqual(changed['status'], 'rejected', changed)
+
     def test_return_refuses_dropped_or_changed_visual_placement(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -266,7 +286,7 @@ class ProductionImportTests(unittest.TestCase):
                 with self.subTest(modification=modification):
                     output = root / (modification + '.fcpxml')
                     tree = ET.parse(reference)
-                    connected = tree.find('.//asset-clip/asset-clip')
+                    connected = tree.find('.//asset-clip/video')
                     if modification == 'dropped':
                         connected.remove(connected.find('adjust-transform'))
                     elif modification == 'position':
@@ -288,7 +308,7 @@ class ProductionImportTests(unittest.TestCase):
             production, reference = self.visual_fixture(root)
             output = root / 'animated.fcpxml'
             tree = ET.parse(reference)
-            transform = tree.find('.//asset-clip/asset-clip/adjust-transform')
+            transform = tree.find('.//asset-clip/video/adjust-transform')
             ET.SubElement(transform, 'param', name='position', value='0 0')
             tree.write(output)
             result = import_production_xml(reference, output, production, 'codex',

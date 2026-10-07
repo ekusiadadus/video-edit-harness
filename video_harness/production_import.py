@@ -21,7 +21,7 @@ import xml.etree.ElementTree as ET
 from .cues import _asset_map, _check_asset, validate_cues
 from .overlay_placement import parse_static_placement
 from .production_fcp import (DTD_PATHS, FCP_FRAME_SAMPLING, FCP_SOURCE_RATES, _fcp_time,
-                             _read_time, resolve_media_path)
+                             _read_time, resolve_media_path, validate_still_resource)
 
 
 ACTORS = {'human', 'codex', 'claude_code', 'automation'}
@@ -32,7 +32,7 @@ STRUCTURE = {'fcpxml', 'import-options', 'option', 'resources', 'format', 'asset
              'bookmark', 'smart-collection', 'match-media', 'match-clip',
              'match-ratings', 'match-analysis-type', 'adjust-colorConform',
              'adjust-conform', 'adjust-transform', 'adjust-blend'}
-STRUCTURE.update({'keyframeAnimation', 'keyframe'})
+STRUCTURE.update({'keyframeAnimation', 'keyframe', 'video'})
 
 
 def _xml_path(path):
@@ -85,6 +85,10 @@ def _safe_xml(path):
                 raise ValueError(f'FCPXML {version} DTD invalid: {checked.stderr[-600:]}')
     parent = {child: node for node in root.iter() for child in node}
     project_spine = root.find('./library/event/project/sequence/spine')
+    for node in root.iter('video'):
+        owner = parent.get(node)
+        if owner is None or owner.tag != 'asset-clip' or parent.get(owner) is not project_spine:
+            raise ValueError('still video is outside a connected clip')
     for animation in root.iter('keyframeAnimation'):
         param = parent.get(animation)
         volume = parent.get(param)
@@ -103,7 +107,8 @@ def _safe_xml(path):
             owner = parent.get(node)
             anchor = parent.get(owner)
             spine_owner = parent.get(anchor)
-            if (owner is None or owner.tag != 'asset-clip' or owner.get('srcEnable') != 'video'
+            if (owner is None or owner.tag not in {'asset-clip', 'video'}
+                    or owner.tag == 'asset-clip' and owner.get('srcEnable') != 'video'
                     or anchor is None or anchor.tag != 'asset-clip'
                     or spine_owner is None or spine_owner is not project_spine):
                 raise ValueError('unsupported visual placement location')
@@ -118,7 +123,7 @@ def _safe_xml(path):
             raise ValueError('unsupported smart collection location')
         if node.tag.startswith('match-') and parent[node].tag != 'smart-collection':
             raise ValueError('unsupported smart collection rule location')
-        if node.tag == 'adjust-colorConform' and (parent[node].tag != 'asset-clip' or not _identity_color(node)):
+        if node.tag == 'adjust-colorConform' and (parent[node].tag not in {'asset-clip', 'video'} or not _identity_color(node)):
             raise ValueError('non-identity color conform is unsupported')
         if node.tag in STRUCTURE:
             continue
@@ -245,10 +250,14 @@ def _snapshot(path):
         if not media.is_file():
             raise ValueError('referenced local asset is missing')
         asset_format = formats.get(item.get('format'))
+        still = asset_format is not None and asset_format.get('frameDuration') is None
+        if still:
+            validate_still_resource(item, formats, media)
         assets[identifier] = {'sha256': _sha(media), 'path': str(media),
+                              'still': still,
                               'has_video': item.get('hasVideo') == '1',
                               'has_audio': item.get('hasAudio') == '1',
-                              'source_fps': 1 / _read_time(asset_format.get('frameDuration')) if asset_format is not None else None,
+                              'source_fps': 1 / _read_time(asset_format.get('frameDuration')) if asset_format is not None and not still else None,
                               'width': asset_format.get('width') if asset_format is not None else None,
                               'height': asset_format.get('height') if asset_format is not None else None}
     output_format = formats.get(sequence.get('format'))
@@ -287,7 +296,7 @@ def _snapshot(path):
                     raise ValueError('marker outside output timeline')
                 markers.append({'output_time': global_time, 'value': child.get('value')})
                 continue
-            if child.tag != 'asset-clip':
+            if child.tag not in {'asset-clip', 'video'}:
                 raise ValueError(f'unsupported connected layer: {child.tag}')
             reference = assets.get(child.get('ref'))
             if reference is None:
@@ -304,15 +313,25 @@ def _snapshot(path):
                 raise ValueError('connected layer outside output timeline')
             source_fps = reference['source_fps']
             src_enable = child.get('srcEnable')
+            if child.tag == 'video':
+                if (not reference['still'] or set(child.attrib) -
+                        {'ref', 'name', 'lane', 'offset', 'start', 'duration'}):
+                    raise ValueError('unsupported still connection')
+                src_enable = 'video'
             # FCP 1.14 can omit srcEnable on an audio-only resource. In that
             # case the media has no video stream to re-enable. Never make this
             # inference for a primary or a source with both audio and video.
             if src_enable is None and reference['has_audio'] and not reference['has_video']:
                 src_enable = 'audio'
             if src_enable == 'video':
-                if not reference['has_video'] or source_fps is None:
+                if not reference['has_video'] or source_fps is None and not reference['still']:
                     raise ValueError('visual layer does not reference video/image')
-                conform = _conform(child, source_fps, output['fps'])
+                if reference['still']:
+                    if child.find('conform-rate') is not None:
+                        raise ValueError('still connection cannot have conform-rate')
+                    conform = None
+                else:
+                    conform = _conform(child, source_fps, output['fps'])
             elif src_enable == 'audio':
                 if not reference['has_audio'] or child.find('conform-rate') is not None:
                     raise ValueError('audio layer has unsupported source/conform')
@@ -326,7 +345,7 @@ def _snapshot(path):
                 raise ValueError('audio layer cannot carry visual placement')
             volume = _volume(child, src_enable)
             connected.append({'sha256': reference['sha256'], 'name': child.get('name'),
-                              'role': child.get('audioRole') if src_enable == 'audio' else child.get('videoRole'),
+                              'role': child.get('audioRole') if src_enable == 'audio' else ('video' if child.tag == 'video' else child.get('videoRole')),
                               'src_enable': src_enable, 'lane': child.get('lane'),
                               'output_start': start_output, 'source_start': _read_time(child.get('start', '0s')),
                               'duration': clip_length, 'conform': conform,

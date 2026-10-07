@@ -2,6 +2,14 @@
 
 各項目は記録時点の状態です。直近の開発機能を先頭に掲載し、過去の未完了記録も検証履歴として残しています。公開alpha.7と開発版を区別してください。
 
+## 2026-10-07 開発版: ネイティブ静止画形式と複合FCPの実取り込み
+
+画像・ラスタタイトルを、FCP自身の静止画形式（ゼロ長asset、FFVideoFormatRateUndefined、接続video）へ統合。動画と音声は従来のasset-clipを保持する。検査と往復取り込みは画像の実体・寸法・接続範囲を照合し、未知の動画ノードや音声・format・clockの混入を拒否する。元の形式の検査は保持。
+
+画像／タイトル／複合を実exporterから再生成しDTD成功。複合runtime.fcpxmlのSHA b0f7868f49848676ed7f98ac787330e5208a7b86fad570f51453bf28f7ab3ae2をFCP 12.4で警告なしに読み込み、source・music・Measured Dialogue PCM・image・labelの5レイヤーを開いた。FCPから返した1.14 XMLも保存し、131音量キーの時刻一致・最大丸め差0.00005 dBを確認。これは小さな実機校正候補で、全作品の互換性や人の視聴承認ではない。ネイティブの省略・丸めへの往復受入、FCP映像書き出し／音声・画像一致は未完了（保存ボタン無効で映像書き出しをキャンセル）。
+
+全体705テスト成功（438.186秒）は静止画統合時点の検証で、その後の不正画像拒否とネイティブ静止画のidentity color-conform対応は最終の関連51テスト成功（13.886秒）で別確認した。生ログ、生成XML、FCP返却XML、GUI画像と拒否報告は`output/implementation-maya/fcp-native-stills-20261007/`。公開alpha.7は変更しない。
+
 ## 2026-10-07 開発版: 全体回帰と作業ツリー外からの実素材レンダー
 
 コード基準3b2cbba。`uv run --no-sync python -m unittest discover -s tests -v`が704件・596.188秒で成功。wheel／sdist／3スキル／Claudeプラグインの計6配布物を検証用フォルダーに生成し、アーカイブ内容・定義・checksum・設定済み秘密値の検査が成功した。公開alpha.7の配布物やtagは変更していない。検証用ファイル名は現行pyprojectの版を使うが、既存公開releaseそのものではない。

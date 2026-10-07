@@ -56,8 +56,7 @@ class FcpAudioReturnTests(unittest.TestCase):
                              {cue['id']: cue for cue in production['cues']})
             self.assertEqual(report['actor'], 'codex')
             self.assertEqual(report['gui_playback'], 'unverified')
-            visual = next(node for node in tree.findall('.//asset-clip/asset-clip')
-                          if node.get('srcEnable') == 'video')
+            visual = tree.find('.//asset-clip/video')
             visual.set('duration', '3/4s')
             tree.write(output)
             revised = import_production_xml(reference, output, production, 'human',
