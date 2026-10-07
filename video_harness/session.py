@@ -1232,8 +1232,10 @@ class Session:
         fields = {'version','kind','render_id','render_sha256','output_time','note','adopted','final_review'}
         if isinstance(selection, dict) and type(selection.get('version')) is int and selection['version'] in (2, 3):
             fields = fields | {'effect_operations'}
+        if isinstance(selection, dict) and type(selection.get('version')) is int and selection['version'] == 4:
+            fields |= {'effect_operations', 'music_operations'}
         if (not isinstance(selection, dict) or set(selection) != fields
-                or type(selection['version']) is not int or selection['version'] not in (1, 2, 3)
+                or type(selection['version']) is not int or selection['version'] not in (1, 2, 3, 4)
                 or selection['kind'] != 'comparison_selection_proposal'
                 or not isinstance(selection['render_id'], str)
                 or not isinstance(selection['render_sha256'], str)
@@ -1259,11 +1261,24 @@ class Session:
                 raise ValueError('Comparison selection source differs from session source')
             self._validate_edit_plan(plan, cfg)
             adjusted_project = None
-            if selection['version'] in (2, 3):
+            if selection['version'] in (2, 3, 4):
                 from .video_effects import revise_comparison_effects
-                cfg['video_effects'] = revise_comparison_effects(
-                    cfg.get('video_effects'), read(render['files']['mapping']['path']),
-                    selection['effect_operations'], cfg.get('assets', []), version=selection['version'])
+                if selection['version'] == 4:
+                    if (not isinstance(selection['effect_operations'], list)
+                            or not isinstance(selection['music_operations'], list)
+                            or not selection['music_operations']):
+                        raise ValueError('Version 4 needs BGM operations and an effect operation list')
+                    from .comparison_music import revise_music
+                    production = read(render['files']['production']['path']) if 'production' in render['files'] else {}
+                    cfg['cue_plan'] = revise_music(cfg, read(render['files']['mapping']['path']),
+                                                  production, render, selection['music_operations'])
+                if selection['effect_operations']:
+                    cfg['video_effects'] = revise_comparison_effects(
+                        cfg.get('video_effects'), read(render['files']['mapping']['path']),
+                        selection['effect_operations'], cfg.get('assets', []),
+                        version=3 if selection['version'] == 4 else selection['version'])
+                elif selection['version'] != 4:
+                    raise ValueError('Comparison adjustments need existing adjustable effects')
                 from .production import resolve_production
                 resolve_production(cfg, read(render['files']['mapping']['path']))
                 adjusted_project = cfg
@@ -1349,9 +1364,12 @@ class Session:
                     cfg.get('video_effects'), read(render['files']['mapping']['path']), cfg.get('assets', [])),
                     read(render['files']['mapping']['path']))
                 video = Path(render['files']['video']['path']).as_uri()
+                from .comparison_music import music_controls
+                production = read(render['files']['production']['path']) if 'production' in render['files'] else {}
                 rows.append({'label': f'{label} / {render["id"]}', 'video': video,
                              'render_id': render['id'], 'sha256': render['files']['video']['sha256'],
                              'effect_controls': controls,
+                             'music_controls': music_controls(cfg, production, render),
                              'transitions': next(row.get('transitions',row.get('production_changes',{}).get('transitions',[]))
                                                  for row in evidence['candidates'] if row['render_id']==render['id']),
                              **({'duration_seconds':timing_rows[render['id']]['duration_seconds'],
@@ -1760,6 +1778,8 @@ class Session:
         if not candidate.get('comparison_selection'):
             raise ValueError('Effect preview requires a comparison adjustment candidate')
         receipt = read(candidate['comparison_selection']['path'])
+        if receipt.get('version') == 4:
+            raise ValueError('BGM changes require a full render; cached effect previews retain original audio')
         if receipt.get('version') not in (2, 3):
             raise ValueError('Effect preview requires version-2/3 comparison adjustments')
         original = self._find_render(state, candidate['selected_render_id'])

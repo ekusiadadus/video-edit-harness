@@ -49,11 +49,13 @@ code{overflow-wrap:anywhere;font-size:11px}textarea{width:min(90%,700px)}
 <label>再生位置 <input id="seek" type="range" min="0" max="0" step="0.01" value="0"></label>
 <output id="time">0.00秒</output><p id="status" role="status">読み込み中</p>
 <main>''' + ''.join(cards) + '''</main>
-<section id="effect-panel" aria-label="選んだ候補のエフェクト調整">
-<h2>選んだ候補のエフェクト調整</h2>
-<p>調整は保存する提案です。この動画の見た目は変わりません。反映後の動画を再確認してください。</p>
+<section id="effect-panel" aria-label="選んだ候補のエフェクトとBGM調整">
+<h2>選んだ候補のエフェクトとBGM調整</h2>
+<p>調整は保存する提案です。この動画の映像・音は変わりません。反映後の動画を再確認してください。</p>
 <p id="effect-summary">候補を選ぶと調整できるエフェクトを表示します。</p>
 <ul id="effect-list"></ul>
+<h3>BGM</h3><p>元音声に対する強さを調整します。最終音量の正規化は別です。曲・音ハメの位置は変えません。</p>
+<ul id="music-list"></ul>
 <button id="undo-effects" type="button" disabled>直前の調整を戻す</button>
 <button id="reset-effects" type="button" disabled>この候補の調整をすべて戻す</button>
 </section>
@@ -63,11 +65,11 @@ code{overflow-wrap:anywhere;font-size:11px}textarea{width:min(90%,700px)}
 <script>const rows=''' + data + ''';
 const videos=[...document.querySelectorAll('video')],seek=document.querySelector('#seek'),status=document.querySelector('#status');
 let playing=false,choice=null,audio=0;
-const staged=rows.map(()=>({values:new Map(),ranges:new Map(),anchors:new Map(),disabled:new Set(),history:[]}));
+const staged=rows.map(()=>({values:new Map(),ranges:new Map(),anchors:new Map(),disabled:new Set(),music:new Map(),musicDisabled:new Set(),history:[]}));
 const effectList=document.querySelector('#effect-list'),effectSummary=document.querySelector('#effect-summary');
 const undoEffects=document.querySelector('#undo-effects'),resetEffects=document.querySelector('#reset-effects');
 function controlsFor(index){return Array.isArray(rows[index].effect_controls)?rows[index].effect_controls:[];}
-function snapshot(state){return {values:new Map(state.values),ranges:new Map(state.ranges),anchors:new Map(state.anchors),disabled:new Set(state.disabled)};}
+function snapshot(state){return {values:new Map(state.values),ranges:new Map(state.ranges),anchors:new Map(state.anchors),disabled:new Set(state.disabled),music:new Map(state.music),musicDisabled:new Set(state.musicDisabled)};}
 function remember(state){state.history.push(snapshot(state));}
 function frameTime(frame,fps){const [n,d='1']=String(fps).split('/');return String(BigInt(frame)*BigInt(d))+'/'+n;}
 function speedRange(event,range,factor){
@@ -92,8 +94,25 @@ if(anchor){if(Object.values(anchor).some(v=>!Number.isFinite(v) || v<0 || v>1))t
 const changed=Object.fromEntries(Object.entries(anchor).filter(([key,v])=>v!==event.anchor[key]));
 if(Object.keys(changed).length)changes.parameters=changed;}
 return Object.keys(changes).length?[{action:'update',id:event.id,changes}]:[];});}
-function changedCount(index){try{return operationsFor(index).length;}catch(e){return '範囲・位置を確認';}}
-function renderEffects(){effectList.replaceChildren();
+function musicOperationsFor(index){const state=staged[index];return (rows[index].music_controls ?? []).flatMap(cue=>{
+if(state.musicDisabled.has(cue.id))return [{action:'remove',id:cue.id}];
+if(!state.music.has(cue.id))return [];const gain=state.music.get(cue.id);
+if(!cue.adjustable_gain || !Number.isFinite(gain) || gain<cue.minimum_gain_db || gain>cue.maximum_gain_db)throw new Error('BGMの強さを表示された範囲で指定してください');
+return gain===Number(cue.gain_db)?[]:[{action:'gain',id:cue.id,gain_db:gain}];});}
+function renderMusic(){const list=document.querySelector('#music-list');list.replaceChildren();if(choice===null)return;
+const state=staged[choice],controls=rows[choice].music_controls ?? [];
+if(!controls.length){const item=document.createElement('li');item.textContent='変更できるBGMはありません。';list.append(item);return;}
+for(const cue of controls){const item=document.createElement('li'),title=document.createElement('span');title.textContent=cue.asset_id+' / '+cue.id+' ';item.append(title);
+if(cue.adjustable_gain){const label=document.createElement('label');label.textContent='BGMの強さ（dB） ';
+const input=document.createElement('input');input.type='number';input.step='any';input.min=String(cue.minimum_gain_db);input.max=String(cue.maximum_gain_db);
+input.value=String(state.music.get(cue.id) ?? cue.gain_db);input.disabled=state.musicDisabled.has(cue.id);
+input.addEventListener('change',()=>{remember(state);state.music.set(cue.id,input.value.trim()===''?NaN:Number(input.value));
+undoEffects.disabled=false;resetEffects.disabled=false;message('BGMの変更を保存して反映後の音声を確認してください。');});label.append(input);item.append(label);
+}else{const info=document.createElement('span');info.textContent='最終正規化や元音声の検査条件により、ここではオフのみ。 ';item.append(info);}
+const label=document.createElement('label');label.textContent='BGMオフ ';const off=document.createElement('input');off.type='checkbox';off.checked=state.musicDisabled.has(cue.id);
+off.addEventListener('change',()=>{remember(state);if(off.checked)state.musicDisabled.add(cue.id);else state.musicDisabled.delete(cue.id);renderEffects();});label.append(off);item.append(label);list.append(item);}}
+function changedCount(index){try{return operationsFor(index).length+musicOperationsFor(index).length;}catch(e){return '範囲・位置・BGMを確認';}}
+function renderEffects(){effectList.replaceChildren();renderMusic();
 if(choice===null){effectSummary.textContent='候補を選ぶと調整できるエフェクトを表示します。';
 undoEffects.disabled=true;resetEffects.disabled=true;return;}
 const controls=controlsFor(choice),state=staged[choice];
@@ -139,9 +158,9 @@ effectList.append(item);}
 undoEffects.disabled=state.history.length===0;
 resetEffects.disabled=state.history.length===0 || changedCount(choice)===0;}
 undoEffects.onclick=()=>{if(choice===null)return;const state=staged[choice],previous=state.history.pop();
-if(!previous)return;state.values=previous.values;state.ranges=previous.ranges;state.anchors=previous.anchors;state.disabled=previous.disabled;renderEffects();};
+if(!previous)return;state.values=previous.values;state.ranges=previous.ranges;state.anchors=previous.anchors;state.disabled=previous.disabled;state.music=previous.music;state.musicDisabled=previous.musicDisabled;renderEffects();};
 resetEffects.onclick=()=>{if(choice===null)return;const state=staged[choice];
-if(!changedCount(choice))return;remember(state);state.values.clear();state.ranges.clear();state.anchors.clear();state.disabled.clear();renderEffects();};
+if(!changedCount(choice))return;remember(state);state.values.clear();state.ranges.clear();state.anchors.clear();state.disabled.clear();state.music.clear();state.musicDisabled.clear();renderEffects();};
 function message(text){status.textContent=text;}
 function stop(){playing=false;videos.forEach(v=>v.pause());}
 function position(t){videos.forEach(v=>{if(Number.isFinite(v.duration))v.currentTime=Math.min(t,v.duration);});seek.value=t;}
@@ -162,11 +181,12 @@ renderEffects();message('候補: '+rows[choice].label);});
 function tick(){if(playing){const t=videos[0].currentTime;seek.value=t;videos.slice(1).forEach(v=>{if(Math.abs(v.currentTime-t)>.12)v.currentTime=t;});}
 document.querySelector('#time').textContent=Number(seek.value).toFixed(2)+'秒';requestAnimationFrame(tick);}tick();
 document.querySelector('#save').onclick=()=>{if(choice===null){message('先に候補を選んでください');return;}
-let operations;try{operations=operationsFor(choice);}catch(e){message(e.message);return;}
-const result={version:operations.some(op=>op.changes && Object.keys(op.changes).some(k=>k!=='strength'))?3:(operations.length?2:1),kind:'comparison_selection_proposal',render_id:rows[choice].render_id,
+let operations,musicOperations;try{operations=operationsFor(choice);musicOperations=musicOperationsFor(choice);}catch(e){message(e.message);return;}
+const result={version:musicOperations.length?4:(operations.some(op=>op.changes && Object.keys(op.changes).some(k=>k!=='strength'))?3:(operations.length?2:1)),kind:'comparison_selection_proposal',render_id:rows[choice].render_id,
 render_sha256:rows[choice].sha256,output_time:Number(seek.value),note:document.querySelector('#note').value,
 adopted:false,final_review:false};
-if(operations.length)result.effect_operations=operations;
+if(operations.length || musicOperations.length)result.effect_operations=operations;
+if(musicOperations.length)result.music_operations=musicOperations;
 const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));
 const a=document.createElement('a');a.href=url;a.download='comparison-selection.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 message('修正メモを保存しました。ハーネスで反映後、生成した動画を再確認してください。');};

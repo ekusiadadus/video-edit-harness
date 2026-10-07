@@ -8,6 +8,8 @@ The development checkout also exercises beat cuts, picture-speed ramps, zooms, t
 
 Development comparison pages offer shorter/original/longer effect time for smooth zoom and saturation, preserving the midpoint without changing footage or BGM speed. Undo and matched interval previews remain available. See [controls and limits](docs/COMPARISON_ADJUSTMENTS.ja.md).
 
+Development effects comparisons also propose existing BGM gain/off corrections with undo. Gain controls use sealed source-audio evidence or explicit no-normalization; normalized music-only cases expose Off. Render the candidate fully before checking its new audio. Track replacement and cached previews of music changes remain unsupported. See [BGM controls](docs/COMPARISON_ADJUSTMENTS.ja.md).
+
 English | [日本語](README.ja.md)
 
 Turn local spoken footage into coherent edits with **Codex or Claude Code**: shorter unnecessary pauses, scene-appropriate color, clear audio, matching captions and an editable Final Cut Pro timeline. You choose the story and review the result; the harness keeps source hashes, revisions and delivery evidence together.

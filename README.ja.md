@@ -12,6 +12,8 @@ alpha.7では、自然な編集を既定にBGM・効果音・補助素材・音�
 
 開発版の比較ページでは、ズーム・彩度演出を「短く・速め／元の長さ／長く・ゆっくり」で調整できます。効果の中心を保って時間を変え、映像やBGMの速度は変えません。取り消しと区間確認を使って仕上げます。[操作と制約](docs/COMPARISON_ADJUSTMENTS.ja.md)。
 
+開発版のエフェクト比較では、配置済みBGMの強さ・オフも取り消し付きで指定できます。正規化なし、または封印済みのミックス検査に元音声がある場合だけ音量欄を表示し、正規化されたBGMだけの動画ではオフを提供します。候補を全編レンダーして新しい音声を確認します。曲の差し替えとBGM変更の高速区間プレビューは未対応です。[操作と制約](docs/COMPARISON_ADJUSTMENTS.ja.md)。
+
 固定領域と追跡した人物・字幕領域の保護には `composition_guides`、ローカル追跡には `tracking track`／`tracking validate` を使用します。`session track-effect` は観察した区間の追跡ズームと、文字の重なり・ズーム見切れの検査を未採用候補にします。[追跡と配置検査](docs/TRACKING.ja.md)にOpenCV・MediaPipeの選択と制限を記載しています。`retime prepare`／`retime render` で変速・静止保持、音声伸縮、字幕時刻の移行を単独のMP4へ描画できます。[時間変更の操作と制限](docs/RETIME.ja.md)を参照してください。visualセッションの未採用候補と変速済み映像のFCP受け渡しに対応します。FCPで編集できる時間変更は未対応です。alpha.7の発話セッションでは、単語保護と観察済みの非発話区間を伴う候補を描画できます。
 
 alpha.7には、観察した位置へ短い文字を追従させる `tracked_title` を追加しています。`session track-effect --effect tracked_title --title-parameters-file label.json` で未採用候補を作れます。[使い方と制限](docs/TRACKING.ja.md)を確認してください。
