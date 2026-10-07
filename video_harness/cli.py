@@ -36,6 +36,7 @@ def parser():
  a=s.add_parser('export-xml');a.add_argument('plan',type=Path);a.add_argument('output',type=Path);a.add_argument('--name',default='Talk Pacing Review')
  a=s.add_parser('verify');a.add_argument('video',type=Path);a.add_argument('--output',type=Path,required=True)
  a.add_argument('--require-audio',action='store_true');a.add_argument('--expected-audio-range',nargs=2,type=float,metavar=('START','END'))
+ a=s.add_parser('native-compare',help='Compare returned MP4 picture and audio locally without approval');a.add_argument('before',type=Path);a.add_argument('after',type=Path);a.add_argument('--output',type=Path,required=True)
  a=s.add_parser('native-inspect',help='Inspect downloaded native finishing media locally without assuming source or rights');a.add_argument('video',type=Path);a.add_argument('--output',type=Path,required=True);a.add_argument('--require-music',action='store_true')
  a=s.add_parser('transcribe');a.add_argument('project',type=Path);a.add_argument('--output',type=Path);a.add_argument('--provider',choices=['auto','openai','azure']);a.add_argument('--model');a.add_argument('--language')
  a=s.add_parser('edit-plan');a.add_argument('project',type=Path);a.add_argument('transcript',type=Path);a.add_argument('--output',type=Path)
@@ -136,6 +137,9 @@ def main():
    keeps=keep_intervals(plan);result=export_timeline(src,probe(src),keeps,args.output,args.name)
    write(args.output.with_suffix('.manifest.json'),{'source':current,'keep':keeps,'result':result,'cuts_enabled':sum(x.get('enabled') is True for x in plan['cuts']),'note':'Natural source audio; apply combined LUT in FCP; normalize final mix after editing.'});print(args.output);return
   if args.cmd=='verify':verify(args.video,args.output,require_audio=args.require_audio,expected_audio_range=args.expected_audio_range);print('decode + color tags + track coverage PASS');return
+  if args.cmd=='native-compare':
+   from .native_comparison import compare_native_results
+   print(json.dumps(compare_native_results(args.before,args.after,args.output),ensure_ascii=False,indent=2));return
   if args.cmd=='native-inspect':
    from .native_finishing import inspect_native_result
    print(json.dumps(inspect_native_result(args.video,args.output,args.require_music),ensure_ascii=False,indent=2));return

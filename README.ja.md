@@ -252,3 +252,5 @@ alpha.7の実験的な `tracked_background` は、追跡対象のフレームご
 開発版の比較ページで、効果の適用区間と滑らかなズームの横・縦位置も変更できます。取り消し・リセットに対応し、実際の FPS に基づくフレーム位置を保存します。修正後にレンダーし、元の区間と変更先を比較します。[操作と制約](docs/COMPARISON_ADJUSTMENTS.ja.md)。
 
 開発版 `session preview-changes SESSION CANDIDATE_ID` で、修正後の全編を待たずに効果の変更区間を確認できます。保存済みの映像・完成音声を再利用し、効果の時計と残像履歴を保ちます。区間だけの試作は採用条件や全編レビューを満たしません。[操作と制約](docs/COMPARISON_ADJUSTMENTS.ja.md)。
+
+開発版の`native-compare BEFORE.mp4 AFTER.mp4 --output DIR`は、外部仕上げの前後を全AVデコードし、再サンプリングしない音声PCMと、時刻が一致するフレームの縮小RGBを比較します。音の違いと映像の変化を分け、曲・効果の同一性、API実行、利用許諾は別途確認します。[比較の操作](docs/TIKTOK_API.ja.md)。

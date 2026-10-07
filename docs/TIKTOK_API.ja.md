@@ -86,3 +86,20 @@ uv run --no-sync video-harness session native-result SESSION PROPOSAL_ID \
 - [Get User Info](https://developers.tiktok.com/docs/en/tiktok-api-v2-get-user-info)
 - [List Videos](https://developers.tiktok.com/docs/en/tiktok-api-v2-video-list)
 - [Video Objectのフィールド](https://developers.tiktok.com/doc/tiktok-api-v2-video-object)
+
+## 音楽入りのStudio実検証と前後比較（2026-10-07）
+
+先の実質無音の書き出しは保持した。その後、Studio内蔵Stockの21.9秒ダンス素材へAudioの「Pick music for me」を実行すると、「Brand Comercial」の音楽レイヤーが追加された。音楽のみの基準版をダウンロードし、短いNightclub効果レイヤーを追加・短縮・移動した版も別途ダウンロードした。個人のローカル素材はアップロードしていない。これは**Studio UIでの実操作と取得MP4の検査**であり、Business／Symphony編集APIからの応答ではない。
+
+基準版SHAは`c5db2d24bd8abacc937ef7791c6c6101e425b914836de8ec92a16792af9c4f38`、効果版SHAは`676b75be059e27b8890c596df3365cbafc63499b95609ad0bb236e8bfe6471b4`。どちらも1080×1920、30fps、657フレーム、21.9秒。基準版の最初の音声トラックはピーク−8.3 dBで実質無音ではない。選択曲の名前はUIの表示であり、録音同一性の鑑定ではない。前後音声のサンプル数は同じだがPCMは完全一致しなかったため「同一音声」と断定しない。縮小映像の差が大きい区間は約2.7〜3.8秒。エフェクトの厳密な内部パラメーターや音楽的な適合はこの検査から決めない。
+
+権利を確認するまで、これらはStudio機能の検証用であり、絶望ドメインのYouTube公開用納品には含めない。YouTube転用許諾、人の全編視聴・試聴、曲の同一性、APIによる実編集は未確認。ローカルAPI設定も引き続き未構成・未接続。
+
+前後比較の診断:
+
+```sh
+uv run --no-sync video-harness native-compare before.mp4 after.mp4 \
+  --output output/native-comparison
+```
+
+新しい出力フォルダーへ全AVデコード検査、再サンプリングしない最初の音声トラックのPCM SHA・サンプル数、全フレームの時刻、アスペクトを維持した最大160ピクセルの縮小RGB差を保存する。画面寸法・FPS・フレーム数・時刻が異なる映像を黙って伸縮して比較しない。縮小画素の一致はフル解像度の画素一致ではない。処理の正常終了は診断の完了であり、元素材の一致・曲／効果の同一性・人の承認・利用許諾・API実行・公開を証明しない。MP4入力を強制しネットワークプレイリストを拒否する。生ログと取得ファイルは`output/implementation-maya/tiktok-native-music-20261007/`へ保持。
