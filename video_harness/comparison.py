@@ -65,11 +65,11 @@ code{overflow-wrap:anywhere;font-size:11px}textarea{width:min(90%,700px)}
 <script>const rows=''' + data + ''';
 const videos=[...document.querySelectorAll('video')],seek=document.querySelector('#seek'),status=document.querySelector('#status');
 let playing=false,choice=null,audio=0;
-const staged=rows.map(()=>({values:new Map(),ranges:new Map(),anchors:new Map(),disabled:new Set(),music:new Map(),musicDisabled:new Set(),history:[]}));
+const staged=rows.map(()=>({values:new Map(),ranges:new Map(),anchors:new Map(),disabled:new Set(),music:new Map(),musicDisabled:new Set(),replacement:new Map(),history:[]}));
 const effectList=document.querySelector('#effect-list'),effectSummary=document.querySelector('#effect-summary');
 const undoEffects=document.querySelector('#undo-effects'),resetEffects=document.querySelector('#reset-effects');
 function controlsFor(index){return Array.isArray(rows[index].effect_controls)?rows[index].effect_controls:[];}
-function snapshot(state){return {values:new Map(state.values),ranges:new Map(state.ranges),anchors:new Map(state.anchors),disabled:new Set(state.disabled),music:new Map(state.music),musicDisabled:new Set(state.musicDisabled)};}
+function snapshot(state){return {values:new Map(state.values),ranges:new Map(state.ranges),anchors:new Map(state.anchors),disabled:new Set(state.disabled),music:new Map(state.music),musicDisabled:new Set(state.musicDisabled),replacement:new Map(state.replacement)};}
 function remember(state){state.history.push(snapshot(state));}
 function frameTime(frame,fps){const [n,d='1']=String(fps).split('/');return String(BigInt(frame)*BigInt(d))+'/'+n;}
 function speedRange(event,range,factor){
@@ -96,7 +96,13 @@ if(Object.keys(changed).length)changes.parameters=changed;}
 return Object.keys(changes).length?[{action:'update',id:event.id,changes}]:[];});}
 function musicOperationsFor(index){const state=staged[index];return (rows[index].music_controls ?? []).flatMap(cue=>{
 if(state.musicDisabled.has(cue.id))return [{action:'remove',id:cue.id}];
-if(!state.music.has(cue.id))return [];const gain=state.music.get(cue.id);
+const replacement=state.replacement.get(cue.id);
+const gain=state.music.get(cue.id) ?? Number(cue.gain_db);
+if(replacement){const selected=(cue.replacement_choices ?? []).find(a=>a.asset_id===replacement.asset_id);
+if(!selected || !Number.isFinite(replacement.start) || replacement.start<0)throw new Error('BGMの曲と開始秒を確認してください');
+if(!Number.isFinite(gain) || gain<cue.minimum_gain_db || gain>cue.maximum_gain_db || (!cue.adjustable_gain && gain!==Number(cue.gain_db)))throw new Error('BGMの強さを確認してください');
+return [{action:'replace',id:cue.id,asset_id:selected.asset_id,asset_sha256:selected.asset_sha256,source_start:String(replacement.start),gain_db:gain}];}
+if(!state.music.has(cue.id))return [];
 if(!cue.adjustable_gain || !Number.isFinite(gain) || gain<cue.minimum_gain_db || gain>cue.maximum_gain_db)throw new Error('BGMの強さを表示された範囲で指定してください');
 return gain===Number(cue.gain_db)?[]:[{action:'gain',id:cue.id,gain_db:gain}];});}
 function renderMusic(){const list=document.querySelector('#music-list');list.replaceChildren();if(choice===null)return;
@@ -108,9 +114,17 @@ const input=document.createElement('input');input.type='number';input.step='any'
 input.value=String(state.music.get(cue.id) ?? cue.gain_db);input.disabled=state.musicDisabled.has(cue.id);
 input.addEventListener('change',()=>{remember(state);state.music.set(cue.id,input.value.trim()===''?NaN:Number(input.value));
 undoEffects.disabled=false;resetEffects.disabled=false;message('BGMの変更を保存して反映後の音声を確認してください。');});label.append(input);item.append(label);
-}else{const info=document.createElement('span');info.textContent='最終正規化や元音声の検査条件により、ここではオフのみ。 ';item.append(info);}
+}else{const info=document.createElement('span');info.textContent='最終正規化や元音声の検査条件により、音量変更は使えません。 ';item.append(info);}
 const label=document.createElement('label');label.textContent='BGMオフ ';const off=document.createElement('input');off.type='checkbox';off.checked=state.musicDisabled.has(cue.id);
-off.addEventListener('change',()=>{remember(state);if(off.checked)state.musicDisabled.add(cue.id);else state.musicDisabled.delete(cue.id);renderEffects();});label.append(off);item.append(label);list.append(item);}}
+off.addEventListener('change',()=>{remember(state);if(off.checked)state.musicDisabled.add(cue.id);else state.musicDisabled.delete(cue.id);renderEffects();});label.append(off);item.append(label);
+if((cue.replacement_choices ?? []).length){const trackLabel=document.createElement('label');trackLabel.textContent='曲を差し替え ';
+const select=document.createElement('select');const keep=document.createElement('option');keep.value='';keep.textContent='元の曲・開始位置を保持';select.append(keep);
+for(const asset of cue.replacement_choices){const option=document.createElement('option');option.value=asset.asset_id;option.textContent=asset.label;select.append(option);}
+select.value=state.replacement.get(cue.id)?.asset_id ?? '';select.disabled=state.musicDisabled.has(cue.id);
+select.addEventListener('change',()=>{remember(state);if(select.value)state.replacement.set(cue.id,{asset_id:select.value,start:0});else state.replacement.delete(cue.id);renderEffects();message('曲の差し替えは全編の再レンダーが必要です。新しい曲の音ハメは未検証です。');});trackLabel.append(select);item.append(trackLabel);
+if(state.replacement.has(cue.id)){const startLabel=document.createElement('label');startLabel.textContent='曲の開始秒 ';const start=document.createElement('input');start.type='number';start.min='0';start.step='any';start.value=String(state.replacement.get(cue.id).start);start.disabled=state.musicDisabled.has(cue.id);
+start.addEventListener('change',()=>{remember(state);state.replacement.set(cue.id,{...state.replacement.get(cue.id),start:start.value.trim()===''?NaN:Number(start.value)});message('新しい曲の拍は未検証です。保存後に全編を書き出し、音ハメを再確認してください。');});startLabel.append(start);item.append(startLabel);}}
+list.append(item);}}
 function changedCount(index){try{return operationsFor(index).length+musicOperationsFor(index).length;}catch(e){return '範囲・位置・BGMを確認';}}
 function renderEffects(){effectList.replaceChildren();renderMusic();
 if(choice===null){effectSummary.textContent='候補を選ぶと調整できるエフェクトを表示します。';
@@ -158,9 +172,9 @@ effectList.append(item);}
 undoEffects.disabled=state.history.length===0;
 resetEffects.disabled=state.history.length===0 || changedCount(choice)===0;}
 undoEffects.onclick=()=>{if(choice===null)return;const state=staged[choice],previous=state.history.pop();
-if(!previous)return;state.values=previous.values;state.ranges=previous.ranges;state.anchors=previous.anchors;state.disabled=previous.disabled;state.music=previous.music;state.musicDisabled=previous.musicDisabled;renderEffects();};
+if(!previous)return;state.values=previous.values;state.ranges=previous.ranges;state.anchors=previous.anchors;state.disabled=previous.disabled;state.music=previous.music;state.musicDisabled=previous.musicDisabled;state.replacement=previous.replacement;renderEffects();};
 resetEffects.onclick=()=>{if(choice===null)return;const state=staged[choice];
-if(!changedCount(choice))return;remember(state);state.values.clear();state.ranges.clear();state.anchors.clear();state.disabled.clear();state.music.clear();state.musicDisabled.clear();renderEffects();};
+if(!changedCount(choice))return;remember(state);state.values.clear();state.ranges.clear();state.anchors.clear();state.disabled.clear();state.music.clear();state.musicDisabled.clear();state.replacement.clear();renderEffects();};
 function message(text){status.textContent=text;}
 function stop(){playing=false;videos.forEach(v=>v.pause());}
 function position(t){videos.forEach(v=>{if(Number.isFinite(v.duration))v.currentTime=Math.min(t,v.duration);});seek.value=t;}
@@ -182,7 +196,7 @@ function tick(){if(playing){const t=videos[0].currentTime;seek.value=t;videos.sl
 document.querySelector('#time').textContent=Number(seek.value).toFixed(2)+'秒';requestAnimationFrame(tick);}tick();
 document.querySelector('#save').onclick=()=>{if(choice===null){message('先に候補を選んでください');return;}
 let operations,musicOperations;try{operations=operationsFor(choice);musicOperations=musicOperationsFor(choice);}catch(e){message(e.message);return;}
-const result={version:musicOperations.length?4:(operations.some(op=>op.changes && Object.keys(op.changes).some(k=>k!=='strength'))?3:(operations.length?2:1)),kind:'comparison_selection_proposal',render_id:rows[choice].render_id,
+const result={version:musicOperations.some(op=>op.action==='replace')?5:(musicOperations.length?4:(operations.some(op=>op.changes && Object.keys(op.changes).some(k=>k!=='strength'))?3:(operations.length?2:1))),kind:'comparison_selection_proposal',render_id:rows[choice].render_id,
 render_sha256:rows[choice].sha256,output_time:Number(seek.value),note:document.querySelector('#note').value,
 adopted:false,final_review:false};
 if(operations.length || musicOperations.length)result.effect_operations=operations;

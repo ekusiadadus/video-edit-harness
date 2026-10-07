@@ -223,6 +223,8 @@ class Session:
                 check_ref(candidate['motion_template'])
             if candidate.get('retime_settings_migration'):
                 check_ref(candidate['retime_settings_migration'])
+            if candidate.get('music_change_evidence'):
+                check_ref(candidate['music_change_evidence'])
             if candidate.get('comparison_selection'):
                 check_ref(candidate['comparison_selection'])
         for comparison in state.get('candidate_comparisons', []):
@@ -809,6 +811,15 @@ class Session:
                     'plan': deepcopy(state['plan']), 'brief': deepcopy(state['brief']),
                     'transcript': deepcopy(state.get('transcript')), 'packed': deepcopy(state.get('packed')),
                     'pattern': pattern, 'actor': actor, 'note': note, 'created_at': now()}
+            provenance = None
+            if base_render_id is not None:
+                provenance = base['files'].get('music_change_evidence')
+            elif state.get('adopted_candidate_id'):
+                adopted = self._find_candidate(state, state['adopted_candidate_id'])
+                if all(adopted.get(key) == state.get(key) for key in ('project', 'plan', 'brief')):
+                    provenance = adopted.get('music_change_evidence')
+            if provenance:
+                item['music_change_evidence'] = deepcopy(provenance)
             if direction_resolution is not None:
                 item['direction'] = self._artifact('direction-resolution', direction_resolution)
             if motion_template is not None:
@@ -1232,10 +1243,10 @@ class Session:
         fields = {'version','kind','render_id','render_sha256','output_time','note','adopted','final_review'}
         if isinstance(selection, dict) and type(selection.get('version')) is int and selection['version'] in (2, 3):
             fields = fields | {'effect_operations'}
-        if isinstance(selection, dict) and type(selection.get('version')) is int and selection['version'] == 4:
+        if isinstance(selection, dict) and type(selection.get('version')) is int and selection['version'] in (4, 5):
             fields |= {'effect_operations', 'music_operations'}
         if (not isinstance(selection, dict) or set(selection) != fields
-                or type(selection['version']) is not int or selection['version'] not in (1, 2, 3, 4)
+                or type(selection['version']) is not int or selection['version'] not in (1, 2, 3, 4, 5)
                 or selection['kind'] != 'comparison_selection_proposal'
                 or not isinstance(selection['render_id'], str)
                 or not isinstance(selection['render_sha256'], str)
@@ -1261,9 +1272,9 @@ class Session:
                 raise ValueError('Comparison selection source differs from session source')
             self._validate_edit_plan(plan, cfg)
             adjusted_project = None
-            if selection['version'] in (2, 3, 4):
+            if selection['version'] in (2, 3, 4, 5):
                 from .video_effects import revise_comparison_effects
-                if selection['version'] == 4:
+                if selection['version'] in (4, 5):
                     if (not isinstance(selection['effect_operations'], list)
                             or not isinstance(selection['music_operations'], list)
                             or not selection['music_operations']):
@@ -1271,13 +1282,20 @@ class Session:
                     from .comparison_music import revise_music
                     production = read(render['files']['production']['path']) if 'production' in render['files'] else {}
                     cfg['cue_plan'] = revise_music(cfg, read(render['files']['mapping']['path']),
-                                                  production, render, selection['music_operations'])
+                                                  production, render, selection['music_operations'],
+                                                  allow_replace=selection['version'] == 5)
+                    if selection['version'] == 5:
+                        if not any(op['action'] == 'replace' for op in selection['music_operations']):
+                            raise ValueError('Version 5 requires a registered track replacement')
+                        from .production import freeze_pattern
+                        cfg.setdefault('editing_pattern', {})['beat_sync'] = 'off'
+                        cfg = freeze_pattern(cfg, refresh=True)
                 if selection['effect_operations']:
                     cfg['video_effects'] = revise_comparison_effects(
                         cfg.get('video_effects'), read(render['files']['mapping']['path']),
                         selection['effect_operations'], cfg.get('assets', []),
-                        version=3 if selection['version'] == 4 else selection['version'])
-                elif selection['version'] != 4:
+                        version=3 if selection['version'] in (4, 5) else selection['version'])
+                elif selection['version'] not in (4, 5):
                     raise ValueError('Comparison adjustments need existing adjustable effects')
                 from .production import resolve_production
                 resolve_production(cfg, read(render['files']['mapping']['path']))
@@ -1307,6 +1325,17 @@ class Session:
                     'comparison_selection': self._artifact('comparison-selection', selection),
                     'selected_render_id': render['id'], 'selected_video_sha256': selection['render_sha256'],
                     'selection_position': mapped}
+            if render['files'].get('music_change_evidence'):
+                item['music_change_evidence'] = deepcopy(render['files']['music_change_evidence'])
+            if selection['version'] == 5:
+                item['music_change_evidence'] = self._artifact('music-change-evidence', {
+                    'version': 1, 'base_video_sha256': selection['render_sha256'],
+                    'mapping_sha256': read(render['files']['production']['path'])['mapping_sha256'],
+                    'operations': selection['music_operations'],
+                    'original_music_cues': [cue for cue in production['cues'] if cue['role'] == 'music'],
+                    'actor': actor, 'reason': note, 'picture_timing_preserved': True,
+                    'new_track_beat_alignment_verified': False,
+                    'requires': 'Analyze the new track and review a fresh full render before claiming beat sync.'})
             if adjusted_project is None and render['files'].get('motion_template'):
                 item['motion_template'] = deepcopy(render['files']['motion_template'])
             state.setdefault('candidates', []).append(item)
@@ -1409,11 +1438,15 @@ class Session:
                          'process_birth': process_birth(os.getpid())}
             if candidate_id:
                 operation['candidate_id'] = candidate_id
+            music_evidence = inputs.get('music_change_evidence')
             recipe = inputs.get('motion_template')
             if not candidate_id and state.get('adopted_candidate_id'):
                 adopted = self._find_candidate(state, state['adopted_candidate_id'])
                 if all(adopted.get(key) == inputs.get(key) for key in ('project', 'plan', 'brief')):
                     recipe = adopted.get('motion_template')
+                    music_evidence = adopted.get('music_change_evidence')
+            if music_evidence:
+                operation['music_change_evidence'] = deepcopy(music_evidence)
             if recipe:
                 operation['motion_template'] = deepcopy(recipe)
             operation['process_identity_status'] = 'known' if operation['process_birth'] else 'unknown'
@@ -1488,6 +1521,9 @@ class Session:
             files['depth_evidence'] = fingerprint(folder / 'depth-evidence.json')
             files['depth_manifest'] = fingerprint(read(files['depth_evidence']['path'])['setting']['manifest']['path'])
             files['depth_picture'] = fingerprint(folder / 'visual-depth.mp4')
+        if operation.get('music_change_evidence'):
+            check_ref(operation['music_change_evidence'])
+            files['music_change_evidence'] = deepcopy(operation['music_change_evidence'])
         if operation.get('motion_template'):
             check_ref(operation['motion_template'])
             files['motion_template'] = deepcopy(operation['motion_template'])
@@ -1778,7 +1814,7 @@ class Session:
         if not candidate.get('comparison_selection'):
             raise ValueError('Effect preview requires a comparison adjustment candidate')
         receipt = read(candidate['comparison_selection']['path'])
-        if receipt.get('version') == 4:
+        if receipt.get('version') in (4, 5):
             raise ValueError('BGM changes require a full render; cached effect previews retain original audio')
         if receipt.get('version') not in (2, 3):
             raise ValueError('Effect preview requires version-2/3 comparison adjustments')

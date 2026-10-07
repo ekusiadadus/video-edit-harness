@@ -61,7 +61,8 @@ class MusicCorrectionContractTests(unittest.TestCase):
         rows = [{'label': 'natural', 'video': 'file:///a.mp4', 'render_id': 'a', 'sha256': 'a' * 64},
                 {'label': 'music', 'video': 'file:///b.mp4', 'render_id': 'b', 'sha256': 'b' * 64,
                  'music_controls': [{'id': 'bgm', 'asset_id': 'song', 'gain_db': 0,
-                                     'adjustable_gain': True, 'minimum_gain_db': -60, 'maximum_gain_db': 12}]}]
+                                     'adjustable_gain': True, 'minimum_gain_db': -60, 'maximum_gain_db': 12,
+                                     'replacement_choices': [{'asset_id': 'new', 'asset_sha256': 'c'*64, 'label': 'New song'}]}]}]
         script = re.search(r'<script>(.*?)</script>', comparison_page(rows), re.S).group(1)
         harness = r'''
 const vm=require('node:vm'),assert=require('node:assert/strict');
@@ -78,6 +79,10 @@ row=ids['#music-list'].children[0];const off=row.children[2].children[0];off.che
 ids['#undo-effects'].click();assert.deepEqual(await save(),value);ids['#reset-effects'].click();assert.equal((await save()).version,1);
 gain=ids['#music-list'].children[0].children[1].children[0];gain.value='100';gain.events.change();const old=saved;ids['#save'].click();assert.equal(saved,old);assert.match(ids['#status'].textContent,/BGM/);
 ids['#undo-effects'].click();assert.equal((await save()).version,1);
+row=ids['#music-list'].children[0];const track=row.children[3].children[0];track.value='new';track.events.change();
+let newValue=await save();assert.equal(newValue.version,5);assert.deepEqual(newValue.music_operations,[{action:'replace',id:'bgm',asset_id:'new',asset_sha256:'c'.repeat(64),source_start:'0',gain_db:0}]);
+row=ids['#music-list'].children[0];const start=row.children[4].children[0];start.value='0.1';start.events.change();assert.equal((await save()).music_operations[0].source_start,'0.1');
+ids['#undo-effects'].click();assert.deepEqual(await save(),newValue);ids['#reset-effects'].click();assert.equal((await save()).version,1);
 })().catch(e=>{console.error(e);process.exitCode=1;});'''
         subprocess.run(['node', '-e', 'const rows=' + json.dumps(rows) + ';const script=' + json.dumps(script) + ';' + harness], check=True)
 
@@ -97,6 +102,10 @@ class MusicCorrectionRenderTests(unittest.TestCase):
             metadata = {key: cfg['assets'][0][key] for key in ('creator', 'source_url', 'license_url',
                 'acquired_on', 'verified_on', 'evidence_path', 'credit', 'cost', 'currency', 'content_id', 'rights')}
             cfg['assets'].append(register_asset(music, {**metadata, 'asset_id': 'song', 'kind': 'music'}))
+            alternative = root / 'alternative.wav'
+            subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
+                'sine=frequency=1320:sample_rate=48000:duration=1', str(alternative)], check=True)
+            cfg['assets'].append(register_asset(alternative, {**metadata, 'asset_id': 'alternative', 'kind': 'music'}))
             cfg.update(edit_basis='visual')
             cfg['audio']['normalize'] = True
             write(root / 'project.json', cfg)
@@ -130,6 +139,30 @@ class MusicCorrectionRenderTests(unittest.TestCase):
             off_receipt = {**receipt, 'music_operations': [{'action': 'remove', 'id': 'bgm'}]}
             off = session.candidate_from_selection(off_receipt, 'codex', 'Disable music only')
             muted = session.render(preview=False, candidate_id=off['id'])
+            replacement_op = {'action': 'replace', 'id': 'bgm', 'asset_id': 'alternative',
+                'asset_sha256': fingerprint(alternative)['sha256'], 'source_start': '1/10', 'gain_db': 0}
+            replacement_receipt = {**receipt, 'version': 5, 'music_operations': [replacement_op]}
+            for change in ({'asset_sha256': '0'*64}, {'source_start': '1/2'}, {'source_start': -1},
+                           {'source_start': 'nan'}, {'source_start': '-1/10'}):
+                with self.assertRaises(ValueError):
+                    session.candidate_from_selection({**replacement_receipt,
+                        'music_operations': [{**replacement_op, **change}]}, 'codex', 'Invalid replacement')
+            with self.assertRaises(ValueError):
+                session.candidate_from_selection({**replacement_receipt, 'version': 4}, 'codex', 'Version 4 immutable')
+            changed = session.candidate_from_selection(replacement_receipt, 'codex', 'Change registered track')
+            with self.assertRaisesRegex(ValueError, 'full render'):
+                session.preview_changes(changed['id'])
+            replaced = session.render(preview=False, candidate_id=changed['id'])
+            self.assertFalse(read(replaced['files']['music_change_evidence']['path'])['new_track_beat_alignment_verified'])
+            self.assertEqual(read(changed['project']['path'])['editing_pattern']['beat_sync'], 'off')
+            followup = session.create_candidate({'style_intensity': .5}, 'codex', 'Retain song evidence', base_render_id=replaced['id'])
+            self.assertEqual(followup['music_change_evidence'], changed['music_change_evidence'])
+            stale = Path(changed['music_change_evidence']['path'])
+            retained = stale.read_bytes()
+            stale.write_text('{}')
+            with self.assertRaises(ValueError):
+                session.resume()
+            stale.write_bytes(retained)
             def pcm(render):
                 return np.frombuffer(subprocess.check_output(['ffmpeg', '-v', 'error', '-i',
                     render['files']['video']['path'], '-vn', '-ac', '1', '-ar', '48000', '-f', 'f32le', '-']), dtype=np.float32)
@@ -138,6 +171,11 @@ class MusicCorrectionRenderTests(unittest.TestCase):
                 spectrum = np.abs(np.fft.rfft(samples * np.hanning(len(samples))))
                 freqs = np.fft.rfftfreq(len(samples), 1/48000)
                 return 20*np.log10(spectrum[np.argmin(abs(freqs-880))]/spectrum[np.argmin(abs(freqs-440))])
+            samples = pcm(replaced)[4800:28800]
+            spectrum = np.abs(np.fft.rfft(samples * np.hanning(len(samples))))
+            freqs = np.fft.rfftfreq(len(samples), 1/48000)
+            self.assertGreater(spectrum[np.argmin(abs(freqs-1320))],
+                               30*spectrum[np.argmin(abs(freqs-880))])
             delta = ratio(pcm(original)) - ratio(pcm(revised))
             self.assertTrue(10 < delta < 14, delta)
             self.assertLess(ratio(pcm(muted)), ratio(pcm(original)) - 30)
@@ -146,6 +184,8 @@ class MusicCorrectionRenderTests(unittest.TestCase):
                     '-an', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'])
             self.assertEqual(picture(original), picture(revised))
             self.assertEqual(picture(original), picture(muted))
+            self.assertEqual(picture(original), picture(replaced))
+            self.assertEqual(read(original['files']['mapping']['path']), read(replaced['files']['mapping']['path']))
             self.assertEqual(read(original['files']['mapping']['path']), read(revised['files']['mapping']['path']))
             for key in ('project', 'plan', 'reviews'):
                 self.assertEqual(before[key], session._load()[key])
