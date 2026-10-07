@@ -1,5 +1,29 @@
 # TikTok公式APIとの読み取り専用接続
 
+## 接続先と実際の不足（2026-10-07確認）
+
+| 用途 | 接続先 | 現在の状態 |
+|---|---|---|
+| 本人のプロフィール／公開動画を読む | Developers Login Kit + Display API | 実装あり。本環境のローカル設定・tokenは未構成 |
+| 音楽と区間エフェクトで仕上げる | Symphony Creative Studio | 内蔵Stockへ音楽とNightclub効果を適用しMP4取得済み。UI実行 |
+| APIで音楽を合成する | Business API Video Soundtrack | 公式公開リクエストあり。完全な契約・利用権限・実応答は未確認 |
+| 商品紹介動画を生成／リミックスする | Symphony Generate & Remix | 公式技術仕様を閲覧。任意のダンス演出を指定するAPIとは同一視しない |
+
+**DevelopersのSandboxとBusiness APIのアプリは別。** ログイン中Business APIのMy Appsはアプリなし、Become a Developerを表示した。登録画面にはメール・電話認証とNextでのDeveloper Terms同意があり、本人操作待ち。登録・同意は代行していない。別アカウントのアプリ有無は未確認。
+
+[Symphony外部資料](https://bytedance.sg.larkoffice.com/docx/LWkDdoOGmo4abxxrL1ylUkQcgSg)はTikTok担当窓口を通じたAPP IDのallowlist登録を案内する。アプリ作成だけで利用許可済みとはしない。[2026統合ガイド](https://bytedance.larkoffice.com/wiki/KcOawZdBwiiI0MkTOU8c6a2Lnac)と、そこから辿った[Remix技術仕様](https://bytedance.sg.larkoffice.com/docx/Wo80dHLp5oxkQ3xmVJblhxI3gMe)をブラウザーで読めた。Web取得のログインリダイレクトだけで資料未公開と判断しない。
+
+仕様の経路は `/file/video/ad/upload/` → `/creative/aigc/video/task/create/` → `/creative/aigc/video/task/list/` → `/creative/aigc/video/list/`。BusinessのAccess-Tokenを使用し、Display tokenを流用しない。確認したRemix作成表は商品情報・素材・配音・字幕等を扱い、任意の区間エフェクト／音楽ID指定は見つけていない。概要が案内するAVATAR_PRODUCTは詳細で廃止表示、STOCK_VIDEOも廃止表示。実契約と利用許可を確認するまで推測で生成を実行しない。
+
+### 次の実装と受入
+
+1. 本人のBusiness開発者登録、アプリ、利用権限を確認。秘密値はKeychainへ保存し、ログイン／設定／実応答を別表示する。
+2. ダンス用途ではVideo Soundtrackの認証・入出力・結果取得契約を確認。許可済みテスト素材と契約が揃ったら、作成・取得・失敗処理を実装する。
+3. APIで未確認の区間エフェクトはStudio仕上げとして扱う。UI通信を逆算してAPIと称さず、手動経路を自動適用と表示しない。商品紹介Remixをダンス編集へ強制しない。
+4. 元／返却SHA、秘密値を除いた実要求・応答、task状態、取得MP4、音声、変更区間を結び付けて比較。字幕・拍・時間対応を再検証し、処理受付だけで完成としない。
+
+素材送信・処理料金・楽曲用途は対象ごとに確認する。今回の調査は動画送信・ジョブ作成・投稿なし。完成MP4の投稿はユーザー自身が行う。生のUI観測と登録画面は `output/implementation-maya/tiktok-api-access-audit-20261007/`。API編集の実行証拠ではない。
+
 確認日: 2026-10-06。現行作業ツリーの `video-harness tiktok-api` は、TikTok Login Kit（Desktop OAuth）とDisplay APIの最小接続を対象にする。**模擬HTTPテストの成功は実アカウント接続ではない。** TikTok投稿・動画アップロード、他人の動画検索、流行ランキング、商用音源ライブラリ（CML）の取得や音源利用許諾は、この接続では行わない。
 
 ## 接続に必要なもの
