@@ -89,6 +89,9 @@ def parser():
     a = command('effects', note=True)
     a.add_argument('render_id')
     a.add_argument('--operations-file', type=Path, required=True, help='Add, update or remove local effects on this render')
+    a = command('beat-effects', note=True)
+    a.add_argument('render_id')
+    a.add_argument('--request-file', type=Path, required=True, help='Exact music beat map and selected beat indices for compound accents')
     a = command('motion-template', note=True)
     a.add_argument('render_id')
     a.add_argument('--request-file', type=Path, required=True, help='Versioned compound local-effect recipe; remains unadopted')
@@ -274,6 +277,7 @@ def dispatch(args):
     if action == 'candidate': return session.create_candidate(_object(args.changes_file), args.actor, args.note)
     if action == 'select-comparison': return session.candidate_from_selection(_object(args.data_file), args.actor, args.note)
     if action == 'effects': return session.propose_effects(args.render_id, _array(args.operations_file), args.actor, args.note)
+    if action == 'beat-effects': return session.propose_beat_effects(args.render_id, _object(args.request_file), args.actor, args.note)
     if action == 'motion-template': return session.propose_motion_template(args.render_id, _object(args.request_file), args.actor, args.note)
     if action == 'depth-layer': return session.propose_depth_layer(args.render_id, args.manifest, args.asset_id,
         args.threshold, args.softness, args.strength, args.actor, args.note)

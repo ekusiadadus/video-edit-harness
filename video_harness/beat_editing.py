@@ -15,8 +15,7 @@ ACTORS = {'human', 'codex', 'claude_code', 'automation'}
 
 
 def _time(value, label):
-    value = str(value)
-    return _seconds(value[:-1] if value.endswith('s') else value, label)
+    return _seconds(value[:-1] if isinstance(value, str) and value.endswith('s') else value, label)
 
 
 def _parameters(max_shift, min_hold, allowed_intervals, duration):

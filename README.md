@@ -8,7 +8,7 @@ The development checkout also exercises beat cuts, picture-speed ramps, zooms, t
 
 Development comparison pages offer shorter/original/longer effect time for smooth zoom and saturation, preserving the midpoint without changing footage or BGM speed. Undo and matched interval previews remain available. See [controls and limits](docs/COMPARISON_ADJUSTMENTS.ja.md).
 
-Development effects comparisons also propose existing BGM gain/off corrections with undo. Gain controls use sealed source-audio evidence or explicit no-normalization; normalized music-only cases expose Off. Render the candidate fully before checking its new audio. Registered, authorized tracks and their source start can also be replaced with undo (version 5). Existing picture timing stays fixed; new-song beat alignment requires fresh analysis and review. Music changes require a full render. See [BGM controls](docs/COMPARISON_ADJUSTMENTS.ja.md).
+Development effects comparisons also propose existing BGM gain/off corrections with undo. Gain controls use sealed source-audio evidence or explicit no-normalization; normalized music-only cases expose Off. Render the candidate fully before checking its new audio. Registered, authorized tracks and their source start can also be replaced with undo (version 5). Existing picture timing stays fixed; new-song beat alignment requires fresh analysis and review. Music changes require a full render. `session beat-effects` centers selected zoom/saturation peaks on the actual music cue’s mapped beats, with a reduced-motion alternative; it does not detect choruses or strong beats. See [beat accents](docs/BEAT_EFFECTS.ja.md) and [BGM controls](docs/COMPARISON_ADJUSTMENTS.ja.md).
 
 English | [日本語](README.ja.md)
 

@@ -67,6 +67,23 @@ class BeatEditingTests(unittest.TestCase):
             self.assertEqual(evidence['beatmap_sha256'], digest(beats))
             self.assertEqual(validate_visual_edl(revision, assets)['sequence'][1]['source_end'], '4/5')
 
+    def test_real_frame_duration_and_beat_times_as_json_floats(self):
+        with tempfile.TemporaryDirectory() as temp:
+            plan, mapping, beats, assets = self.fixture(Path(temp), fps=(24, 24, 24))
+            plan['sequence'][-1].update(source_end='13/24', source_end_frame_exclusive=13)
+            mapping.update(fps='24', duration=float(Fraction(61, 24)), frame_count=61)
+            for i, row in enumerate(mapping['sequence']):
+                row.update(output_first_frame=i*24, output_end_frame_exclusive=(i+1)*24 if i<2 else 61)
+            mapping['sequence'][-1]['source_end_frame_exclusive'] = 13
+            beats.update(fps='24', beats=[{'frame': f, 'frame_time': float(Fraction(f,24)),
+                'cut_eligible': True} for f in (25,47)])
+            revised, evidence = suggest_beat_revision(plan, mapping, beats, assets,
+                '1/8', '1/3', [['0','61/24']], 'codex', 'Actual fractional CFR duration')
+            self.assertEqual([c['suggested_frame'] for c in evidence['cuts']], [25,47])
+            self.assertEqual(revised['sequence'][0]['source_end_frame_exclusive'],25)
+            self.assertEqual(revised['sequence'][1]['source_end_frame_exclusive'],22)
+            self.assertEqual(revised['sequence'][2]['source_first_frame'],0)
+
     def test_no_nonspoken_permission_or_protected_beat_keeps_cut(self):
         with tempfile.TemporaryDirectory() as temp:
             plan, mapping, beats, assets = self.fixture(Path(temp))

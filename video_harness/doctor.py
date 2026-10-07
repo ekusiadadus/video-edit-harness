@@ -25,7 +25,7 @@ SESSION_ACTIONS = ('start', 'status', 'cloud-policy', 'transcribe', 'transcript'
                    'compare-candidates', 'select-comparison', 'effects', 'audio-cuts', 'direction', 'native-finish', 'native-result',
                    'tracking-source', 'track-effect',
                    'retime-source', 'retime',
-                   'visual-plan', 'propose-beats', 'import-production-fcp')
+                   'visual-plan', 'propose-beats', 'motion-template', 'beat-effects', 'import-production-fcp')
 
 
 def _release_version(version):

@@ -1134,6 +1134,29 @@ class Session:
         return self.create_candidate({'video_effects': effects}, actor, note,
                                      expected_project=state['project'], base_render_id=render_id)
 
+    def propose_beat_effects(self, render_id, request, actor, note):
+        """Center selected compound accents on the actual music cue's mapped beats."""
+        from .beat_motion import compile_beat_focus
+        from .video_effects import revise_effects
+        require_note(note)
+        actor_name(actor)
+        state = self._load()
+        self._verify(state)
+        render = self._find_render(state, render_id)
+        self._verify_render(render)
+        if render['preview'] or 'production' not in render['files']:
+            raise ValueError('Beat effects require a full music render')
+        cfg = read(render['project']['path'])
+        mapping = read(render['files']['mapping']['path'])
+        operations, evidence = compile_beat_focus(request, mapping,
+            read(render['files']['production']['path']), note)
+        effects = revise_effects(cfg.get('video_effects'), mapping, operations, cfg.get('assets', []))
+        evidence.update(request=deepcopy(request), actor=actor, reason=note,
+                        base_render_id=render_id, video=deepcopy(render['files']['video']),
+                        mapping=deepcopy(render['files']['mapping']))
+        return self.create_candidate({'video_effects': effects}, actor, note,
+            expected_project=state['project'], base_render_id=render_id, motion_template=evidence)
+
     def propose_motion_template(self, render_id, request, actor, note):
         """Expand a versioned local recipe into an unadopted effects candidate."""
         from .motion_templates import compile_template
